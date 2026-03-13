@@ -25,12 +25,18 @@ fn char_rows(c: char) -> [u8; 5] {
         'E' | 'e'        => [7, 4, 7, 4, 7],
         'F' | 'f'        => [7, 4, 7, 4, 4],
         'J' | 'j'        => [3, 1, 1, 5, 7],
+        'D' | 'd'        => [6, 5, 5, 5, 6],
+        'I' | 'i'        => [7, 2, 2, 2, 7],
+        'L' | 'l'        => [4, 4, 4, 4, 7],
         'M'              => [5, 7, 5, 5, 5],
         'm'              => [0, 6, 5, 5, 5],
+        'N'              => [5, 7, 7, 5, 5],
+        'n'              => [0, 6, 5, 5, 5],
         'P' | 'p'        => [7, 5, 7, 4, 4],
         'T' | 't'        => [7, 2, 2, 2, 2],
         'X' | 'x'        => [5, 5, 2, 5, 5],
         'Z' | 'z'        => [7, 1, 2, 4, 7],
+        'U' | 'u'        => [5, 5, 5, 5, 7],
         ':'              => [0, 2, 0, 2, 0],
         '.'              => [0, 0, 0, 0, 2],
         ' '              => [0, 0, 0, 0, 0],
@@ -74,6 +80,19 @@ fn emit_string(
     for (i, c) in s.chars().enumerate() {
         emit_char(c, x + i as f32 * stride, y, scale, color, out);
     }
+}
+
+/// Public: emit a text string at screen-space position (x, y) with the given
+/// pixel scale and color into `out`.
+pub fn emit_text(
+    s: &str,
+    x: f32,
+    y: f32,
+    scale: f32,
+    color: [f32; 4],
+    out: &mut Vec<InstanceData>,
+) {
+    emit_string(s, x, y, scale, color, out);
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

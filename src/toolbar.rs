@@ -1,8 +1,9 @@
 use glam::Vec2;
 use crate::renderer::InstanceData;
+use crate::stats::emit_text;
 
 pub const TOOLBAR_HEIGHT: f32 = 48.0;
-pub const BTN_W: f32 = 48.0;
+pub const BTN_W: f32 = 52.0;
 pub const BTN_H: f32 = 48.0;
 pub const BTN_PAD: f32 = 4.0;
 
@@ -138,101 +139,30 @@ impl Toolbar {
             let cx = btn.x + BTN_W * 0.5;
             let cy = BTN_H * 0.5;
 
-            match btn.kind {
-                BtnKind::Select => {
-                    // Cursor: a filled triangle pointing down-right, made of 2 thin rects
-                    let s = 14.0f32;
-                    // vertical stroke
-                    push_line(&mut out, [cx - 2.0, cy - s * 0.5], [cx - 2.0, cy + s * 0.5], 2.5, icon_color);
-                    // diagonal stroke
-                    push_line(&mut out, [cx - 2.0, cy + s * 0.5], [cx + s * 0.4, cy + s * 0.05], 2.5, icon_color);
-                    push_line(&mut out, [cx - 2.0, cy - s * 0.5], [cx + s * 0.4, cy + s * 0.05], 2.5, icon_color);
-                }
-                BtnKind::Rect => {
-                    let hw = 10.0f32;
-                    let hh = 7.0f32;
-                    // outline: 4 thin rectangles
-                    push_line(&mut out, [cx - hw, cy - hh], [cx + hw, cy - hh], 2.0, icon_color); // top
-                    push_line(&mut out, [cx - hw, cy + hh], [cx + hw, cy + hh], 2.0, icon_color); // bottom
-                    push_line(&mut out, [cx - hw, cy - hh], [cx - hw, cy + hh], 2.0, icon_color); // left
-                    push_line(&mut out, [cx + hw, cy - hh], [cx + hw, cy + hh], 2.0, icon_color); // right
-                }
-                BtnKind::Ellipse => {
-                    let s = 18.0f32;
-                    out.push(InstanceData {
-                        pos: [cx - s * 0.5, cy - s * 0.4],
-                        size: [s, s * 0.8],
-                        color: icon_color,
-                        shape_type: 1.0,
-                        alpha: 1.0,
-                    });
-                    // cut out the inside (dark ellipse slightly smaller)
-                    out.push(InstanceData {
-                        pos: [cx - s * 0.5 + 3.0, cy - s * 0.4 + 3.0],
-                        size: [s - 6.0, s * 0.8 - 6.0],
-                        color: if is_active { [0.07, 0.09, 0.13, 1.0] } else { [0.13, 0.14, 0.18, 1.0] },
-                        shape_type: 1.0,
-                        alpha: 1.0,
-                    });
-                }
-                BtnKind::Line => {
-                    let s = 12.0f32;
-                    push_line(&mut out, [cx - s, cy + s * 0.5], [cx + s, cy - s * 0.5], 2.5, icon_color);
-                }
-                BtnKind::Undo => {
-                    // Left-pointing arc approximated with 3 line segments
-                    let s = 8.0f32;
-                    push_line(&mut out, [cx,       cy - s], [cx - s,   cy - s * 0.1], 2.0, icon_color);
-                    push_line(&mut out, [cx - s,   cy - s * 0.1], [cx - s * 0.3, cy + s], 2.0, icon_color);
-                    push_line(&mut out, [cx,       cy - s], [cx + s * 0.6, cy - s * 0.4], 2.0, icon_color);
-                }
-                BtnKind::Redo => {
-                    let s = 8.0f32;
-                    push_line(&mut out, [cx,       cy - s], [cx + s,   cy - s * 0.1], 2.0, icon_color);
-                    push_line(&mut out, [cx + s,   cy - s * 0.1], [cx + s * 0.3, cy + s], 2.0, icon_color);
-                    push_line(&mut out, [cx,       cy - s], [cx - s * 0.6, cy - s * 0.4], 2.0, icon_color);
-                }
-            }
+            // Text label: 3×5 bitmap font, scale=2 → glyph is 6px wide, 10px tall
+            // stride per char = (3+1)*2 = 8px
+            const SCALE: f32 = 2.0;
+            const CHAR_W: f32 = 3.0 * SCALE; // 6
+            const GAP: f32 = SCALE;           // 2
+            const STRIDE: f32 = CHAR_W + GAP; // 8
+            const GLYPH_H: f32 = 5.0 * SCALE; // 10
+
+            let label = match btn.kind {
+                BtnKind::Select  => "SEL",
+                BtnKind::Rect    => "RECT",
+                BtnKind::Ellipse => "ELPS",
+                BtnKind::Line    => "LINE",
+                BtnKind::Undo    => "UNDO",
+                BtnKind::Redo    => "REDO",
+            };
+
+            let text_w = label.len() as f32 * STRIDE - GAP;
+            let tx = cx - text_w * 0.5;
+            let ty = cy - GLYPH_H * 0.5;
+            emit_text(label, tx, ty, SCALE, icon_color, &mut out);
         }
         out
     }
-}
-
-// ── Helper: encode a line segment as a tightly-fit instanced rect ─────────────
-
-fn push_line(out: &mut Vec<InstanceData>, a: [f32; 2], b: [f32; 2], thickness: f32, color: [f32; 4]) {
-    let ax = a[0]; let ay = a[1];
-    let bx = b[0]; let by = b[1];
-    let dx = bx - ax; let dy = by - ay;
-    let len = (dx * dx + dy * dy).sqrt().max(0.001);
-
-    // The instance rect spans from a to b; we use the LINE shape shader.
-    // pos = min corner of AABB, size = (length, thickness)
-    // But the shader expects pos to be the start of the segment and size = (dx, dy)
-    // Actually, for line shape_type=2 the shader uses uv.x along the segment.
-    // We pass: pos = start, size = (dx, dy), and the bounding quad is computed
-    // by the vertex shader which expands by thickness on both sides.
-    //
-    // For simplicity in the current shader design (which just draws a horizontal
-    // bar and ignores rotation), we instead use many thin rects aligned per segment.
-    // We'll draw a thin rotated rect using the rect shader by computing the AABB
-    // and accepting a bit of overdraw.
-    //
-    // REAL approach: encode line start/end, then clip in fragment shader.
-    // We approximate here with a 2px-wide AABB rect for toolbar icons.
-    let _len = len; // suppress warning
-    let min_x = ax.min(bx) - thickness * 0.5;
-    let min_y = ay.min(by) - thickness * 0.5;
-    let max_x = ax.max(bx) + thickness * 0.5;
-    let max_y = ay.max(by) + thickness * 0.5;
-
-    out.push(InstanceData {
-        pos: [min_x, min_y],
-        size: [max_x - min_x, max_y - min_y],
-        color,
-        shape_type: 0.0,  // rect for icon strokes (good enough at small scale)
-        alpha: 1.0,
-    });
 }
 
 /// Convert a world-space element into one or more InstanceData entries.
