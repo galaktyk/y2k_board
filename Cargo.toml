@@ -1,0 +1,11 @@
+[package]
+name = "quadboard"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+miniquad = "0.4"
+glam = "0.29"
+
+[profile.release]
+opt-level = 3
