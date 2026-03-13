@@ -357,6 +357,27 @@ impl EventHandler for App {
         // Draw board elements and toolbar in separate passes since they use different MVP matrices.
         let board_mvp = Renderer::camera_mvp(&self.camera, self.screen_size);
 
+
+
+        // Selection outlines (semi-transparent)    
+        let mut selection_inst = Vec::new();
+        for element in &self.board.elements {
+            if let Some(instance) = toolbar::selection_instance(element, 1.0) {
+                selection_inst.push(instance);
+            }
+        }
+
+        
+        if !selection_inst.is_empty() {
+            self.renderer
+                .draw_instances(&mut *self.ctx, &selection_inst, board_mvp);
+        }
+
+
+
+
+
+
         // Board elements
         self.renderer.draw_instances(
             &mut *self.ctx,
@@ -374,17 +395,8 @@ impl EventHandler for App {
         self.renderer
             .draw_text_instances(&mut *self.ctx, &text_instances, board_mvp);
 
-        let mut selection_inst = Vec::new();
-        for element in &self.board.elements {
-            if let Some(instance) = toolbar::selection_instance(element, 1.0) {
-                selection_inst.push(instance);
-            }
-        }
-        if !selection_inst.is_empty() {
-            self.renderer
-                .draw_instances(&mut *self.ctx, &selection_inst, board_mvp);
-        }
 
+        
         if let Some(ref preview) = self.input.preview {
             let preview_inst = toolbar::element_to_instances(preview, 0.5);
             self.renderer
