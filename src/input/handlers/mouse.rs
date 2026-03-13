@@ -130,13 +130,18 @@ pub fn on_mouse_down(
                 }
 
                 if is_double_click {
-                    if board.ensure_text(id) || board.element(id).and_then(|element| element.text.as_ref()).is_some() {
+                    if board
+                        .element(id)
+                        .map(|element| element.can_host_text())
+                        .unwrap_or(false)
+                    {
                         state.active_text_id = Some(id);
                         state.text_cursor = board
                             .element(id)
                             .and_then(|element| element.text.as_ref())
                             .map(|text| text.content.chars().count())
                             .unwrap_or(0);
+                        state.text_selecting = false;
                     }
                     state.drag_mode = DragMode::None;
                     state.move_origin.clear();
@@ -160,11 +165,13 @@ pub fn on_mouse_down(
                 state.last_click_id = None;
                 state.last_click_at = None;
                 state.active_text_id = None;
+                state.text_selecting = false;
                 board.deselect_all();
             }
         }
         Tool::Rect | Tool::Ellipse | Tool::Line | Tool::Text => {
             state.active_text_id = None;
+            state.text_selecting = false;
             state.dragging_tool = true;
             state.drag_start_world = world;
             state.preview = None;
@@ -199,6 +206,8 @@ pub fn on_mouse_up(
     if btn != miniquad::MouseButton::Left {
         return;
     }
+
+    state.text_selecting = false;
 
     if state.drag_mode != DragMode::None {
         let changes = board.selected_transform_changes(&state.move_origin);

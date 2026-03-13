@@ -2,14 +2,15 @@ use miniquad::*;
 use glam::Vec2;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
+use cosmic_text::Motion;
 
-use crate::board::Board;
+use crate::board::{Board, BoardOperation, ElementPropertyChange, ElementPropertyPatch, TextData};
 use crate::camera::Camera;
 use crate::input::{self, DragMode, InputState};
 use crate::renderer::{InstanceData, Renderer};
 use crate::snapshot;
 use crate::spatial::SpatialGrid;
-use crate::text::TextSystem;
+use crate::text::{ActiveTextEdit, TextSystem};
 use crate::toolbar::{self, Toolbar, ToolbarAction};
 use crate::stats;
 
@@ -157,6 +158,43 @@ fn element_in_range(element: &crate::board::Element, range: VisibleRange) -> boo
         && max.y >= range.min.y
 }
 
+struct TextEditSession {
+    element_id: u64,
+    original_text: Option<TextData>,
+    buffer: String,
+    cursor_byte: usize,
+    selection_anchor_byte: Option<usize>,
+    preferred_x: Option<i32>,
+}
+
+impl TextEditSession {
+    fn selection_range(&self) -> Option<(usize, usize)> {
+        let anchor = self.selection_anchor_byte?;
+        if anchor == self.cursor_byte {
+            return None;
+        }
+        Some((anchor.min(self.cursor_byte), anchor.max(self.cursor_byte)))
+    }
+
+    fn clear_selection(&mut self) {
+        self.selection_anchor_byte = None;
+    }
+
+    fn set_cursor(&mut self, cursor_byte: usize, extend_selection: bool) {
+        if extend_selection {
+            if self.selection_anchor_byte.is_none() {
+                self.selection_anchor_byte = Some(self.cursor_byte);
+            }
+        } else {
+            self.selection_anchor_byte = None;
+        }
+        self.cursor_byte = cursor_byte.min(self.buffer.len());
+        if self.selection_anchor_byte == Some(self.cursor_byte) {
+            self.selection_anchor_byte = None;
+        }
+    }
+}
+
 pub struct App {
     ctx: Box<dyn RenderingBackend>,
     renderer: Renderer,
@@ -172,6 +210,7 @@ pub struct App {
     visibility_dirty: bool,
     dirty_element_ids: HashSet<u64>,
     text_system: TextSystem,
+    text_edit: Option<TextEditSession>,
     // ── stats ─────────────────────────────────────────────────────────────
     last_frame:   Instant,
     frame_ms:     f32,
@@ -200,6 +239,7 @@ impl App {
             visibility_dirty: true,
             dirty_element_ids: HashSet::new(),
             text_system: TextSystem::new(),
+            text_edit: None,
             last_frame:  Instant::now(),
             frame_ms:    0.0,
             fps:         0.0,
@@ -303,6 +343,7 @@ impl App {
                 self.spatial_dirty = true;
                 self.visibility_dirty = true;
                 self.dirty_element_ids.clear();
+                self.text_edit = None;
                 self.request_redraw();
                 println!("Loaded snapshot from snapshot.bin");
             }
@@ -385,15 +426,34 @@ impl EventHandler for App {
             board_mvp,
         );
 
+        let active_text_edit = self.text_edit.as_ref().map(|edit| {
+            (
+                edit.element_id,
+                edit.buffer.clone(),
+                edit.cursor_byte,
+                edit.selection_anchor_byte,
+            )
+        });
+        let active_text_edit = active_text_edit.as_ref().map(|edit| ActiveTextEdit {
+            element_id: edit.0,
+            content: &edit.1,
+            cursor_byte: edit.2,
+            selection_anchor_byte: edit.3,
+        });
+
         let text_instances = self.text_system.build_visible_text_instances(
             &mut *self.ctx,
             self.renderer.text_atlas(),
+            self.renderer.emoji_atlas(),
             &self.board,
             self.board_render_cache.visible_board_indices(),
             &self.camera,
+            active_text_edit,
         );
         self.renderer
-            .draw_text_instances(&mut *self.ctx, &text_instances, board_mvp);
+            .draw_text_instances(&mut *self.ctx, &text_instances.mono_instances, board_mvp);
+        self.renderer
+            .draw_color_text_instances(&mut *self.ctx, &text_instances.color_instances, board_mvp);
 
 
         
@@ -439,12 +499,36 @@ impl EventHandler for App {
     }
 
     fn mouse_button_down_event(&mut self, button: MouseButton, x: f32, y: f32) {
+        if button == MouseButton::Left && y < toolbar::TOOLBAR_HEIGHT && self.text_edit.is_some() {
+            self.finish_text_edit(true);
+        }
+
+        let previous_active = self.input.active_text_id;
         if let Some(action) = input::on_mouse_down(
             &mut self.input, &mut self.board, &self.camera,
             &mut self.toolbar, self.screen_size, x, y, button,
         ) {
             self.handle_toolbar_action(action);
             return;
+        }
+
+        let new_active = self.input.active_text_id;
+        if previous_active != new_active {
+            if previous_active.is_some() {
+                self.finish_text_edit(true);
+            }
+            if let Some(id) = new_active {
+                self.begin_text_edit(id);
+            }
+        }
+
+        if button == MouseButton::Left {
+            if let Some(id) = self.input.active_text_id {
+                if let Some(cursor_byte) = self.text_cursor_from_screen(id, Vec2::new(x, y)) {
+                    self.set_text_cursor(cursor_byte, false);
+                    self.input.text_selecting = true;
+                }
+            }
         }
 
         self.request_redraw();
@@ -457,6 +541,7 @@ impl EventHandler for App {
             &mut self.input, &mut self.board, &self.camera,
             &mut self.toolbar, self.screen_size, x, y, button,
         );
+        self.input.text_selecting = false;
 
         if had_drag || had_preview {
             self.spatial_dirty = true;
@@ -469,6 +554,17 @@ impl EventHandler for App {
     }
 
     fn mouse_motion_event(&mut self, x: f32, y: f32) {
+        self.input.mouse_pos = Vec2::new(x, y);
+        if self.input.text_selecting {
+            if let Some(id) = self.input.active_text_id {
+                if let Some(cursor_byte) = self.text_cursor_from_screen(id, self.input.mouse_pos) {
+                    self.set_text_cursor(cursor_byte, true);
+                    self.request_redraw();
+                    return;
+                }
+            }
+        }
+
         let was_panning = self.input.panning;
         let was_dragging_tool = self.input.dragging_tool;
         input::on_mouse_move(
@@ -497,60 +593,70 @@ impl EventHandler for App {
     }
 
     fn key_down_event(&mut self, keycode: KeyCode, keymods: KeyMods, _repeat: bool) {
-        if let Some(id) = self.input.active_text_id {
+        if self.input.active_text_id.is_some() {
             match keycode {
                 KeyCode::Escape => {
-                    self.input.active_text_id = None;
-                    self.request_redraw();
+                    self.finish_text_edit(true);
                 }
                 KeyCode::Backspace => {
-                    if self.edit_active_text(id, EditAction::Backspace) {
+                    if self.delete_backward() {
                         self.request_redraw();
                     }
                 }
                 KeyCode::Delete => {
-                    if self.edit_active_text(id, EditAction::Delete) {
+                    if self.delete_forward() {
                         self.request_redraw();
                     }
                 }
                 KeyCode::Left => {
-                    self.move_text_cursor(id, CursorMove::Left);
+                    self.move_text_cursor(Motion::Left, keymods.shift);
                     self.request_redraw();
                 }
                 KeyCode::Right => {
-                    self.move_text_cursor(id, CursorMove::Right);
+                    self.move_text_cursor(Motion::Right, keymods.shift);
+                    self.request_redraw();
+                }
+                KeyCode::Up => {
+                    self.move_text_cursor(Motion::Up, keymods.shift);
+                    self.request_redraw();
+                }
+                KeyCode::Down => {
+                    self.move_text_cursor(Motion::Down, keymods.shift);
                     self.request_redraw();
                 }
                 KeyCode::Home => {
-                    self.move_text_cursor(id, CursorMove::Home);
+                    self.move_text_cursor(Motion::Home, keymods.shift);
                     self.request_redraw();
                 }
                 KeyCode::End => {
-                    self.move_text_cursor(id, CursorMove::End);
+                    self.move_text_cursor(Motion::End, keymods.shift);
                     self.request_redraw();
                 }
                 KeyCode::Enter => {
-                    if self.insert_text(id, "\n") {
+                    if self.insert_text("\n") {
                         self.request_redraw();
                     }
                 }
+                KeyCode::A if keymods.ctrl => {
+                    self.select_all_text();
+                    self.request_redraw();
+                }
                 KeyCode::C if keymods.ctrl => {
-                    if let Some(text) = self.board.element(id).and_then(|element| element.text.as_ref()) {
-                        window::clipboard_set(&text.content);
+                    if let Some(text) = self.selected_text().or_else(|| self.current_text().map(str::to_string)) {
+                        window::clipboard_set(&text);
                     }
                 }
                 KeyCode::X if keymods.ctrl => {
-                    if let Some(text) = self.board.element(id).and_then(|element| element.text.as_ref()) {
-                        window::clipboard_set(&text.content);
+                    if let Some(text) = self.selected_text().or_else(|| self.current_text().map(str::to_string)) {
+                        window::clipboard_set(&text);
                     }
-                    if self.board.update_text(id, |text| text.content.clear()) {
-                        self.input.text_cursor = 0;
+                    if self.delete_selection_or_all() {
                         self.request_redraw();
                     }
                 }
                 KeyCode::V if keymods.ctrl => {
                     if let Some(clipboard) = window::clipboard_get() {
-                        if self.insert_text(id, &clipboard) {
+                        if self.insert_text(&clipboard) {
                             self.request_redraw();
                         }
                     }
@@ -603,12 +709,12 @@ impl EventHandler for App {
         if repeat || character.is_control() {
             return;
         }
-        let Some(id) = self.input.active_text_id else {
+        if self.input.active_text_id.is_none() {
             return;
-        };
+        }
 
         let text = character.to_string();
-        if self.insert_text(id, &text) {
+        if self.insert_text(&text) {
             self.request_redraw();
         }
     }
@@ -620,84 +726,226 @@ impl EventHandler for App {
     }
 }
 
-enum EditAction {
-    Backspace,
-    Delete,
-}
-
-enum CursorMove {
-    Left,
-    Right,
-    Home,
-    End,
-}
-
 impl App {
-    fn active_text_chars(&self, id: u64) -> usize {
-        self.board
-            .element(id)
-            .and_then(|element| element.text.as_ref())
-            .map(|text| text.content.chars().count())
-            .unwrap_or(0)
-    }
-
-    fn insert_text(&mut self, id: u64, inserted: &str) -> bool {
-        let cursor = self.input.text_cursor;
-        let updated = self.board.update_text(id, |text| {
-            let byte_index = char_to_byte_index(&text.content, cursor);
-            text.content.insert_str(byte_index, inserted);
-        });
-        if updated {
-            self.input.text_cursor += inserted.chars().count();
-        }
-        updated
-    }
-
-    fn edit_active_text(&mut self, id: u64, action: EditAction) -> bool {
-        let cursor = self.input.text_cursor;
-        let updated = self.board.update_text(id, |text| match action {
-            EditAction::Backspace => {
-                if cursor == 0 {
-                    return;
-                }
-                let start = char_to_byte_index(&text.content, cursor - 1);
-                let end = char_to_byte_index(&text.content, cursor);
-                text.content.replace_range(start..end, "");
-            }
-            EditAction::Delete => {
-                let total = text.content.chars().count();
-                if cursor >= total {
-                    return;
-                }
-                let start = char_to_byte_index(&text.content, cursor);
-                let end = char_to_byte_index(&text.content, cursor + 1);
-                text.content.replace_range(start..end, "");
-            }
-        });
-
-        if updated {
-            if matches!(action, EditAction::Backspace) && self.input.text_cursor > 0 {
-                self.input.text_cursor -= 1;
-            }
-        }
-        updated
-    }
-
-    fn move_text_cursor(&mut self, id: u64, movement: CursorMove) {
-        let len = self.active_text_chars(id);
-        self.input.text_cursor = match movement {
-            CursorMove::Left => self.input.text_cursor.saturating_sub(1),
-            CursorMove::Right => (self.input.text_cursor + 1).min(len),
-            CursorMove::Home => 0,
-            CursorMove::End => len,
+    fn begin_text_edit(&mut self, id: u64) {
+        let Some(element) = self.board.element(id) else {
+            return;
         };
+        let original_text = element.text.clone();
+        let cursor_byte = original_text
+            .as_ref()
+            .map(|text| text.content.len())
+            .unwrap_or(0);
+        self.input.active_text_id = Some(id);
+        self.text_edit = Some(TextEditSession {
+            element_id: id,
+            buffer: original_text
+                .as_ref()
+                .map(|text| text.content.clone())
+                .unwrap_or_default(),
+            original_text,
+            cursor_byte,
+            selection_anchor_byte: None,
+            preferred_x: None,
+        });
+    }
+
+    fn finish_text_edit(&mut self, commit: bool) {
+        let Some(edit) = self.text_edit.take() else {
+            self.input.active_text_id = None;
+            self.input.text_selecting = false;
+            return;
+        };
+
+        self.input.active_text_id = None;
+        self.input.text_selecting = false;
+
+        if commit {
+            let before = edit.original_text.clone();
+            let after = match before.clone() {
+                Some(mut text) => {
+                    text.content = edit.buffer.clone();
+                    Some(text)
+                }
+                None if edit.buffer.is_empty() => None,
+                None => Some(TextData {
+                    content: edit.buffer.clone(),
+                    ..TextData::default()
+                }),
+            };
+
+            if before != after {
+                self.board.apply_operation(BoardOperation::SetProperty {
+                    changes: vec![ElementPropertyChange {
+                        id: edit.element_id,
+                        patch: ElementPropertyPatch::Text { before, after },
+                    }],
+                });
+            }
+        }
+
+        self.request_redraw();
+    }
+
+    fn text_cursor_from_screen(&mut self, id: u64, screen_pos: Vec2) -> Option<usize> {
+        let world = self.camera.screen_to_world(screen_pos, self.screen_size);
+        let element = self.board.element(id)?;
+        let content = self
+            .text_edit
+            .as_ref()
+            .filter(|edit| edit.element_id == id)
+            .map(|edit| edit.buffer.as_str())
+            .or_else(|| element.text.as_ref().map(|text| text.content.as_str()))
+            .unwrap_or_default();
+        self.text_system.hit_test_cursor(element, content, world)
+    }
+
+    fn set_text_cursor(&mut self, cursor_byte: usize, extend_selection: bool) {
+        if let Some(edit) = self.text_edit.as_mut() {
+            edit.set_cursor(cursor_byte, extend_selection);
+            edit.preferred_x = None;
+        }
+    }
+
+    fn move_text_cursor(&mut self, motion: Motion, extend_selection: bool) {
+        let Some(edit) = self.text_edit.as_mut() else {
+            return;
+        };
+        let Some(element) = self.board.element(edit.element_id) else {
+            return;
+        };
+        if let Some((cursor_byte, preferred_x)) = self.text_system.move_cursor(
+            element,
+            &edit.buffer,
+            edit.cursor_byte,
+            edit.preferred_x,
+            motion,
+        ) {
+            edit.preferred_x = preferred_x;
+            edit.set_cursor(cursor_byte, extend_selection);
+        }
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        let edit = self.text_edit.as_ref()?;
+        let (start, end) = edit.selection_range()?;
+        Some(edit.buffer[start..end].to_string())
+    }
+
+    fn current_text(&self) -> Option<&str> {
+        self.text_edit.as_ref().map(|edit| edit.buffer.as_str())
+    }
+
+    fn select_all_text(&mut self) {
+        let Some(edit) = self.text_edit.as_mut() else {
+            return;
+        };
+        edit.selection_anchor_byte = Some(0);
+        edit.cursor_byte = edit.buffer.len();
+        edit.preferred_x = None;
+    }
+
+    fn delete_selection_or_all(&mut self) -> bool {
+        if self
+            .text_edit
+            .as_ref()
+            .and_then(TextEditSession::selection_range)
+            .is_some()
+        {
+            return self.delete_selection();
+        }
+        let Some(edit) = self.text_edit.as_mut() else {
+            return false;
+        };
+        if edit.buffer.is_empty() {
+            return false;
+        }
+        edit.buffer.clear();
+        edit.cursor_byte = 0;
+        edit.clear_selection();
+        edit.preferred_x = None;
+        true
+    }
+
+    fn delete_selection(&mut self) -> bool {
+        let Some(edit) = self.text_edit.as_mut() else {
+            return false;
+        };
+        let Some((start, end)) = edit.selection_range() else {
+            return false;
+        };
+        edit.buffer.replace_range(start..end, "");
+        edit.cursor_byte = start;
+        edit.clear_selection();
+        edit.preferred_x = None;
+        true
+    }
+
+    fn insert_text(&mut self, inserted: &str) -> bool {
+        let _ = self.delete_selection();
+        let Some(edit) = self.text_edit.as_mut() else {
+            return false;
+        };
+        let cursor = edit.cursor_byte.min(edit.buffer.len());
+        edit.buffer.insert_str(cursor, inserted);
+        edit.cursor_byte = cursor + inserted.len();
+        edit.clear_selection();
+        edit.preferred_x = None;
+        true
+    }
+
+    fn delete_backward(&mut self) -> bool {
+        if self.delete_selection() {
+            return true;
+        }
+        let Some(edit) = self.text_edit.as_mut() else {
+            return false;
+        };
+        if edit.cursor_byte == 0 {
+            return false;
+        }
+        let previous = previous_char_boundary(&edit.buffer, edit.cursor_byte);
+        edit.buffer.replace_range(previous..edit.cursor_byte, "");
+        edit.cursor_byte = previous;
+        edit.preferred_x = None;
+        true
+    }
+
+    fn delete_forward(&mut self) -> bool {
+        if self.delete_selection() {
+            return true;
+        }
+        let Some(edit) = self.text_edit.as_mut() else {
+            return false;
+        };
+        if edit.cursor_byte >= edit.buffer.len() {
+            return false;
+        }
+        let next = next_char_boundary(&edit.buffer, edit.cursor_byte);
+        edit.buffer.replace_range(edit.cursor_byte..next, "");
+        edit.preferred_x = None;
+        true
     }
 }
 
-fn char_to_byte_index(text: &str, char_index: usize) -> usize {
-    text.char_indices()
-        .nth(char_index)
-        .map(|(index, _)| index)
+fn previous_char_boundary(text: &str, index: usize) -> usize {
+    text[..index.min(text.len())]
+        .char_indices()
+        .last()
+        .map(|(idx, _)| idx)
+        .unwrap_or(0)
+}
+
+fn next_char_boundary(text: &str, index: usize) -> usize {
+    let clamped = index.min(text.len());
+    if clamped >= text.len() {
+        return text.len();
+    }
+    let mut chars = text[clamped..].char_indices();
+    let _ = chars.next();
+    chars
+        .next()
+        .map(|(offset, _)| clamped + offset)
         .unwrap_or(text.len())
 }
 

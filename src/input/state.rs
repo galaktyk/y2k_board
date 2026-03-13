@@ -23,6 +23,7 @@ pub struct InputState {
     pub move_delta: Vec2,
     pub active_text_id: Option<u64>,
     pub text_cursor: usize,
+    pub text_selecting: bool,
     pub last_click_id: Option<u64>,
     pub last_click_at: Option<Instant>,
 }
@@ -66,6 +67,7 @@ impl InputState {
             move_delta: Vec2::ZERO,
             active_text_id: None,
             text_cursor: 0,
+            text_selecting: false,
             last_click_id: None,
             last_click_at: None,
         }

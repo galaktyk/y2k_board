@@ -1,3 +1,8 @@
+change default color for text
+1. text in shapes -> black
+2. own text element in board -> white
+
+---
 BIG FEATURE: Text rendering
 use cosmic text to render and text-edit text
 

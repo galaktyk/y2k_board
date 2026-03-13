@@ -23,7 +23,7 @@ impl Default for TextData {
         Self {
             content: String::new(),
             font_size: 24.0,
-            color: [0.96, 0.97, 0.99, 1.0],
+            color: [0.0, 0.0, 0.0, 1.0],
         }
     }
 }
@@ -401,52 +401,6 @@ impl Board {
 
     pub fn element(&self, id: u64) -> Option<&Element> {
         self.elements.iter().find(|element| element.id == id)
-    }
-
-    pub fn ensure_text(&mut self, id: u64) -> bool {
-        let Some(element) = self.element(id) else {
-            return false;
-        };
-        if !element.can_host_text() || element.text.is_some() {
-            return false;
-        }
-
-        self.apply_operation(BoardOperation::SetProperty {
-            changes: vec![ElementPropertyChange {
-                id,
-                patch: ElementPropertyPatch::Text {
-                    before: None,
-                    after: Some(TextData::default()),
-                },
-            }],
-        });
-        true
-    }
-
-    pub fn update_text<F>(&mut self, id: u64, mut update: F) -> bool
-    where
-        F: FnMut(&mut TextData),
-    {
-        let Some(element) = self.element(id) else {
-            return false;
-        };
-        let Some(mut after) = element.text.clone() else {
-            return false;
-        };
-        let before = Some(after.clone());
-        update(&mut after);
-        let after = Some(after);
-        if before == after {
-            return false;
-        }
-
-        self.apply_operation(BoardOperation::SetProperty {
-            changes: vec![ElementPropertyChange {
-                id,
-                patch: ElementPropertyPatch::Text { before, after },
-            }],
-        });
-        true
     }
 }
 

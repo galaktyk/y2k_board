@@ -1,21 +1,43 @@
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::path::Path;
 
-use cosmic_text::{Attrs, Buffer, Color, FontSystem, Metrics, Shaping, SwashCache, Wrap};
+use cosmic_text::{
+    Attrs, Buffer, CacheKey, Color, Cursor, FontSystem, Metrics, Motion, Shaping,
+    SwashCache, SwashContent, SwashImage, Wrap,
+};
 use glam::Vec2;
 use miniquad::{RenderingBackend, TextureId};
 
-use crate::board::{Board, Element};
+use crate::board::{Board, Element, TextData};
 use crate::camera::Camera;
 use crate::renderer::TextInstanceData;
 
-const ATLAS_SIZE: usize = 1024;
+const TEXT_ATLAS_SIZE: usize = 1024;
+const EMOJI_ATLAS_SIZE: usize = 1024;
 const ATLAS_GAP: usize = 2;
+
+#[derive(Clone, Copy)]
+pub struct ActiveTextEdit<'a> {
+    pub element_id: u64,
+    pub content: &'a str,
+    pub cursor_byte: usize,
+    pub selection_anchor_byte: Option<usize>,
+}
+
+#[derive(Default)]
+pub struct PreparedTextDraw {
+    pub mono_instances: Vec<TextInstanceData>,
+    pub color_instances: Vec<TextInstanceData>,
+}
 
 pub struct TextSystem {
     font_system: FontSystem,
     swash_cache: SwashCache,
-    clear_bytes: Vec<u8>,
+    mono_atlas: Atlas,
+    emoji_atlas: Atlas,
+    overlay_ready: bool,
+    fallback_keys: HashMap<u32, CacheKey>,
 }
 
 impl TextSystem {
@@ -26,133 +48,500 @@ impl TextSystem {
         Self {
             font_system,
             swash_cache: SwashCache::new(),
-            clear_bytes: vec![0; ATLAS_SIZE * ATLAS_SIZE],
+            mono_atlas: Atlas::new(TEXT_ATLAS_SIZE, true),
+            emoji_atlas: Atlas::new(EMOJI_ATLAS_SIZE, false),
+            overlay_ready: false,
+            fallback_keys: HashMap::new(),
         }
     }
 
     pub fn build_visible_text_instances(
         &mut self,
         ctx: &mut dyn RenderingBackend,
-        atlas: TextureId,
+        text_atlas: TextureId,
+        emoji_atlas: TextureId,
         board: &Board,
         visible_indices: &[usize],
         camera: &Camera,
-    ) -> Vec<TextInstanceData> {
-        ctx.texture_update(atlas, &self.clear_bytes);
+        active_edit: Option<ActiveTextEdit<'_>>,
+    ) -> PreparedTextDraw {
+        self.ensure_overlay_pixel(ctx, text_atlas);
 
         let mut candidates: Vec<&Element> = visible_indices
             .iter()
             .filter_map(|&index| board.elements.get(index))
-            .filter(|element| element.text.as_ref().map(|text| !text.content.is_empty()).unwrap_or(false))
+            .filter(|element| {
+                let active_content = active_edit
+                    .filter(|edit| edit.element_id == element.id)
+                    .map(|edit| edit.content);
+                active_content
+                    .or_else(|| element.text.as_ref().map(|text| text.content.as_str()))
+                    .map(|content| !content.is_empty())
+                    .unwrap_or(false)
+            })
             .collect();
 
         candidates.sort_by(|left, right| {
             let left_dist = text_host_distance(left, camera.pan);
             let right_dist = text_host_distance(right, camera.pan);
-            left_dist.partial_cmp(&right_dist).unwrap_or(Ordering::Equal)
+            left_dist
+                .partial_cmp(&right_dist)
+                .unwrap_or(Ordering::Equal)
         });
 
-        let mut atlas_x = 0usize;
-        let mut atlas_y = 0usize;
-        let mut row_h = 0usize;
-        let mut instances = Vec::new();
+        let mut prepared = PreparedTextDraw::default();
 
         for element in candidates {
-            let Some(text) = element.text.as_ref() else {
+            let content = active_edit
+                .filter(|edit| edit.element_id == element.id)
+                .map(|edit| edit.content)
+                .or_else(|| element.text.as_ref().map(|text| text.content.as_str()))
+                .unwrap_or_default();
+
+            if content.is_empty() {
                 continue;
-            };
-            let mut surface = self.rasterize_text_surface(element, &text.content, text.font_size, text.color);
-            let mut draw_size = surface.size;
-            if !surface.bytes.is_empty() {
-                if let Some((x, y)) = pack_rect(&mut atlas_x, &mut atlas_y, &mut row_h, draw_size.0, draw_size.1) {
-                    ctx.texture_update_part(atlas, x as i32, y as i32, draw_size.0 as i32, draw_size.1 as i32, &surface.bytes);
-                    instances.push(build_instance(element, surface.world_pos, draw_size, x, y, text.color));
-                    continue;
-                }
             }
 
-            surface = self.rasterize_text_surface(element, "■", text.font_size, text.color);
-            draw_size = surface.size;
-            if !surface.bytes.is_empty() {
-                if let Some((x, y)) = pack_rect(&mut atlas_x, &mut atlas_y, &mut row_h, draw_size.0, draw_size.1) {
-                    ctx.texture_update_part(atlas, x as i32, y as i32, draw_size.0 as i32, draw_size.1 as i32, &surface.bytes);
-                    instances.push(build_instance(element, surface.world_pos, draw_size, x, y, text.color));
+            let Some(layout) = self.layout_text(element, content) else {
+                continue;
+            };
+            self.append_layout_instances(
+                ctx,
+                text_atlas,
+                emoji_atlas,
+                element,
+                &layout,
+                &mut prepared,
+            );
+        }
+
+        if let Some(edit) = active_edit {
+            if let Some(element) = board.element(edit.element_id) {
+                let overlay = self.build_edit_overlay_instances(
+                    element,
+                    edit.content,
+                    edit.cursor_byte,
+                    edit.selection_anchor_byte,
+                );
+                prepared.mono_instances.extend(overlay);
+            }
+        }
+
+        prepared
+    }
+
+    pub fn hit_test_cursor(
+        &mut self,
+        element: &Element,
+        content: &str,
+        world_pos: Vec2,
+    ) -> Option<usize> {
+        let layout = self.layout_text(element, content)?;
+        let local = inverse_rotate_point(element, world_pos) - layout.world_min;
+        let cursor = layout.buffer.hit(local.x, local.y)?;
+        Some(cursor_to_global_byte(content, cursor))
+    }
+
+    pub fn move_cursor(
+        &mut self,
+        element: &Element,
+        content: &str,
+        cursor_byte: usize,
+        preferred_x: Option<i32>,
+        motion: Motion,
+    ) -> Option<(usize, Option<i32>)> {
+        let mut layout = self.layout_text(element, content)?;
+        let cursor = global_byte_to_cursor(content, cursor_byte);
+        let (next, next_preferred_x) = layout
+            .buffer
+            .cursor_motion(&mut self.font_system, cursor, preferred_x, motion)?;
+        Some((cursor_to_global_byte(content, next), next_preferred_x))
+    }
+
+    pub fn build_edit_overlay_instances(
+        &mut self,
+        element: &Element,
+        content: &str,
+        cursor_byte: usize,
+        selection_anchor_byte: Option<usize>,
+    ) -> Vec<TextInstanceData> {
+        let Some(layout) = self.layout_text(element, content) else {
+            return Vec::new();
+        };
+
+        let uv_min = [0.0, 0.0];
+        let uv_max = [1.0 / TEXT_ATLAS_SIZE as f32, 1.0 / TEXT_ATLAS_SIZE as f32];
+        let origin = (element.pos + element.size * 0.5).to_array();
+        let mut instances = Vec::new();
+
+        if let Some((start_byte, end_byte)) = selection_range(cursor_byte, selection_anchor_byte) {
+            let start = global_byte_to_cursor(content, start_byte);
+            let end = global_byte_to_cursor(content, end_byte);
+            for run in layout.buffer.layout_runs() {
+                if let Some((x, width)) = run.highlight(start, end) {
+                    if width <= 0.0 {
+                        continue;
+                    }
+                    instances.push(TextInstanceData {
+                        pos: (layout.world_min + Vec2::new(x, run.line_top)).to_array(),
+                        size: [width, run.line_height],
+                        origin,
+                        rotation: element.rotation,
+                        uv_min,
+                        uv_max,
+                        color: [0.18, 0.45, 1.0, 0.22],
+                    });
                 }
             }
+        }
+
+        let cursor = global_byte_to_cursor(content, cursor_byte);
+        if let Some((x, line_top, line_height)) = caret_geometry(&layout.buffer, cursor) {
+            instances.push(TextInstanceData {
+                pos: (layout.world_min + Vec2::new((x - 1.0).max(0.0), line_top)).to_array(),
+                size: [2.0, line_height.max(1.0)],
+                origin,
+                rotation: element.rotation,
+                uv_min,
+                uv_max,
+                color: [0.06, 0.09, 0.14, 0.95],
+            });
         }
 
         instances
     }
 
-    fn rasterize_text_surface(
+    fn append_layout_instances(
         &mut self,
+        ctx: &mut dyn RenderingBackend,
+        mono_texture: TextureId,
+        emoji_texture: TextureId,
         element: &Element,
-        text: &str,
-        font_size: f32,
-        color: [f32; 4],
-    ) -> TextSurface {
-        let Some((world_pos, max_pos)) = element.text_bounds() else {
-            return TextSurface::empty();
-        };
+        layout: &LaidOutText,
+        prepared: &mut PreparedTextDraw,
+    ) {
+        let origin = (element.pos + element.size * 0.5).to_array();
+        let default_color = layout.text.color;
+        let fallback_key = self.fallback_cache_key(layout.text.font_size);
 
-        let width = (max_pos.x - world_pos.x).max(1.0).ceil() as usize;
-        let height = (max_pos.y - world_pos.y).max(1.0).ceil() as usize;
-        if width == 0 || height == 0 || width > ATLAS_SIZE || height > ATLAS_SIZE {
-            return TextSurface::empty();
+        for run in layout.buffer.layout_runs() {
+            for glyph in run.glyphs {
+                let physical = glyph.physical((0.0, run.line_y), 1.0);
+                let resolved = self
+                    .resolve_glyph(ctx, mono_texture, emoji_texture, physical.cache_key)
+                    .or_else(|| {
+                        fallback_key.and_then(|key| {
+                            self.resolve_glyph(ctx, mono_texture, emoji_texture, key)
+                        })
+                    });
+                let Some(resolved) = resolved else {
+                    continue;
+                };
+
+                let glyph_color = glyph
+                    .color_opt
+                    .map(cosmic_color_to_rgba)
+                    .unwrap_or(default_color);
+                let instance_color = match resolved.kind {
+                    AtlasKind::Mono => glyph_color,
+                    AtlasKind::Color => [1.0, 1.0, 1.0, glyph_color[3]],
+                };
+
+                let pos = layout.world_min
+                    + Vec2::new(
+                        (physical.x + resolved.entry.left) as f32,
+                        (physical.y - resolved.entry.top) as f32,
+                    );
+
+                let instance = TextInstanceData {
+                    pos: pos.to_array(),
+                    size: [resolved.entry.width as f32, resolved.entry.height as f32],
+                    origin,
+                    rotation: element.rotation,
+                    uv_min: resolved.entry.uv_min(layout.atlas_size(resolved.kind) as f32),
+                    uv_max: resolved.entry.uv_max(layout.atlas_size(resolved.kind) as f32),
+                    color: instance_color,
+                };
+
+                match resolved.kind {
+                    AtlasKind::Mono => prepared.mono_instances.push(instance),
+                    AtlasKind::Color => prepared.color_instances.push(instance),
+                }
+            }
+        }
+    }
+
+    fn resolve_glyph(
+        &mut self,
+        ctx: &mut dyn RenderingBackend,
+        mono_texture: TextureId,
+        emoji_texture: TextureId,
+        cache_key: CacheKey,
+    ) -> Option<ResolvedGlyph> {
+        if let Some(entry) = self.mono_atlas.entries.get(&cache_key) {
+            return Some(ResolvedGlyph {
+                kind: AtlasKind::Mono,
+                entry: *entry,
+            });
+        }
+        if let Some(entry) = self.emoji_atlas.entries.get(&cache_key) {
+            return Some(ResolvedGlyph {
+                kind: AtlasKind::Color,
+                entry: *entry,
+            });
+        }
+
+        let image = self
+            .swash_cache
+            .get_image(&mut self.font_system, cache_key)
+            .as_ref()?
+            .clone();
+
+        match image.content {
+            SwashContent::Mask | SwashContent::SubpixelMask => {
+                let entry = self.mono_atlas.insert(ctx, mono_texture, cache_key, &image)?;
+                Some(ResolvedGlyph {
+                    kind: AtlasKind::Mono,
+                    entry,
+                })
+            }
+            SwashContent::Color => {
+                let entry = self.emoji_atlas.insert(ctx, emoji_texture, cache_key, &image)?;
+                Some(ResolvedGlyph {
+                    kind: AtlasKind::Color,
+                    entry,
+                })
+            }
+        }
+    }
+
+    fn fallback_cache_key(&mut self, font_size: f32) -> Option<CacheKey> {
+        let key = font_size.to_bits();
+        if let Some(cache_key) = self.fallback_keys.get(&key) {
+            return Some(*cache_key);
         }
 
         let metrics = Metrics::new(font_size.max(8.0), (font_size * 1.35).max(font_size + 4.0));
-        let attrs = Attrs::new();
+        let attrs = Attrs::new().color(Color::rgb(0, 0, 0));
         let mut buffer = Buffer::new(&mut self.font_system, metrics);
-        buffer.set_size(&mut self.font_system, Some(width as f32), Some(height as f32));
-        buffer.set_wrap(&mut self.font_system, Wrap::WordOrGlyph);
-        buffer.set_text(&mut self.font_system, text, &attrs, Shaping::Advanced, None);
+        buffer.set_size(
+            &mut self.font_system,
+            Some((font_size * 2.0).max(16.0)),
+            Some(metrics.line_height.max(16.0)),
+        );
+        buffer.set_wrap(&mut self.font_system, Wrap::None);
+        buffer.set_text(&mut self.font_system, "■", &attrs, Shaping::Advanced, None);
         buffer.shape_until_scroll(&mut self.font_system, true);
 
-        let mut pixels = vec![0u8; width * height];
-        let text_color = Color::rgba(
-            (color[0].clamp(0.0, 1.0) * 255.0) as u8,
-            (color[1].clamp(0.0, 1.0) * 255.0) as u8,
-            (color[2].clamp(0.0, 1.0) * 255.0) as u8,
-            (color[3].clamp(0.0, 1.0) * 255.0) as u8,
-        );
-        buffer.draw(&mut self.font_system, &mut self.swash_cache, text_color, |x, y, w, h, draw_color| {
-            let alpha = draw_color.a();
-            for iy in 0..h as i32 {
-                let py = y + iy;
-                if py < 0 || py >= height as i32 {
-                    continue;
-                }
-                for ix in 0..w as i32 {
-                    let px = x + ix;
-                    if px < 0 || px >= width as i32 {
-                        continue;
-                    }
-                    pixels[py as usize * width + px as usize] = alpha;
-                }
-            }
-        });
+        let run = buffer.layout_runs().next()?;
+        let glyph = run.glyphs.first()?;
+        let cache_key = glyph.physical((0.0, run.line_y), 1.0).cache_key;
+        self.fallback_keys.insert(key, cache_key);
+        Some(cache_key)
+    }
 
-        TextSurface {
-            bytes: pixels,
-            size: (width, height),
-            world_pos,
+    fn ensure_overlay_pixel(&mut self, ctx: &mut dyn RenderingBackend, text_atlas: TextureId) {
+        if self.overlay_ready {
+            return;
+        }
+
+        ctx.texture_update_part(text_atlas, 0, 0, 1, 1, &[255]);
+        self.overlay_ready = true;
+    }
+
+    fn layout_text(&mut self, element: &Element, content: &str) -> Option<LaidOutText> {
+        let Some((world_min, world_max)) = element.text_bounds() else {
+            return None;
+        };
+        let text = element.text.clone().unwrap_or_default();
+        let width = (world_max.x - world_min.x).max(1.0);
+        let height = (world_max.y - world_min.y).max(1.0);
+
+        let metrics = Metrics::new(
+            text.font_size.max(8.0),
+            (text.font_size * 1.35).max(text.font_size + 4.0),
+        );
+        let attrs = Attrs::new().color(rgba_to_cosmic_color(text.color));
+        let mut buffer = Buffer::new(&mut self.font_system, metrics);
+        buffer.set_size(&mut self.font_system, Some(width), Some(height));
+        buffer.set_wrap(&mut self.font_system, Wrap::WordOrGlyph);
+        buffer.set_text(&mut self.font_system, content, &attrs, Shaping::Advanced, None);
+        buffer.shape_until_scroll(&mut self.font_system, true);
+
+        Some(LaidOutText {
+            buffer,
+            world_min,
+            text,
+        })
+    }
+}
+
+struct LaidOutText {
+    buffer: Buffer,
+    world_min: Vec2,
+    text: TextData,
+}
+
+impl LaidOutText {
+    fn atlas_size(&self, kind: AtlasKind) -> usize {
+        match kind {
+            AtlasKind::Mono => TEXT_ATLAS_SIZE,
+            AtlasKind::Color => EMOJI_ATLAS_SIZE,
         }
     }
 }
 
-struct TextSurface {
-    bytes: Vec<u8>,
-    size: (usize, usize),
-    world_pos: Vec2,
+#[derive(Clone, Copy)]
+struct AtlasEntry {
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+    left: i32,
+    top: i32,
 }
 
-impl TextSurface {
-    fn empty() -> Self {
+impl AtlasEntry {
+    fn uv_min(&self, atlas_size: f32) -> [f32; 2] {
+        [self.x as f32 / atlas_size, self.y as f32 / atlas_size]
+    }
+
+    fn uv_max(&self, atlas_size: f32) -> [f32; 2] {
+        [
+            (self.x + self.width) as f32 / atlas_size,
+            (self.y + self.height) as f32 / atlas_size,
+        ]
+    }
+}
+
+struct Atlas {
+    size: usize,
+    next_x: usize,
+    next_y: usize,
+    row_h: usize,
+    entries: HashMap<CacheKey, AtlasEntry>,
+}
+
+impl Atlas {
+    fn new(size: usize, reserve_overlay_pixel: bool) -> Self {
+        let next_x = if reserve_overlay_pixel { 1 + ATLAS_GAP } else { 0 };
+        let row_h = if reserve_overlay_pixel { 1 } else { 0 };
         Self {
-            bytes: Vec::new(),
-            size: (0, 0),
-            world_pos: Vec2::ZERO,
+            size,
+            next_x,
+            next_y: 0,
+            row_h,
+            entries: HashMap::new(),
+        }
+    }
+
+    fn insert(
+        &mut self,
+        ctx: &mut dyn RenderingBackend,
+        texture: TextureId,
+        cache_key: CacheKey,
+        image: &SwashImage,
+    ) -> Option<AtlasEntry> {
+        if let Some(entry) = self.entries.get(&cache_key) {
+            return Some(*entry);
+        }
+
+        let width = image.placement.width as usize;
+        let height = image.placement.height as usize;
+        if width == 0 || height == 0 {
+            return None;
+        }
+
+        let (x, y) = self.pack(width, height)?;
+        let bytes = atlas_bytes(image)?;
+        ctx.texture_update_part(
+            texture,
+            x as i32,
+            y as i32,
+            width as i32,
+            height as i32,
+            &bytes,
+        );
+
+        let entry = AtlasEntry {
+            x,
+            y,
+            width,
+            height,
+            left: image.placement.left,
+            top: image.placement.top,
+        };
+        self.entries.insert(cache_key, entry);
+        Some(entry)
+    }
+
+    fn pack(&mut self, width: usize, height: usize) -> Option<(usize, usize)> {
+        if width > self.size || height > self.size {
+            return None;
+        }
+        if self.next_x + width > self.size {
+            self.next_x = 0;
+            self.next_y += self.row_h + ATLAS_GAP;
+            self.row_h = 0;
+        }
+        if self.next_y + height > self.size {
+            return None;
+        }
+
+        let out = (self.next_x, self.next_y);
+        self.next_x += width + ATLAS_GAP;
+        self.row_h = self.row_h.max(height);
+        Some(out)
+    }
+}
+
+#[derive(Clone, Copy)]
+enum AtlasKind {
+    Mono,
+    Color,
+}
+
+struct ResolvedGlyph {
+    kind: AtlasKind,
+    entry: AtlasEntry,
+}
+
+fn selection_range(cursor_byte: usize, anchor_byte: Option<usize>) -> Option<(usize, usize)> {
+    let anchor_byte = anchor_byte?;
+    if anchor_byte == cursor_byte {
+        return None;
+    }
+    Some((anchor_byte.min(cursor_byte), anchor_byte.max(cursor_byte)))
+}
+
+fn caret_geometry(buffer: &Buffer, cursor: Cursor) -> Option<(f32, f32, f32)> {
+    for run in buffer.layout_runs() {
+        if run.line_i != cursor.line {
+            continue;
+        }
+        if let Some((x, _)) = run.highlight(cursor, cursor) {
+            return Some((x, run.line_top, run.line_height));
+        }
+        if cursor.index >= run.text.len() {
+            return Some((run.line_w, run.line_top, run.line_height));
+        }
+        if run.glyphs.is_empty() {
+            return Some((0.0, run.line_top, run.line_height));
+        }
+    }
+    None
+}
+
+fn atlas_bytes(image: &SwashImage) -> Option<Vec<u8>> {
+    match image.content {
+        SwashContent::Mask | SwashContent::Color => Some(image.data.clone()),
+        SwashContent::SubpixelMask => {
+            let mut bytes = Vec::with_capacity((image.placement.width * image.placement.height) as usize);
+            for chunk in image.data.chunks_exact(3) {
+                let alpha = ((u16::from(chunk[0]) + u16::from(chunk[1]) + u16::from(chunk[2])) / 3) as u8;
+                bytes.push(alpha);
+            }
+            Some(bytes)
         }
     }
 }
@@ -162,52 +551,56 @@ fn text_host_distance(element: &Element, screen_center: Vec2) -> f32 {
     center.distance_squared(screen_center)
 }
 
-fn pack_rect(
-    atlas_x: &mut usize,
-    atlas_y: &mut usize,
-    row_h: &mut usize,
-    width: usize,
-    height: usize,
-) -> Option<(usize, usize)> {
-    if width == 0 || height == 0 || width > ATLAS_SIZE || height > ATLAS_SIZE {
-        return None;
-    }
-    if *atlas_x + width > ATLAS_SIZE {
-        *atlas_x = 0;
-        *atlas_y += *row_h + ATLAS_GAP;
-        *row_h = 0;
-    }
-    if *atlas_y + height > ATLAS_SIZE {
-        return None;
-    }
-
-    let out = (*atlas_x, *atlas_y);
-    *atlas_x += width + ATLAS_GAP;
-    *row_h = (*row_h).max(height);
-    Some(out)
+fn inverse_rotate_point(element: &Element, point: Vec2) -> Vec2 {
+    let center = element.pos + element.size * 0.5;
+    let delta = point - center;
+    let c = element.rotation.cos();
+    let s = element.rotation.sin();
+    center + Vec2::new(delta.x * c + delta.y * s, -delta.x * s + delta.y * c)
 }
 
-fn build_instance(
-    element: &Element,
-    world_pos: Vec2,
-    size: (usize, usize),
-    atlas_x: usize,
-    atlas_y: usize,
-    color: [f32; 4],
-) -> TextInstanceData {
-    let uv_min = [atlas_x as f32 / ATLAS_SIZE as f32, atlas_y as f32 / ATLAS_SIZE as f32];
-    let uv_max = [
-        (atlas_x + size.0) as f32 / ATLAS_SIZE as f32,
-        (atlas_y + size.1) as f32 / ATLAS_SIZE as f32,
-    ];
+fn rgba_to_cosmic_color(color: [f32; 4]) -> Color {
+    Color::rgba(
+        (color[0].clamp(0.0, 1.0) * 255.0) as u8,
+        (color[1].clamp(0.0, 1.0) * 255.0) as u8,
+        (color[2].clamp(0.0, 1.0) * 255.0) as u8,
+        (color[3].clamp(0.0, 1.0) * 255.0) as u8,
+    )
+}
 
-    TextInstanceData {
-        pos: world_pos.to_array(),
-        size: [size.0 as f32, size.1 as f32],
-        origin: (element.pos + element.size * 0.5).to_array(),
-        rotation: element.rotation,
-        uv_min,
-        uv_max,
-        color,
+fn cosmic_color_to_rgba(color: Color) -> [f32; 4] {
+    let rgba = color.0;
+    [
+        ((rgba >> 16) & 0xFF) as f32 / 255.0,
+        ((rgba >> 8) & 0xFF) as f32 / 255.0,
+        (rgba & 0xFF) as f32 / 255.0,
+        ((rgba >> 24) & 0xFF) as f32 / 255.0,
+    ]
+}
+
+fn global_byte_to_cursor(text: &str, global_byte: usize) -> Cursor {
+    let target = global_byte.min(text.len());
+    let mut line_start = 0usize;
+    for (line, segment) in text.split('\n').enumerate() {
+        let line_end = line_start + segment.len();
+        if target <= line_end {
+            return Cursor::new(line, target - line_start);
+        }
+        line_start = line_end + 1;
     }
+
+    let last_line = text.split('\n').count().saturating_sub(1);
+    let last_len = text.split('\n').last().map(str::len).unwrap_or(0);
+    Cursor::new(last_line, last_len)
+}
+
+fn cursor_to_global_byte(text: &str, cursor: Cursor) -> usize {
+    let mut line_start = 0usize;
+    for (line, segment) in text.split('\n').enumerate() {
+        if line == cursor.line {
+            return (line_start + cursor.index.min(segment.len())).min(text.len());
+        }
+        line_start += segment.len() + 1;
+    }
+    text.len()
 }

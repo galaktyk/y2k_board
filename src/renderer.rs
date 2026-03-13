@@ -178,7 +178,27 @@ uniform sampler2D u_text_atlas;
 
 void main() {
     float mask = texture2D(u_text_atlas, v_uv).a;
+    if (mask <= 0.0) {
+        discard;
+    }
     gl_FragColor = vec4(v_color.rgb, v_color.a * mask);
+}
+"#;
+
+const COLOR_TEXT_FRAGMENT_SRC: &str = r#"#version 100
+precision highp float;
+
+varying vec2 v_uv;
+varying vec4 v_color;
+
+uniform sampler2D u_color_atlas;
+
+void main() {
+    vec4 sample_color = texture2D(u_color_atlas, v_uv);
+    if (sample_color.a <= 0.0) {
+        discard;
+    }
+    gl_FragColor = vec4(sample_color.rgb * v_color.rgb, sample_color.a * v_color.a);
 }
 "#;
 
@@ -223,11 +243,14 @@ pub struct Renderer {
     shape_bindings: Bindings,
     instance_buffer: BufferId,
 
-    // text pipeline
+    // text pipelines
     text_pipeline: Pipeline,
     text_bindings: Bindings,
+    color_text_pipeline: Pipeline,
+    color_text_bindings: Bindings,
     text_instance_buffer: BufferId,
     text_atlas: TextureId,
+    emoji_atlas: TextureId,
 
     // grid pipeline
     grid_pipeline: Pipeline,
@@ -290,6 +313,19 @@ impl Renderer {
                 width: 1024,
                 height: 1024,
                 format: TextureFormat::Alpha,
+                wrap: TextureWrap::Clamp,
+                min_filter: FilterMode::Linear,
+                mag_filter: FilterMode::Linear,
+                ..Default::default()
+            },
+        );
+        let emoji_atlas = ctx.new_texture(
+            TextureAccess::Static,
+            TextureSource::Bytes(&vec![0u8; 1024 * 1024 * 4]),
+            TextureParams {
+                width: 1024,
+                height: 1024,
+                format: TextureFormat::RGBA8,
                 wrap: TextureWrap::Clamp,
                 min_filter: FilterMode::Linear,
                 mag_filter: FilterMode::Linear,
@@ -409,6 +445,61 @@ impl Renderer {
             images: vec![text_atlas],
         };
 
+        let color_text_shader = ctx
+            .new_shader(
+                ShaderSource::Glsl {
+                    vertex: TEXT_VERTEX_SRC,
+                    fragment: COLOR_TEXT_FRAGMENT_SRC,
+                },
+                ShaderMeta {
+                    uniforms: UniformBlockLayout {
+                        uniforms: vec![UniformDesc::new("u_mvp", UniformType::Mat4)],
+                    },
+                    images: vec!["u_color_atlas".to_string()],
+                },
+            )
+            .expect("color text shader compile failed");
+
+        let color_text_pipeline = ctx.new_pipeline(
+            &[
+                BufferLayout::default(),
+                BufferLayout {
+                    step_func: VertexStep::PerInstance,
+                    ..Default::default()
+                },
+            ],
+            &[
+                VertexAttribute::with_buffer("a_pos", VertexFormat::Float2, 0),
+                VertexAttribute::with_buffer("i_pos", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_size", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_origin", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_rotation", VertexFormat::Float1, 1),
+                VertexAttribute::with_buffer("i_uv_min", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_uv_max", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_color", VertexFormat::Float4, 1),
+            ],
+            color_text_shader,
+            PipelineParams {
+                color_blend: Some(BlendState::new(
+                    Equation::Add,
+                    BlendFactor::Value(BlendValue::SourceAlpha),
+                    BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
+                )),
+                alpha_blend: Some(BlendState::new(
+                    Equation::Add,
+                    BlendFactor::One,
+                    BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
+                )),
+                ..Default::default()
+            },
+        );
+
+        let color_text_bindings = Bindings {
+            vertex_buffers: vec![vertex_buf, text_instance_buffer],
+            index_buffer: index_buf,
+            images: vec![emoji_atlas],
+        };
+
         // ── Grid pipeline ─────────────────────────────────────────────────
         #[rustfmt::skip]
         let fsq_verts: [f32; 8] = [
@@ -484,8 +575,11 @@ impl Renderer {
             instance_buffer,
             text_pipeline,
             text_bindings,
+            color_text_pipeline,
+            color_text_bindings,
             text_instance_buffer,
             text_atlas,
+            emoji_atlas,
             grid_pipeline,
             grid_bindings,
         }
@@ -577,8 +671,31 @@ impl Renderer {
         ctx.draw(0, 6, instances.len() as i32);
     }
 
+    pub fn draw_color_text_instances(
+        &mut self,
+        ctx: &mut dyn RenderingBackend,
+        instances: &[TextInstanceData],
+        mvp: glam::Mat4,
+    ) {
+        if instances.is_empty() {
+            return;
+        }
+
+        ctx.buffer_update(self.text_instance_buffer, BufferSource::slice(instances));
+        ctx.apply_pipeline(&self.color_text_pipeline);
+        ctx.apply_bindings(&self.color_text_bindings);
+        ctx.apply_uniforms(UniformsSource::table(&ShapeUniforms {
+            u_mvp: mvp.to_cols_array_2d(),
+        }));
+        ctx.draw(0, 6, instances.len() as i32);
+    }
+
     pub fn text_atlas(&self) -> TextureId {
         self.text_atlas
+    }
+
+    pub fn emoji_atlas(&self) -> TextureId {
+        self.emoji_atlas
     }
 }
 
