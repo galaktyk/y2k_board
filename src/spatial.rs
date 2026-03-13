@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use glam::Vec2;
 
 const CELL_SIZE: f32 = 64.0;
@@ -31,17 +31,15 @@ impl SpatialGrid {
     }
 
     /// Returns unique IDs overlapping the given AABB of world-space mins/maxes.
-    pub fn query(&self, aabb_min: Vec2, aabb_max: Vec2) -> Vec<u64> {
+    pub fn query(&self, aabb_min: Vec2, aabb_max: Vec2) -> HashSet<u64> {
         let (c0x, c0y) = cell(aabb_min);
         let (c1x, c1y) = cell(aabb_max);
-        let mut result: Vec<u64> = Vec::new();
+        let mut result: HashSet<u64> = HashSet::new();
         for cx in c0x..=c1x {
             for cy in c0y..=c1y {
                 if let Some(ids) = self.cells.get(&(cx, cy)) {
                     for &id in ids {
-                        if !result.contains(&id) {
-                            result.push(id);
-                        }
+                        result.insert(id);
                     }
                 }
             }

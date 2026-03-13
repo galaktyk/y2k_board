@@ -131,7 +131,6 @@ impl EventHandler for App {
         if keycode == KeyCode::B && keymods.alt {
             let (vis_min, vis_max) = self.camera.visible_rect(self.screen_size);
             let vis_size = vis_max - vis_min;
-            let max_dim = (vis_size.x.min(vis_size.y) * 0.2).max(50.0);
             let mut seed: u64 = (self.board.elements.len() as u64)
                 .wrapping_mul(0x9e3779b97f4a7c15)
                 ^ 0xdeadbeefcafe1234;
@@ -152,7 +151,7 @@ impl EventHandler for App {
                 let rc2 = rng(&mut seed);
                 let shape = shapes[(seed % 3) as usize];
                 let pos   = vis_min + Vec2::new(rx * vis_size.x, ry * vis_size.y);
-                let size  = Vec2::new(20.0 + rw * (max_dim - 20.0), 20.0 + rh * (max_dim - 20.0));
+                let size  = Vec2::new(100.0 + rw * 300.0, 100.0 + rh * 300.0);
                 let color = [rc0 * 0.7 + 0.3, rc1 * 0.7 + 0.3, rc2 * 0.7 + 0.3, 0.85];
                 let id    = self.board.next_id();
                 self.board.elements.push(Element { id, shape, pos, size, color, selected: false });
