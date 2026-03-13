@@ -80,12 +80,7 @@ impl TextSystem {
                 }
             }
         }
-        #[cfg(target_arch = "wasm32")]
-        {
-            // Fetch and load at startup
-            let bytes = fetch_font("https://github.com/googlefonts/noto-emoji/raw/main/fonts/NotoColorEmoji.ttf").await;
-            font_system.db_mut().load_font_data(bytes);
-        }
+        // Note: emoji font loading on WASM is not yet implemented.
 
         Self {
             font_system,

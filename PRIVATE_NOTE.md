@@ -1,12 +1,12 @@
 
 change boder to be real border (not blob big shadow)
 ---
+
+
 culling optimize
 - if shape or text element  size is smaller than 20px, skip render text
 wait this seems to do a loop check
 should i do this in cpu or gpu?
-
-
 
 ---
 
@@ -15,11 +15,6 @@ is this html correct? i only see backscreen when open http://localhost:8080/ wit
 
 ---
 
-
- Set the Caret/Candidate Position Hint for IME and emoji input
- canvas has a world transform (pan + zoom), so you must convert:
-
----
 add multiple selection with drag over
  (show area rectangle while dragging)
 when drag finished, show big selection rectangle (also with handles for resizing/rotating)

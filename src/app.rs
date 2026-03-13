@@ -1,7 +1,7 @@
 use miniquad::*;
 use glam::Vec2;
 use std::collections::{HashMap, HashSet};
-use std::time::Instant;
+
 use cosmic_text::Motion;
 
 use crate::board::{Board, BoardOperation, ElementPropertyChange, ElementPropertyPatch, TextData};
@@ -212,7 +212,7 @@ pub struct App {
     text_system: TextSystem,
     text_edit: Option<TextEditSession>,
     // ── stats ─────────────────────────────────────────────────────────────
-    last_frame:   Instant,
+    last_frame:   f64,
     frame_ms:     f32,
     fps:          f32,
     fps_accum:    f32,
@@ -240,7 +240,7 @@ impl App {
             dirty_element_ids: HashSet::new(),
             text_system: TextSystem::new(),
             text_edit: None,
-            last_frame:  Instant::now(),
+            last_frame:  miniquad::date::now(),
             frame_ms:    0.0,
             fps:         0.0,
             fps_accum:   0.0,
@@ -376,8 +376,8 @@ impl EventHandler for App {
 
     fn draw(&mut self) {
         // ── Frame timing ──────────────────────────────────────────────────
-        let now   = Instant::now();
-        let dt_ms = now.duration_since(self.last_frame).as_secs_f32() * 1000.0;
+        let now   = miniquad::date::now();
+        let dt_ms = ((now - self.last_frame) * 1000.0) as f32;
         self.last_frame = now;
         self.frame_ms   = dt_ms;
 

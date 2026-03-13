@@ -1,5 +1,5 @@
 use glam::Vec2;
-use std::time::{Duration, Instant};
+
 
 use crate::board::{Board, BoardOperation, Element, ShapeType};
 use crate::camera::Camera;
@@ -18,7 +18,7 @@ pub fn on_mouse_down(
     y: f32,
     btn: miniquad::MouseButton,
 ) -> Option<ToolbarAction> {
-    const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(400);
+    const DOUBLE_CLICK_WINDOW: f64 = 0.4;
 
     state.mouse_pos = Vec2::new(x, y);
 
@@ -56,7 +56,7 @@ pub fn on_mouse_down(
 
     match toolbar.active_tool {
         Tool::Select => {
-            let now = Instant::now();
+            let now = miniquad::date::now();
             let mut handle_hit = None;
             for e in board.elements.iter().filter(|e| e.selected).rev() {
                 if let Some(handles) = get_element_handles(e) {
@@ -114,7 +114,7 @@ pub fn on_mouse_down(
                 let is_double_click = state.last_click_id == Some(id)
                     && state
                         .last_click_at
-                        .map(|last| now.duration_since(last) <= DOUBLE_CLICK_WINDOW)
+                        .map(|last| (now - last) <= DOUBLE_CLICK_WINDOW)
                         .unwrap_or(false);
 
                 state.last_click_id = Some(id);
