@@ -138,7 +138,7 @@ do not update anything to save battery.
 
 ---
 
-# Board Operations
+# Ops
 
 Board changes are represented as **operations**.
 

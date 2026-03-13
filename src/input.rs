@@ -2,6 +2,7 @@ use glam::Vec2;
 use crate::board::{Board, Element, Op, ShapeType};
 use crate::camera::Camera;
 use crate::toolbar::{Tool, Toolbar, ToolbarAction, TOOLBAR_HEIGHT};
+use crate::renderer::InstanceData;
 
 pub struct InputState {
     pub mouse_pos: Vec2,
@@ -21,16 +22,32 @@ pub struct InputState {
     dragging_tool: bool,
     drag_start_world: Vec2,
 
-    // Move-selected state
-    moving_elements: bool,
+    // Element dragging state
+    drag_mode: DragMode,
     move_start_world: Vec2,
-    /// Element positions at the start of the move gesture
-    move_origin: Vec<(u64, Vec2)>,
+    /// Element positions at the start of the gesture
+    move_origin: Vec<(u64, Vec2, Vec2, f32)>,
 
     /// Transient preview element shown while dragging a create tool.
     pub preview: Option<Element>,
     /// Live drag delta for selected elements (shown before commit).
     pub move_delta: Vec2,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum HandleDir {
+    TL,
+    TR,
+    BR,
+    BL,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DragMode {
+    None,
+    MoveSelected,
+    ResizingHandle(HandleDir),
+    Rotating,
 }
 
 impl InputState {
@@ -47,7 +64,7 @@ impl InputState {
             pan_start_world: Vec2::ZERO,
             dragging_tool: false,
             drag_start_world: Vec2::ZERO,
-            moving_elements: false,
+            drag_mode: DragMode::None,
             move_start_world: Vec2::ZERO,
             move_origin: Vec::new(),
             preview: None,
@@ -109,6 +126,41 @@ pub fn on_mouse_down(
 
     match toolbar.active_tool {
         Tool::Select => {
+            // Check handles first
+            let mut handle_hit = None;
+            for e in board.elements.iter().filter(|e| e.selected).rev() {
+                if let Some(handles) = get_element_handles(e) {
+                    let hit_radius = 15.0f32; // a bit larger than 5.0 for easier grabbing
+                    for (i, &pt) in handles.iter().enumerate() {
+                        let dx = world.x - pt.x;
+                        let dy = world.y - pt.y;
+                        if dx*dx + dy*dy < hit_radius*hit_radius {
+                            handle_hit = Some((e.id, i));
+                            break;
+                        }
+                    }
+                }
+                if handle_hit.is_some() { break; }
+            }
+
+            if let Some((_id, h_idx)) = handle_hit {
+                state.drag_mode = match h_idx {
+                    0 => DragMode::ResizingHandle(HandleDir::TL),
+                    1 => DragMode::ResizingHandle(HandleDir::TR),
+                    2 => DragMode::ResizingHandle(HandleDir::BR),
+                    3 => DragMode::ResizingHandle(HandleDir::BL),
+                    4 => DragMode::Rotating,
+                    _ => unreachable!(),
+                };
+                state.move_origin = board.elements.iter()
+                    .filter(|e| e.selected)
+                    .map(|e| (e.id, e.pos, e.size, e.rotation))
+                    .collect();
+                state.move_start_world = world;
+                state.move_delta = Vec2::ZERO;
+                return;
+            }
+
             if let Some(id) = board.hit_test(world) {
                 let already_selected = board.elements.iter().find(|e| e.id == id).map(|e| e.selected).unwrap_or(false);
                 if !already_selected {
@@ -118,9 +170,9 @@ pub fn on_mouse_down(
                 // Track positions for a potential move
                 state.move_origin = board.elements.iter()
                     .filter(|e| e.selected)
-                    .map(|e| (e.id, e.pos))
+                    .map(|e| (e.id, e.pos, e.size, e.rotation))
                     .collect();
-                state.moving_elements = true;
+                state.drag_mode = DragMode::MoveSelected;
                 state.move_start_world = world;
                 state.move_delta = Vec2::ZERO;
             } else {
@@ -158,16 +210,23 @@ pub fn on_mouse_up(
         return;
     }
 
-    // Commit move
-    if state.moving_elements && state.move_delta != Vec2::ZERO {
-        let moves: Vec<(u64, Vec2, Vec2)> = state.move_origin.iter()
-            .map(|&(id, old)| (id, old, old + state.move_delta))
-            .collect();
-        if !moves.is_empty() {
-            board.apply_op(Op::MoveElements { moves });
+    // Commit move, resize, rotate
+    if state.drag_mode != DragMode::None {
+        let mut updates = Vec::new();
+        for e in &board.elements {
+            if e.selected {
+                if let Some(&(id, old_pos, old_size, old_rot)) = state.move_origin.iter().find(|&&(id, _, _, _)| id == e.id) {
+                    if e.pos != old_pos || e.size != old_size || e.rotation != old_rot {
+                        updates.push((id, (old_pos, old_size, old_rot), (e.pos, e.size, e.rotation)));
+                    }
+                }
+            }
+        }
+        if !updates.is_empty() {
+            board.apply_op(Op::UpdateElements { updates });
         }
     }
-    state.moving_elements = false;
+    state.drag_mode = DragMode::None;
     state.move_delta = Vec2::ZERO;
     state.move_origin.clear();
 
@@ -225,14 +284,74 @@ pub fn on_mouse_move(
 
     let world = camera.screen_to_world(state.mouse_pos, screen_size);
 
-    // Move selected elements (live preview via move_delta)
-    if state.moving_elements {
+    // Live update elements
+    if state.drag_mode != DragMode::None {
         state.move_delta = world - state.move_start_world;
-        // Apply live delta to element positions temporarily
         for e in &mut board.elements {
             if e.selected {
-                if let Some(&(_, orig)) = state.move_origin.iter().find(|&&(id, _)| id == e.id) {
-                    e.pos = orig + state.move_delta;
+                if let Some(&(_, orig_pos, orig_size, orig_rot)) = state.move_origin.iter().find(|&&(id, _, _, _)| id == e.id) {
+                    match state.drag_mode {
+                        DragMode::MoveSelected => {
+                            e.pos = orig_pos + state.move_delta;
+                        }
+                        DragMode::Rotating => {
+                            let center = orig_pos + orig_size * 0.5;
+                            let start_vec = state.move_start_world - center;
+                            let current_vec = world - center;
+                            let angle_diff = current_vec.y.atan2(current_vec.x) - start_vec.y.atan2(start_vec.x);
+                            e.rotation = orig_rot + angle_diff;
+                        }
+                        DragMode::ResizingHandle(dir) => {
+                            // First map world diff back into local unrotated space
+                            let c = orig_rot.cos();
+                            let s = orig_rot.sin();
+                            let dx = state.move_delta.x;
+                            let dy = state.move_delta.y;
+                            let l_dx = dx * c + dy * s;
+                            let l_dy = -dx * s + dy * c;
+
+                            let mut new_pos = orig_pos;
+                            let mut new_size = orig_size;
+
+                            match dir {
+                                HandleDir::TL => {
+                                    new_pos += Vec2::new(l_dx, l_dy);
+                                    new_size -= Vec2::new(l_dx, l_dy);
+                                }
+                                HandleDir::TR => {
+                                    new_pos.y += l_dy;
+                                    new_size.x += l_dx;
+                                    new_size.y -= l_dy;
+                                }
+                                HandleDir::BL => {
+                                    new_pos.x += l_dx;
+                                    new_size.x -= l_dx;
+                                    new_size.y += l_dy;
+                                }
+                                HandleDir::BR => {
+                                    new_size += Vec2::new(l_dx, l_dy);
+                                }
+                            }
+
+                            // Keep pos in world space: the new_pos we computed is as if the top-left moved in local space 
+                            // *relative to the original rotation*.
+                            // It's actually easier to compute the new local center, and rotate it into world space.
+                            
+                            let local_center = new_pos + new_size * 0.5;
+                            let orig_local_center = orig_pos + orig_size * 0.5;
+                            let d_cx = local_center.x - orig_local_center.x;
+                            let d_cy = local_center.y - orig_local_center.y;
+                            
+                            let w_dcx = d_cx * c - d_cy * s;
+                            let w_dcy = d_cx * s + d_cy * c;
+                            
+                            let w_center = orig_pos + orig_size * 0.5 + Vec2::new(w_dcx, w_dcy);
+                            
+                            e.size = new_size;
+                            e.pos = w_center - new_size * 0.5;
+                        }
+                        DragMode::None => {}
+                    }
                 }
             }
         }
@@ -265,6 +384,7 @@ pub fn on_mouse_move(
             shape,
             pos,
             size,
+            rotation: 0.0,
             color: default_color(shape),
             selected: false,
         });
@@ -313,4 +433,77 @@ fn default_color(shape: ShapeType) -> [f32; 4] {
         ShapeType::Ellipse => [0.34, 0.80, 0.65, 0.85],
         ShapeType::Line    => [0.95, 0.75, 0.30, 1.00],
     }
+}
+
+pub fn get_element_handles(e: &Element) -> Option<[Vec2; 5]> {
+    if e.shape == ShapeType::Line {
+        return None;
+    }
+    let center = e.pos + e.size * 0.5;
+    let c = e.rotation.cos();
+    let s = e.rotation.sin();
+    let rot = |rx: f32, ry: f32| -> Vec2 {
+        center + Vec2::new(rx * c - ry * s, rx * s + ry * c)
+    };
+
+    let hw = e.size.x * 0.5;
+    let hh = e.size.y * 0.5;
+    let th = -hh - 30.0;
+
+    Some([
+        rot(-hw, -hh), // TL
+        rot(hw, -hh),  // TR
+        rot(hw, hh),   // BR
+        rot(-hw, hh),  // BL
+        rot(0.0, th),  // Top-mid rotation
+    ])
+}
+
+pub fn handles_to_instances(e: &Element) -> Vec<InstanceData> {
+    let mut out = Vec::new();
+    let handles = match get_element_handles(e) {
+        Some(h) => h,
+        None => return out,
+    };
+
+    let center = e.pos + e.size * 0.5;
+    let c = e.rotation.cos();
+    let s = e.rotation.sin();
+    let rot = |rx: f32, ry: f32| -> Vec2 {
+        center + Vec2::new(rx * c - ry * s, rx * s + ry * c)
+    };
+    
+    let stick_center = rot(0.0, -e.size.y * 0.5 - 15.0);
+
+    out.push(InstanceData {
+        pos: [stick_center.x - 0.5, stick_center.y - 15.0],
+        size: [1.0, 30.0],
+        rotation: e.rotation,
+        color: [1.0, 1.0, 1.0, 1.0],
+        shape_type: 0.0, // Rect
+        alpha: 1.0,
+    });
+
+    let s = 10.0;
+    for i in 0..4 {
+        out.push(InstanceData {
+            pos: [handles[i].x - s*0.5, handles[i].y - s*0.5],
+            size: [s, s],
+            rotation: e.rotation,
+            color: [1.0, 1.0, 1.0, 1.0],
+            shape_type: 0.0,
+            alpha: 1.0,
+        });
+    }
+
+    out.push(InstanceData {
+        pos: [handles[4].x - s*0.5, handles[4].y - s*0.5],
+        size: [s, s],
+        rotation: e.rotation,
+        color: [1.0, 1.0, 1.0, 1.0],
+        shape_type: 1.0,
+        alpha: 1.0,
+    });
+
+    out
 }

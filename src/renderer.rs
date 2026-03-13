@@ -13,6 +13,8 @@ pub struct InstanceData {
     pub pos: [f32; 2],
     /// Width/height (or dx/dy for lines).
     pub size: [f32; 2],
+    /// Rotation in radians
+    pub rotation: f32,
     /// RGBA colour.
     pub color: [f32; 4],
     /// 0 = rect, 1 = ellipse, 2 = line.
@@ -29,6 +31,7 @@ attribute vec2 a_pos;      // 0..1 range
 // per-instance
 attribute vec2 i_pos;
 attribute vec2 i_size;
+attribute float i_rotation;
 attribute vec4 i_color;
 attribute float i_shape;
 attribute float i_alpha;
@@ -67,6 +70,12 @@ void main() {
         world_pos = i_pos + a_pos * i_size;
         v_uv = a_pos;
     }
+
+    vec2 center = i_pos + i_size * 0.5;
+    float c = cos(i_rotation);
+    float s = sin(i_rotation);
+    mat2 rot = mat2(c, s, -s, c);
+    world_pos = center + rot * (world_pos - center);
 
     gl_Position   = u_mvp * vec4(world_pos, 0.0, 1.0);
     v_color = i_color;
@@ -235,6 +244,7 @@ impl Renderer {
                 // buffer 1: per-instance
                 VertexAttribute::with_buffer("i_pos", VertexFormat::Float2, 1),
                 VertexAttribute::with_buffer("i_size", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_rotation", VertexFormat::Float1, 1),
                 VertexAttribute::with_buffer("i_color", VertexFormat::Float4, 1),
                 VertexAttribute::with_buffer("i_shape", VertexFormat::Float1, 1),
                 VertexAttribute::with_buffer("i_alpha", VertexFormat::Float1, 1),

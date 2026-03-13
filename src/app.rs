@@ -114,6 +114,17 @@ impl EventHandler for App {
         // Board elements
         self.renderer.draw_instances(&mut *self.ctx, &board_inst, board_mvp);
 
+        // Selection handles
+        let mut handle_inst = Vec::new();
+        for e in &self.board.elements {
+            if e.selected {
+                handle_inst.extend(crate::input::handles_to_instances(e));
+            }
+        }
+        if !handle_inst.is_empty() {
+            self.renderer.draw_instances(&mut *self.ctx, &handle_inst, board_mvp);
+        }
+
         let tb_inst = self.toolbar.build_instances(
             self.screen_size.x,
             self.board.can_undo(),
@@ -171,7 +182,7 @@ impl EventHandler for App {
         if keycode == KeyCode::Space {
             self.input.space_held = true;
         }
-        if keycode == KeyCode::B && keymods.alt {
+        if keycode == KeyCode::B && keymods.alt && keymods.ctrl {
             let (vis_min, vis_max) = self.camera.visible_rect(self.screen_size);
             let vis_size = vis_max - vis_min;
             let mut seed: u64 = (self.board.elements.len() as u64)
@@ -197,9 +208,9 @@ impl EventHandler for App {
                 let size  = Vec2::new(100.0 + rw * 300.0, 100.0 + rh * 300.0);
                 let color = [rc0 * 0.7 + 0.3, rc1 * 0.7 + 0.3, rc2 * 0.7 + 0.3, 0.85];
                 let id    = self.board.next_id();
-                self.board.elements.push(Element { id, shape, pos, size, color, selected: false });
+                self.board.elements.push(Element { id, shape, pos, size, rotation: 0.0, color, selected: false });
             }
-            println!("Alt+B: spawned 500 shapes | total elements: {}", self.board.elements.len());
+            println!("Alt+Ctrl+B: spawned 500 shapes | total elements: {}", self.board.elements.len());
             self.dirty = true;
             return;
         }

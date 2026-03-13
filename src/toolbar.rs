@@ -92,6 +92,7 @@ impl Toolbar {
         out.push(InstanceData {
             pos: [0.0, 0.0],
             size: [screen_w, TOOLBAR_HEIGHT],
+            rotation: 0.0,
             color: [0.13, 0.14, 0.18, 1.0],
             shape_type: 0.0,
             alpha: 1.0,
@@ -101,6 +102,7 @@ impl Toolbar {
         out.push(InstanceData {
             pos: [0.0, TOOLBAR_HEIGHT - 1.0],
             size: [screen_w, 1.0],
+            rotation: 0.0,
             color: [0.25, 0.26, 0.30, 1.0],
             shape_type: 0.0,
             alpha: 1.0,
@@ -128,6 +130,7 @@ impl Toolbar {
                 out.push(InstanceData {
                     pos: [btn.x + 2.0, 4.0],
                     size: [BTN_W - 4.0, BTN_H - 8.0],
+                    rotation: 0.0,
                     color: [0.25, 0.48, 0.82, 0.35],
                     shape_type: 0.0,
                     alpha: 1.0,
@@ -185,6 +188,7 @@ pub fn element_to_instances(
         out.push(InstanceData {
             pos:  (e.pos - Vec2::splat(expand)).to_array(),
             size: (e.size + Vec2::splat(expand * 2.0)).to_array(),
+            rotation: e.rotation,
             color: sel_color,
             shape_type: st,
             alpha,
@@ -194,6 +198,7 @@ pub fn element_to_instances(
     out.push(InstanceData {
         pos:        e.pos.to_array(),
         size:       e.size.to_array(),
+        rotation:   e.rotation,
         color:      e.color,
         shape_type: st,
         alpha,
