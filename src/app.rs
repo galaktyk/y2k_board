@@ -455,6 +455,11 @@ impl EventHandler for App {
         self.renderer
             .draw_color_text_instances(&mut *self.ctx, &text_instances.color_instances, board_mvp);
 
+        if let Some(world_caret) = text_instances.caret_pos {
+            let screen_caret = self.camera.world_to_screen(world_caret, self.screen_size);
+            set_ime_candidate_pos(screen_caret.x as i32, screen_caret.y as i32);
+        }
+
 
         
         if let Some(ref preview) = self.input.preview {
@@ -948,5 +953,32 @@ fn next_char_boundary(text: &str, index: usize) -> usize {
         .next()
         .map(|(offset, _)| clamped + offset)
         .unwrap_or(text.len())
+}
+
+/// Move the OS IME / emoji candidate window to the given screen-space pixel coordinate.
+/// On non-Windows platforms this is a no-op.
+fn set_ime_candidate_pos(x: i32, y: i32) {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use winapi::um::winuser::GetForegroundWindow;
+        use winapi::um::imm::{ImmGetContext, ImmReleaseContext, ImmSetCompositionWindow,
+                               COMPOSITIONFORM, CFS_POINT};
+        use winapi::shared::windef::POINT;
+
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_null() { return; }
+        let himc = ImmGetContext(hwnd);
+        if himc.is_null() { return; }
+        let mut cf = COMPOSITIONFORM {
+            dwStyle: CFS_POINT,
+            ptCurrentPos: POINT { x, y },
+            rcArea: std::mem::zeroed(),
+        };
+        ImmSetCompositionWindow(himc, &mut cf);
+        ImmReleaseContext(hwnd, himc);
+    }
+    // suppress unused-variable warnings on non-Windows
+    #[cfg(not(target_os = "windows"))]
+    let _ = (x, y);
 }
 

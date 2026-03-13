@@ -29,6 +29,7 @@ pub struct ActiveTextEdit<'a> {
 pub struct PreparedTextDraw {
     pub mono_instances: Vec<TextInstanceData>,
     pub color_instances: Vec<TextInstanceData>,
+    pub caret_pos: Option<Vec2>,
 }
 
 pub struct TextSystem {
@@ -157,13 +158,14 @@ impl TextSystem {
 
         if let Some(edit) = active_edit {
             if let Some(element) = board.element(edit.element_id) {
-                let overlay = self.build_edit_overlay_instances(
+                let (overlay, caret_pos) = self.build_edit_overlay_instances(
                     element,
                     edit.content,
                     edit.cursor_byte,
                     edit.selection_anchor_byte,
                 );
                 prepared.mono_instances.extend(overlay);
+                prepared.caret_pos = caret_pos;
             }
         }
 
@@ -205,15 +207,16 @@ impl TextSystem {
         content: &str,
         cursor_byte: usize,
         selection_anchor_byte: Option<usize>,
-    ) -> Vec<TextInstanceData> {
+    ) -> (Vec<TextInstanceData>, Option<Vec2>) {
         let Some(layout) = self.layout_text(element, content) else {
-            return Vec::new();
+            return (Vec::new(), None);
         };
 
         let uv_min = [0.0, 0.0];
         let uv_max = [1.0 / TEXT_ATLAS_SIZE as f32, 1.0 / TEXT_ATLAS_SIZE as f32];
         let origin = (element.pos + element.size * 0.5).to_array();
         let mut instances = Vec::new();
+        let mut caret_pos = None;
 
         if let Some((start_byte, end_byte)) = selection_range(cursor_byte, selection_anchor_byte) {
             let start = global_byte_to_cursor(content, start_byte);
@@ -238,8 +241,9 @@ impl TextSystem {
 
         let cursor = global_byte_to_cursor(content, cursor_byte);
         if let Some((x, line_top, line_height)) = caret_geometry(&layout.buffer, cursor) {
+            let world_pos = layout.world_min + Vec2::new((x - 1.0).max(0.0), line_top);
             instances.push(TextInstanceData {
-                pos: (layout.world_min + Vec2::new((x - 1.0).max(0.0), line_top)).to_array(),
+                pos: world_pos.to_array(),
                 size: [2.0, line_height.max(1.0)],
                 origin,
                 rotation: element.rotation,
@@ -247,9 +251,10 @@ impl TextSystem {
                 uv_max,
                 color: [0.06, 0.09, 0.14, 0.95],
             });
+            caret_pos = Some(world_pos);
         }
 
-        instances
+        (instances, caret_pos)
     }
 
     fn append_layout_instances(

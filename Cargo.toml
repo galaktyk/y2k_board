@@ -4,11 +4,14 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-miniquad = "0.4"
+miniquad = "0.4.8"
 glam = { version = "0.29", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 bincode = "1"
-cosmic-text = "0.18"
+cosmic-text = "0.18.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winapi = { version = "0.3", features = ["winuser", "imm"] }
 
 [profile.release]
 opt-level = "z"

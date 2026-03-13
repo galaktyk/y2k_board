@@ -220,6 +220,7 @@ dependencies = [
  "glam",
  "miniquad",
  "serde",
+ "winapi",
 ]
 
 [[package]]
