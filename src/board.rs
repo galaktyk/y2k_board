@@ -8,6 +8,24 @@ pub enum ShapeType {
     Rect,
     Ellipse,
     Line,
+    Text,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TextData {
+    pub content: String,
+    pub font_size: f32,
+    pub color: [f32; 4],
+}
+
+impl Default for TextData {
+    fn default() -> Self {
+        Self {
+            content: String::new(),
+            font_size: 24.0,
+            color: [0.96, 0.97, 0.99, 1.0],
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -21,6 +39,7 @@ pub struct Element {
     pub rotation: f32,
     pub color: [f32; 4],
     pub selected: bool,
+    pub text: Option<TextData>,
 }
 
 impl Element {
@@ -45,6 +64,21 @@ impl Element {
             }
         }
     }
+
+    pub fn can_host_text(&self) -> bool {
+        matches!(self.shape, ShapeType::Rect | ShapeType::Ellipse | ShapeType::Text)
+    }
+
+    pub fn text_bounds(&self) -> Option<(Vec2, Vec2)> {
+        if !self.can_host_text() {
+            return None;
+        }
+
+        let padding = Vec2::splat(12.0);
+        let min = self.pos + padding;
+        let max = self.pos + (self.size - padding * 2.0).max(Vec2::splat(1.0));
+        Some((min, max))
+    }
 }
 
 // ── Operations ───────────────────────────────────────────────────────────────
@@ -67,6 +101,10 @@ pub enum ElementPropertyPatch {
     Transform {
         before: ElementTransform,
         after: ElementTransform,
+    },
+    Text {
+        before: Option<TextData>,
+        after: Option<TextData>,
     },
 }
 
@@ -105,6 +143,10 @@ fn inverse(op: &BoardOperation) -> BoardOperation {
                                 after: *before,
                             }
                         }
+                        ElementPropertyPatch::Text { before, after } => ElementPropertyPatch::Text {
+                            before: after.clone(),
+                            after: before.clone(),
+                        },
                     },
                 })
                 .collect(),
@@ -146,6 +188,14 @@ fn log_operation(op: &BoardOperation) {
                             after.size.y,
                             before.rotation,
                             after.rotation,
+                        );
+                    }
+                    ElementPropertyPatch::Text { before, after } => {
+                        println!(
+                            "[ops]   id={} text len={} -> {}",
+                            change.id,
+                            before.as_ref().map(|text| text.content.chars().count()).unwrap_or(0),
+                            after.as_ref().map(|text| text.content.chars().count()).unwrap_or(0),
                         );
                     }
                 }
@@ -231,11 +281,21 @@ impl Board {
                 for change in changes {
                     let after = match &change.patch {
                         ElementPropertyPatch::Transform { after, .. } => after,
+                        ElementPropertyPatch::Text { .. } => continue,
                     };
                     if let Some(element) = self.elements.iter_mut().find(|e| e.id == change.id) {
                         element.pos = after.pos;
                         element.size = after.size;
                         element.rotation = after.rotation;
+                    }
+                }
+                for change in changes {
+                    let after = match &change.patch {
+                        ElementPropertyPatch::Text { after, .. } => after,
+                        ElementPropertyPatch::Transform { .. } => continue,
+                    };
+                    if let Some(element) = self.elements.iter_mut().find(|e| e.id == change.id) {
+                        element.text = after.clone();
                     }
                 }
             }
@@ -338,6 +398,56 @@ impl Board {
         }
         None
     }
+
+    pub fn element(&self, id: u64) -> Option<&Element> {
+        self.elements.iter().find(|element| element.id == id)
+    }
+
+    pub fn ensure_text(&mut self, id: u64) -> bool {
+        let Some(element) = self.element(id) else {
+            return false;
+        };
+        if !element.can_host_text() || element.text.is_some() {
+            return false;
+        }
+
+        self.apply_operation(BoardOperation::SetProperty {
+            changes: vec![ElementPropertyChange {
+                id,
+                patch: ElementPropertyPatch::Text {
+                    before: None,
+                    after: Some(TextData::default()),
+                },
+            }],
+        });
+        true
+    }
+
+    pub fn update_text<F>(&mut self, id: u64, mut update: F) -> bool
+    where
+        F: FnMut(&mut TextData),
+    {
+        let Some(element) = self.element(id) else {
+            return false;
+        };
+        let Some(mut after) = element.text.clone() else {
+            return false;
+        };
+        let before = Some(after.clone());
+        update(&mut after);
+        let after = Some(after);
+        if before == after {
+            return false;
+        }
+
+        self.apply_operation(BoardOperation::SetProperty {
+            changes: vec![ElementPropertyChange {
+                id,
+                patch: ElementPropertyPatch::Text { before, after },
+            }],
+        });
+        true
+    }
 }
 
 fn element_hit(e: &Element, mut p: Vec2) -> bool {
@@ -350,7 +460,7 @@ fn element_hit(e: &Element, mut p: Vec2) -> bool {
     p.y = center.y - dx * sin_r + dy * cos_r;
 
     match e.shape {
-        ShapeType::Rect => {
+        ShapeType::Rect | ShapeType::Text => {
             let min_x = e.pos.x.min(e.pos.x + e.size.x);
             let max_x = e.pos.x.max(e.pos.x + e.size.x);
             let min_y = e.pos.y.min(e.pos.y + e.size.y);

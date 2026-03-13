@@ -2,11 +2,15 @@ use crate::board::Board;
 use crate::input::state::InputState;
 
 pub fn on_key_down(
-    _state: &mut InputState,
+    state: &mut InputState,
     board: &mut Board,
     keycode: miniquad::KeyCode,
     modifiers: miniquad::KeyMods,
 ) {
+    if state.active_text_id.is_some() {
+        return;
+    }
+
     match keycode {
         miniquad::KeyCode::Z if modifiers.ctrl => {
             if modifiers.shift {

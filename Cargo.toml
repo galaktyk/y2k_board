@@ -8,6 +8,7 @@ miniquad = "0.4"
 glam = { version = "0.29", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 bincode = "1"
+cosmic-text = "0.18"
 
 [profile.release]
 opt-level = 3

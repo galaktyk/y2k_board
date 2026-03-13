@@ -7,6 +7,7 @@ mod renderer;
 mod snapshot;
 mod spatial;
 mod stats;
+mod text;
 mod toolbar;
 
 use miniquad::conf;

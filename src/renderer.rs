@@ -23,6 +23,18 @@ pub struct InstanceData {
     pub alpha: f32,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct TextInstanceData {
+    pub pos: [f32; 2],
+    pub size: [f32; 2],
+    pub origin: [f32; 2],
+    pub rotation: f32,
+    pub uv_min: [f32; 2],
+    pub uv_max: [f32; 2],
+    pub color: [f32; 4],
+}
+
 // ── Shaders ───────────────────────────────────────────────────────────────────
 
 const VERTEX_SRC: &str = r#"#version 100
@@ -113,6 +125,10 @@ void main() {
         gl_FragColor = vec4(v_color.rgb, alpha * a);
 
     } else {
+        if (v_shape > 2.5) {
+            gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+            return;
+        }
         // Line
         vec2 p = v_line_p;
         float dx = p.x - clamp(p.x, 0.0, v_line_len);
@@ -121,6 +137,48 @@ void main() {
         float a = 1.0 - smoothstep(thickness - 1.0, thickness + 1.0, d);
         gl_FragColor = vec4(v_color.rgb, alpha * a);
     }
+}
+"#;
+
+const TEXT_VERTEX_SRC: &str = r#"#version 100
+attribute vec2 a_pos;
+attribute vec2 i_pos;
+attribute vec2 i_size;
+attribute vec2 i_origin;
+attribute float i_rotation;
+attribute vec2 i_uv_min;
+attribute vec2 i_uv_max;
+attribute vec4 i_color;
+
+uniform mat4 u_mvp;
+
+varying vec2 v_uv;
+varying vec4 v_color;
+
+void main() {
+    vec2 world_pos = i_pos + a_pos * i_size;
+    float c = cos(i_rotation);
+    float s = sin(i_rotation);
+    mat2 rot = mat2(c, s, -s, c);
+    world_pos = i_origin + rot * (world_pos - i_origin);
+
+    v_uv = mix(i_uv_min, i_uv_max, a_pos);
+    v_color = i_color;
+    gl_Position = u_mvp * vec4(world_pos, 0.0, 1.0);
+}
+"#;
+
+const TEXT_FRAGMENT_SRC: &str = r#"#version 100
+precision highp float;
+
+varying vec2 v_uv;
+varying vec4 v_color;
+
+uniform sampler2D u_text_atlas;
+
+void main() {
+    float mask = texture2D(u_text_atlas, v_uv).a;
+    gl_FragColor = vec4(v_color.rgb, v_color.a * mask);
 }
 "#;
 
@@ -165,6 +223,12 @@ pub struct Renderer {
     shape_bindings: Bindings,
     instance_buffer: BufferId,
 
+    // text pipeline
+    text_pipeline: Pipeline,
+    text_bindings: Bindings,
+    text_instance_buffer: BufferId,
+    text_atlas: TextureId,
+
     // grid pipeline
     grid_pipeline: Pipeline,
     grid_bindings: Bindings,
@@ -208,10 +272,29 @@ impl Renderer {
             BufferUsage::Stream,
             BufferSource::empty::<InstanceData>(max_instances),
         );
+        let text_instance_buffer = ctx.new_buffer(
+            BufferType::VertexBuffer,
+            BufferUsage::Stream,
+            BufferSource::empty::<TextInstanceData>(max_instances),
+        );
         eprintln!(
             "[Renderer] Instance buffer created: {} MB (max {} instances)",
             (max_instances * std::mem::size_of::<InstanceData>()) / (1024 * 1024),
             max_instances
+        );
+
+        let text_atlas = ctx.new_texture(
+            TextureAccess::Static,
+            TextureSource::Bytes(&vec![0u8; 1024 * 1024]),
+            TextureParams {
+                width: 1024,
+                height: 1024,
+                format: TextureFormat::Alpha,
+                wrap: TextureWrap::Clamp,
+                min_filter: FilterMode::Linear,
+                mag_filter: FilterMode::Linear,
+                ..Default::default()
+            },
         );
 
         // ── Shape pipeline ────────────────────────────────────────────────
@@ -269,6 +352,61 @@ impl Renderer {
             vertex_buffers: vec![vertex_buf, instance_buffer],
             index_buffer: index_buf,
             images: vec![],
+        };
+
+        let text_shader = ctx
+            .new_shader(
+                ShaderSource::Glsl {
+                    vertex: TEXT_VERTEX_SRC,
+                    fragment: TEXT_FRAGMENT_SRC,
+                },
+                ShaderMeta {
+                    uniforms: UniformBlockLayout {
+                        uniforms: vec![UniformDesc::new("u_mvp", UniformType::Mat4)],
+                    },
+                    images: vec!["u_text_atlas".to_string()],
+                },
+            )
+            .expect("text shader compile failed");
+
+        let text_pipeline = ctx.new_pipeline(
+            &[
+                BufferLayout::default(),
+                BufferLayout {
+                    step_func: VertexStep::PerInstance,
+                    ..Default::default()
+                },
+            ],
+            &[
+                VertexAttribute::with_buffer("a_pos", VertexFormat::Float2, 0),
+                VertexAttribute::with_buffer("i_pos", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_size", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_origin", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_rotation", VertexFormat::Float1, 1),
+                VertexAttribute::with_buffer("i_uv_min", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_uv_max", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_color", VertexFormat::Float4, 1),
+            ],
+            text_shader,
+            PipelineParams {
+                color_blend: Some(BlendState::new(
+                    Equation::Add,
+                    BlendFactor::Value(BlendValue::SourceAlpha),
+                    BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
+                )),
+                alpha_blend: Some(BlendState::new(
+                    Equation::Add,
+                    BlendFactor::One,
+                    BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
+                )),
+                ..Default::default()
+            },
+        );
+
+        let text_bindings = Bindings {
+            vertex_buffers: vec![vertex_buf, text_instance_buffer],
+            index_buffer: index_buf,
+            images: vec![text_atlas],
         };
 
         // ── Grid pipeline ─────────────────────────────────────────────────
@@ -344,6 +482,10 @@ impl Renderer {
             shape_pipeline,
             shape_bindings,
             instance_buffer,
+            text_pipeline,
+            text_bindings,
+            text_instance_buffer,
+            text_atlas,
             grid_pipeline,
             grid_bindings,
         }
@@ -414,6 +556,29 @@ impl Renderer {
             u_mvp: mvp.to_cols_array_2d(),
         }));
         ctx.draw(0, 6, instances.len() as i32);
+    }
+
+    pub fn draw_text_instances(
+        &mut self,
+        ctx: &mut dyn RenderingBackend,
+        instances: &[TextInstanceData],
+        mvp: glam::Mat4,
+    ) {
+        if instances.is_empty() {
+            return;
+        }
+
+        ctx.buffer_update(self.text_instance_buffer, BufferSource::slice(instances));
+        ctx.apply_pipeline(&self.text_pipeline);
+        ctx.apply_bindings(&self.text_bindings);
+        ctx.apply_uniforms(UniformsSource::table(&ShapeUniforms {
+            u_mvp: mvp.to_cols_array_2d(),
+        }));
+        ctx.draw(0, 6, instances.len() as i32);
+    }
+
+    pub fn text_atlas(&self) -> TextureId {
+        self.text_atlas
     }
 }
 

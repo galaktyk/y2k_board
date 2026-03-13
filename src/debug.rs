@@ -40,7 +40,8 @@ pub fn spawn_debug_shapes(board: &mut Board, camera: &Camera, screen_size: Vec2)
             size, 
             rotation: 0.0, 
             color, 
-            selected: false 
+            selected: false,
+            text: None,
         });
     }
     println!("Alt+Ctrl+B: spawned 500 shapes | total elements: {}", board.elements.len());

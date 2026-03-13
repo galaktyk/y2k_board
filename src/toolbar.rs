@@ -13,6 +13,7 @@ pub enum Tool {
     Rect,
     Ellipse,
     Line,
+    Text,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -30,6 +31,7 @@ enum BtnKind {
     Rect,
     Ellipse,
     Line,
+    Text,
     Save,
     Load,
     Undo,
@@ -43,7 +45,7 @@ struct Button {
 
 pub struct Toolbar {
     pub active_tool: Tool,
-    buttons: [Button; 8],
+    buttons: [Button; 9],
 }
 
 impl Toolbar {
@@ -53,6 +55,7 @@ impl Toolbar {
             BtnKind::Rect,
             BtnKind::Ellipse,
             BtnKind::Line,
+            BtnKind::Text,
             BtnKind::Save,
             BtnKind::Load,
             BtnKind::Undo,
@@ -76,6 +79,7 @@ impl Toolbar {
                     BtnKind::Rect    => ToolbarAction::SetTool(Tool::Rect),
                     BtnKind::Ellipse => ToolbarAction::SetTool(Tool::Ellipse),
                     BtnKind::Line    => ToolbarAction::SetTool(Tool::Line),
+                    BtnKind::Text    => ToolbarAction::SetTool(Tool::Text),
                     BtnKind::Save    => ToolbarAction::Save,
                     BtnKind::Load    => ToolbarAction::Load,
                     BtnKind::Undo    => ToolbarAction::Undo,
@@ -123,6 +127,7 @@ impl Toolbar {
                 | (BtnKind::Rect, Tool::Rect)
                 | (BtnKind::Ellipse, Tool::Ellipse)
                 | (BtnKind::Line, Tool::Line)
+                | (BtnKind::Text, Tool::Text)
             );
 
             let dimmed = matches!(
@@ -163,6 +168,7 @@ impl Toolbar {
                 BtnKind::Rect    => "RECT",
                 BtnKind::Ellipse => "ELPS",
                 BtnKind::Line    => "LINE",
+                BtnKind::Text    => "TEXT",
                 BtnKind::Undo    => "UNDO",
                 BtnKind::Redo    => "REDO",
                 BtnKind::Save    => "SAVE",
@@ -188,6 +194,7 @@ pub fn element_instance(
         crate::board::ShapeType::Rect => 0.0,
         crate::board::ShapeType::Ellipse => 1.0,
         crate::board::ShapeType::Line => 2.0,
+        crate::board::ShapeType::Text => 3.0,
     };
 
     InstanceData {
@@ -209,7 +216,7 @@ pub fn selection_instance(
     }
 
     let st = match e.shape {
-        crate::board::ShapeType::Rect => 0.0,
+        crate::board::ShapeType::Rect | crate::board::ShapeType::Text => 0.0,
         crate::board::ShapeType::Ellipse => 1.0,
         crate::board::ShapeType::Line => 2.0,
     };

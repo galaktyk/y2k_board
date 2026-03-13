@@ -1,4 +1,5 @@
 use glam::Vec2;
+use std::time::{Duration, Instant};
 
 use crate::board::{Board, BoardOperation, Element, ShapeType};
 use crate::camera::Camera;
@@ -17,6 +18,8 @@ pub fn on_mouse_down(
     y: f32,
     btn: miniquad::MouseButton,
 ) -> Option<ToolbarAction> {
+    const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(400);
+
     state.mouse_pos = Vec2::new(x, y);
 
     match btn {
@@ -53,6 +56,7 @@ pub fn on_mouse_down(
 
     match toolbar.active_tool {
         Tool::Select => {
+            let now = Instant::now();
             let mut handle_hit = None;
             for e in board.elements.iter().filter(|e| e.selected).rev() {
                 if let Some(handles) = get_element_handles(e) {
@@ -101,6 +105,19 @@ pub fn on_mouse_down(
             }
 
             if let Some(id) = board.hit_test(world) {
+                if state.active_text_id.is_some() && state.active_text_id != Some(id) {
+                    state.active_text_id = None;
+                }
+
+                let is_double_click = state.last_click_id == Some(id)
+                    && state
+                        .last_click_at
+                        .map(|last| now.duration_since(last) <= DOUBLE_CLICK_WINDOW)
+                        .unwrap_or(false);
+
+                state.last_click_id = Some(id);
+                state.last_click_at = Some(now);
+
                 let already_selected = board
                     .elements
                     .iter()
@@ -111,6 +128,25 @@ pub fn on_mouse_down(
                     board.deselect_all();
                     board.select_only(id);
                 }
+
+                if is_double_click {
+                    if board.ensure_text(id) || board.element(id).and_then(|element| element.text.as_ref()).is_some() {
+                        state.active_text_id = Some(id);
+                        state.text_cursor = board
+                            .element(id)
+                            .and_then(|element| element.text.as_ref())
+                            .map(|text| text.content.chars().count())
+                            .unwrap_or(0);
+                    }
+                    state.drag_mode = DragMode::None;
+                    state.move_origin.clear();
+                    return None;
+                }
+
+                if state.active_text_id == Some(id) {
+                    return None;
+                }
+
                 state.move_origin = board
                     .elements
                     .iter()
@@ -121,10 +157,14 @@ pub fn on_mouse_down(
                 state.move_start_world = world;
                 state.move_delta = Vec2::ZERO;
             } else {
+                state.last_click_id = None;
+                state.last_click_at = None;
+                state.active_text_id = None;
                 board.deselect_all();
             }
         }
-        Tool::Rect | Tool::Ellipse | Tool::Line => {
+        Tool::Rect | Tool::Ellipse | Tool::Line | Tool::Text => {
+            state.active_text_id = None;
             state.dragging_tool = true;
             state.drag_start_world = world;
             state.preview = None;
@@ -189,7 +229,14 @@ pub fn on_mouse_up(
                 let _ = camera;
                 let _ = screen_size;
                 element.id = board.next_id();
+                if element.shape == ShapeType::Text {
+                    element.text = Some(crate::board::TextData::default());
+                }
                 board.apply_operation(BoardOperation::AddElement(element));
+                if matches!(toolbar.active_tool, Tool::Text) {
+                    state.active_text_id = Some(board.next_available_id().saturating_sub(1));
+                    state.text_cursor = 0;
+                }
                 toolbar.active_tool = Tool::Select;
             }
         }
@@ -315,6 +362,7 @@ pub fn on_mouse_move(
             Tool::Rect => ShapeType::Rect,
             Tool::Ellipse => ShapeType::Ellipse,
             Tool::Line => ShapeType::Line,
+            Tool::Text => ShapeType::Text,
             Tool::Select => return,
         };
 
@@ -334,6 +382,11 @@ pub fn on_mouse_move(
             rotation: 0.0,
             color: default_color(shape),
             selected: false,
+            text: if shape == ShapeType::Text {
+                Some(crate::board::TextData::default())
+            } else {
+                None
+            },
         });
     }
 }

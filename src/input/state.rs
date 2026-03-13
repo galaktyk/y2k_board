@@ -1,4 +1,5 @@
 use glam::Vec2;
+use std::time::Instant;
 
 use crate::board::Element;
 
@@ -20,6 +21,10 @@ pub struct InputState {
     pub move_origin: Vec<(u64, Vec2, Vec2, f32)>,
     pub preview: Option<Element>,
     pub move_delta: Vec2,
+    pub active_text_id: Option<u64>,
+    pub text_cursor: usize,
+    pub last_click_id: Option<u64>,
+    pub last_click_at: Option<Instant>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -59,6 +64,10 @@ impl InputState {
             move_origin: Vec::new(),
             preview: None,
             move_delta: Vec2::ZERO,
+            active_text_id: None,
+            text_cursor: 0,
+            last_click_id: None,
+            last_click_at: None,
         }
     }
 

@@ -9,6 +9,7 @@ use crate::input::{self, DragMode, InputState};
 use crate::renderer::{InstanceData, Renderer};
 use crate::snapshot;
 use crate::spatial::SpatialGrid;
+use crate::text::TextSystem;
 use crate::toolbar::{self, Toolbar, ToolbarAction};
 use crate::stats;
 
@@ -106,6 +107,10 @@ impl BoardRenderCache {
         &self.visible_instances
     }
 
+    fn visible_board_indices(&self) -> &[usize] {
+        &self.visible_board_indices
+    }
+
     fn push_visible(&mut self, board_index: usize, id: u64) {
         let visible_index = self.visible_instances.len();
         self.visible_instances.push(self.all_instances[board_index]);
@@ -166,6 +171,7 @@ pub struct App {
     spatial_dirty: bool,
     visibility_dirty: bool,
     dirty_element_ids: HashSet<u64>,
+    text_system: TextSystem,
     // ── stats ─────────────────────────────────────────────────────────────
     last_frame:   Instant,
     frame_ms:     f32,
@@ -193,6 +199,7 @@ impl App {
             spatial_dirty: true,
             visibility_dirty: true,
             dirty_element_ids: HashSet::new(),
+            text_system: TextSystem::new(),
             last_frame:  Instant::now(),
             frame_ms:    0.0,
             fps:         0.0,
@@ -357,6 +364,16 @@ impl EventHandler for App {
             board_mvp,
         );
 
+        let text_instances = self.text_system.build_visible_text_instances(
+            &mut *self.ctx,
+            self.renderer.text_atlas(),
+            &self.board,
+            self.board_render_cache.visible_board_indices(),
+            &self.camera,
+        );
+        self.renderer
+            .draw_text_instances(&mut *self.ctx, &text_instances, board_mvp);
+
         let mut selection_inst = Vec::new();
         for element in &self.board.elements {
             if let Some(instance) = toolbar::selection_instance(element, 1.0) {
@@ -468,6 +485,69 @@ impl EventHandler for App {
     }
 
     fn key_down_event(&mut self, keycode: KeyCode, keymods: KeyMods, _repeat: bool) {
+        if let Some(id) = self.input.active_text_id {
+            match keycode {
+                KeyCode::Escape => {
+                    self.input.active_text_id = None;
+                    self.request_redraw();
+                }
+                KeyCode::Backspace => {
+                    if self.edit_active_text(id, EditAction::Backspace) {
+                        self.request_redraw();
+                    }
+                }
+                KeyCode::Delete => {
+                    if self.edit_active_text(id, EditAction::Delete) {
+                        self.request_redraw();
+                    }
+                }
+                KeyCode::Left => {
+                    self.move_text_cursor(id, CursorMove::Left);
+                    self.request_redraw();
+                }
+                KeyCode::Right => {
+                    self.move_text_cursor(id, CursorMove::Right);
+                    self.request_redraw();
+                }
+                KeyCode::Home => {
+                    self.move_text_cursor(id, CursorMove::Home);
+                    self.request_redraw();
+                }
+                KeyCode::End => {
+                    self.move_text_cursor(id, CursorMove::End);
+                    self.request_redraw();
+                }
+                KeyCode::Enter => {
+                    if self.insert_text(id, "\n") {
+                        self.request_redraw();
+                    }
+                }
+                KeyCode::C if keymods.ctrl => {
+                    if let Some(text) = self.board.element(id).and_then(|element| element.text.as_ref()) {
+                        window::clipboard_set(&text.content);
+                    }
+                }
+                KeyCode::X if keymods.ctrl => {
+                    if let Some(text) = self.board.element(id).and_then(|element| element.text.as_ref()) {
+                        window::clipboard_set(&text.content);
+                    }
+                    if self.board.update_text(id, |text| text.content.clear()) {
+                        self.input.text_cursor = 0;
+                        self.request_redraw();
+                    }
+                }
+                KeyCode::V if keymods.ctrl => {
+                    if let Some(clipboard) = window::clipboard_get() {
+                        if self.insert_text(id, &clipboard) {
+                            self.request_redraw();
+                        }
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+
         if keycode == KeyCode::Space {
             self.input.space_held = true;
         }
@@ -507,10 +587,105 @@ impl EventHandler for App {
         }
     }
 
+    fn char_event(&mut self, character: char, _keymods: KeyMods, repeat: bool) {
+        if repeat || character.is_control() {
+            return;
+        }
+        let Some(id) = self.input.active_text_id else {
+            return;
+        };
+
+        let text = character.to_string();
+        if self.insert_text(id, &text) {
+            self.request_redraw();
+        }
+    }
+
     fn resize_event(&mut self, width: f32, height: f32) {
         self.screen_size = Vec2::new(width, height);
         self.visibility_dirty = true;
         self.request_redraw();
     }
+}
+
+enum EditAction {
+    Backspace,
+    Delete,
+}
+
+enum CursorMove {
+    Left,
+    Right,
+    Home,
+    End,
+}
+
+impl App {
+    fn active_text_chars(&self, id: u64) -> usize {
+        self.board
+            .element(id)
+            .and_then(|element| element.text.as_ref())
+            .map(|text| text.content.chars().count())
+            .unwrap_or(0)
+    }
+
+    fn insert_text(&mut self, id: u64, inserted: &str) -> bool {
+        let cursor = self.input.text_cursor;
+        let updated = self.board.update_text(id, |text| {
+            let byte_index = char_to_byte_index(&text.content, cursor);
+            text.content.insert_str(byte_index, inserted);
+        });
+        if updated {
+            self.input.text_cursor += inserted.chars().count();
+        }
+        updated
+    }
+
+    fn edit_active_text(&mut self, id: u64, action: EditAction) -> bool {
+        let cursor = self.input.text_cursor;
+        let updated = self.board.update_text(id, |text| match action {
+            EditAction::Backspace => {
+                if cursor == 0 {
+                    return;
+                }
+                let start = char_to_byte_index(&text.content, cursor - 1);
+                let end = char_to_byte_index(&text.content, cursor);
+                text.content.replace_range(start..end, "");
+            }
+            EditAction::Delete => {
+                let total = text.content.chars().count();
+                if cursor >= total {
+                    return;
+                }
+                let start = char_to_byte_index(&text.content, cursor);
+                let end = char_to_byte_index(&text.content, cursor + 1);
+                text.content.replace_range(start..end, "");
+            }
+        });
+
+        if updated {
+            if matches!(action, EditAction::Backspace) && self.input.text_cursor > 0 {
+                self.input.text_cursor -= 1;
+            }
+        }
+        updated
+    }
+
+    fn move_text_cursor(&mut self, id: u64, movement: CursorMove) {
+        let len = self.active_text_chars(id);
+        self.input.text_cursor = match movement {
+            CursorMove::Left => self.input.text_cursor.saturating_sub(1),
+            CursorMove::Right => (self.input.text_cursor + 1).min(len),
+            CursorMove::Home => 0,
+            CursorMove::End => len,
+        };
+    }
+}
+
+fn char_to_byte_index(text: &str, char_index: usize) -> usize {
+    text.char_indices()
+        .nth(char_index)
+        .map(|(index, _)| index)
+        .unwrap_or(text.len())
 }
 
