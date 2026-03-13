@@ -1,6 +1,7 @@
 mod app;
 mod board;
 mod camera;
+mod debug;
 mod input;
 mod renderer;
 mod spatial;
