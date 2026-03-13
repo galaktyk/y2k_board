@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use cosmic_text::{
-    Attrs, Buffer, CacheKey, Color, Cursor, FontSystem, Metrics, Motion, Shaping,
-    SwashCache, SwashContent, SwashImage, Wrap,
+    Attrs, Buffer, CacheKey, Color, Cursor, FontSystem, Metrics, Motion, Shaping, SwashCache,
+    SwashContent, SwashImage, Wrap,
 };
 use glam::Vec2;
 use miniquad::{RenderingBackend, TextureId};
@@ -43,6 +43,48 @@ impl TextSystem {
     pub fn new() -> Self {
         let mut font_system = FontSystem::new();
         font_system.db_mut().load_fonts_dir(Path::new("fonts"));
+
+        // Support emojis by loading system emoji fonts
+        #[cfg(target_os = "windows")]
+        {
+            let windir = std::env::var("WINDIR").unwrap_or("C:\\Windows".to_string());
+            let fonts_dir = format!("{windir}\\Fonts");
+            for entry in std::fs::read_dir(&fonts_dir).unwrap().flatten() {
+                let name = entry.file_name().to_string_lossy().to_lowercase();
+                if name.contains("emoji")|| name.contains("emj"){
+                    let _ = font_system.db_mut().load_font_file(&entry.path());
+                    println!("Loaded emoji font: {}", entry.path().display());
+                }
+            }
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let _ = font_system
+                .db_mut()
+                .load_font_file(Path::new("/System/Library/Fonts/Apple Color Emoji.ttc"));
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            // Common paths, try both
+            let paths = [
+                "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+                "/usr/share/fonts/noto/NotoColorEmoji.ttf",
+            ];
+            for p in paths {
+                if Path::new(p).exists() {
+                    let _ = font_system.db_mut().load_font_file(Path::new(p));
+                    break;
+                }
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            // Fetch and load at startup
+            let bytes = fetch_font("https://github.com/googlefonts/noto-emoji/raw/main/fonts/NotoColorEmoji.ttf").await;
+            font_system.db_mut().load_font_data(bytes);
+        }
 
         Self {
             font_system,
@@ -150,9 +192,10 @@ impl TextSystem {
     ) -> Option<(usize, Option<i32>)> {
         let mut layout = self.layout_text(element, content)?;
         let cursor = global_byte_to_cursor(content, cursor_byte);
-        let (next, next_preferred_x) = layout
-            .buffer
-            .cursor_motion(&mut self.font_system, cursor, preferred_x, motion)?;
+        let (next, next_preferred_x) =
+            layout
+                .buffer
+                .cursor_motion(&mut self.font_system, cursor, preferred_x, motion)?;
         Some((cursor_to_global_byte(content, next), next_preferred_x))
     }
 
@@ -224,8 +267,9 @@ impl TextSystem {
         for run in layout.buffer.layout_runs() {
             for glyph in run.glyphs {
                 let physical = glyph.physical((0.0, run.line_y), 1.0);
-                let resolved = self
-                    .resolve_glyph(ctx, mono_texture, emoji_texture, physical.cache_key);
+
+                let resolved =
+                    self.resolve_glyph(ctx, mono_texture, emoji_texture, physical.cache_key);
                 // Skip fallback for missing glyphs - prevents space characters from showing as tofu
                 // Missing glyphs will simply not be rendered (invisible)
                 let Some(resolved) = resolved else {
@@ -252,8 +296,12 @@ impl TextSystem {
                     size: [resolved.entry.width as f32, resolved.entry.height as f32],
                     origin,
                     rotation: element.rotation,
-                    uv_min: resolved.entry.uv_min(layout.atlas_size(resolved.kind) as f32),
-                    uv_max: resolved.entry.uv_max(layout.atlas_size(resolved.kind) as f32),
+                    uv_min: resolved
+                        .entry
+                        .uv_min(layout.atlas_size(resolved.kind) as f32),
+                    uv_max: resolved
+                        .entry
+                        .uv_max(layout.atlas_size(resolved.kind) as f32),
                     color: instance_color,
                 };
 
@@ -293,14 +341,18 @@ impl TextSystem {
 
         match image.content {
             SwashContent::Mask | SwashContent::SubpixelMask => {
-                let entry = self.mono_atlas.insert(ctx, mono_texture, cache_key, &image)?;
+                let entry = self
+                    .mono_atlas
+                    .insert(ctx, mono_texture, cache_key, &image)?;
                 Some(ResolvedGlyph {
                     kind: AtlasKind::Mono,
                     entry,
                 })
             }
             SwashContent::Color => {
-                let entry = self.emoji_atlas.insert(ctx, emoji_texture, cache_key, &image)?;
+                let entry = self
+                    .emoji_atlas
+                    .insert(ctx, emoji_texture, cache_key, &image)?;
                 Some(ResolvedGlyph {
                     kind: AtlasKind::Color,
                     entry,
@@ -334,7 +386,14 @@ impl TextSystem {
         let mut buffer = Buffer::new(&mut self.font_system, metrics);
         buffer.set_size(&mut self.font_system, Some(width), Some(height));
         buffer.set_wrap(&mut self.font_system, Wrap::WordOrGlyph);
-        buffer.set_text(&mut self.font_system, content, &attrs, Shaping::Advanced, None);
+
+        buffer.set_text(
+            &mut self.font_system,
+            content,
+            &attrs,
+            Shaping::Advanced,
+            None,
+        );
         buffer.shape_until_scroll(&mut self.font_system, true);
 
         Some(LaidOutText {
@@ -358,6 +417,15 @@ impl LaidOutText {
             AtlasKind::Color => EMOJI_ATLAS_SIZE,
         }
     }
+}
+
+pub fn cosmic_color_to_rgba(color: Color) -> [f32; 4] {
+    [
+        color.r() as f32 / 255.0,
+        color.g() as f32 / 255.0,
+        color.b() as f32 / 255.0,
+        color.a() as f32 / 255.0,
+    ]
 }
 
 #[derive(Clone, Copy)]
@@ -393,7 +461,11 @@ struct Atlas {
 
 impl Atlas {
     fn new(size: usize, reserve_overlay_pixel: bool) -> Self {
-        let next_x = if reserve_overlay_pixel { 1 + ATLAS_GAP } else { 0 };
+        let next_x = if reserve_overlay_pixel {
+            1 + ATLAS_GAP
+        } else {
+            0
+        };
         let row_h = if reserve_overlay_pixel { 1 } else { 0 };
         Self {
             size,
@@ -507,11 +579,24 @@ fn caret_geometry(buffer: &Buffer, cursor: Cursor) -> Option<(f32, f32, f32)> {
 
 fn atlas_bytes(image: &SwashImage) -> Option<Vec<u8>> {
     match image.content {
-        SwashContent::Mask | SwashContent::Color => Some(image.data.clone()),
+        SwashContent::Mask => Some(image.data.clone()),
+        SwashContent::Color => {
+            let mut rgba = Vec::with_capacity(image.data.len());
+            for chunk in image.data.chunks_exact(4) {
+                // BGRA -> RGBA conversion
+                rgba.push(chunk[2]);
+                rgba.push(chunk[1]);
+                rgba.push(chunk[0]);
+                rgba.push(chunk[3]);
+            }
+            Some(rgba)
+        }
         SwashContent::SubpixelMask => {
-            let mut bytes = Vec::with_capacity((image.placement.width * image.placement.height) as usize);
+            let mut bytes =
+                Vec::with_capacity((image.placement.width * image.placement.height) as usize);
             for chunk in image.data.chunks_exact(3) {
-                let alpha = ((u16::from(chunk[0]) + u16::from(chunk[1]) + u16::from(chunk[2])) / 3) as u8;
+                let alpha =
+                    ((u16::from(chunk[0]) + u16::from(chunk[1]) + u16::from(chunk[2])) / 3) as u8;
                 bytes.push(alpha);
             }
             Some(bytes)
@@ -539,16 +624,6 @@ fn rgba_to_cosmic_color(color: [f32; 4]) -> Color {
         (color[2].clamp(0.0, 1.0) * 255.0) as u8,
         (color[3].clamp(0.0, 1.0) * 255.0) as u8,
     )
-}
-
-fn cosmic_color_to_rgba(color: Color) -> [f32; 4] {
-    let rgba = color.0;
-    [
-        ((rgba >> 16) & 0xFF) as f32 / 255.0,
-        ((rgba >> 8) & 0xFF) as f32 / 255.0,
-        (rgba & 0xFF) as f32 / 255.0,
-        ((rgba >> 24) & 0xFF) as f32 / 255.0,
-    ]
 }
 
 fn global_byte_to_cursor(text: &str, global_byte: usize) -> Cursor {
