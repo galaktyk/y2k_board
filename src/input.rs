@@ -139,7 +139,7 @@ pub fn on_mouse_up(
     state: &mut InputState,
     board: &mut Board,
     camera: &Camera,
-    toolbar: &Toolbar,
+    toolbar: &mut Toolbar,
     screen_size: Vec2,
     x: f32,
     y: f32,
@@ -189,9 +189,11 @@ pub fn on_mouse_up(
                         elem.size.y = -elem.size.y;
                     }
                 }
-                let _ = camera; let _ = screen_size; let _ = toolbar;
+                let _ = camera; let _ = screen_size;
                 elem.id = board.next_id();
                 board.apply_op(Op::AddElement(elem));
+                // Auto-switch back to Select tool after creating a shape
+                toolbar.active_tool = Tool::Select;
             }
         }
     }

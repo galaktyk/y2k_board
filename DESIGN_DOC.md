@@ -208,23 +208,18 @@ This reduces network traffic.
 
 ---
 
-# Sprint 1 Goals
 
-Primary focus: **core rendering + board interaction**
-
-1. Spatial Partitioning
-2. Background Grid: dont make it too dense
-3. Shape create / Rendering
-4. basic ui
+# Sprint 2
+* ops CRDT system
+* snapshot save/load
 
 
 
-# What Not Included in Sprint 1
-
+# TBD
 * text rendering
 * image uploading
 * image rendering
-* snapshot save/load
+
 * partial instance buffer updates
 * networking
 * collaborative editing

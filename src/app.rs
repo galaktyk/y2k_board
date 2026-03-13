@@ -149,7 +149,7 @@ impl EventHandler for App {
     fn mouse_button_up_event(&mut self, button: MouseButton, x: f32, y: f32) {
         input::on_mouse_up(
             &mut self.input, &mut self.board, &self.camera,
-            &self.toolbar, self.screen_size, x, y, button,
+            &mut self.toolbar, self.screen_size, x, y, button,
         );
         self.dirty = true;
     }
