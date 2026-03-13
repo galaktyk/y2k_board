@@ -18,6 +18,8 @@ pub enum Tool {
 #[derive(Clone, Copy, Debug)]
 pub enum ToolbarAction {
     SetTool(Tool),
+    Save,
+    Load,
     Undo,
     Redo,
 }
@@ -28,6 +30,8 @@ enum BtnKind {
     Rect,
     Ellipse,
     Line,
+    Save,
+    Load,
     Undo,
     Redo,
 }
@@ -39,7 +43,7 @@ struct Button {
 
 pub struct Toolbar {
     pub active_tool: Tool,
-    buttons: [Button; 6],
+    buttons: [Button; 8],
 }
 
 impl Toolbar {
@@ -49,6 +53,8 @@ impl Toolbar {
             BtnKind::Rect,
             BtnKind::Ellipse,
             BtnKind::Line,
+            BtnKind::Save,
+            BtnKind::Load,
             BtnKind::Undo,
             BtnKind::Redo,
         ];
@@ -70,6 +76,8 @@ impl Toolbar {
                     BtnKind::Rect    => ToolbarAction::SetTool(Tool::Rect),
                     BtnKind::Ellipse => ToolbarAction::SetTool(Tool::Ellipse),
                     BtnKind::Line    => ToolbarAction::SetTool(Tool::Line),
+                    BtnKind::Save    => ToolbarAction::Save,
+                    BtnKind::Load    => ToolbarAction::Load,
                     BtnKind::Undo    => ToolbarAction::Undo,
                     BtnKind::Redo    => ToolbarAction::Redo,
                 });
@@ -157,6 +165,8 @@ impl Toolbar {
                 BtnKind::Line    => "LINE",
                 BtnKind::Undo    => "UNDO",
                 BtnKind::Redo    => "REDO",
+                BtnKind::Save    => "SAVE",
+                BtnKind::Load    => "LOAD",
             };
 
             let text_w = label.len() as f32 * STRIDE - GAP;

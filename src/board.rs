@@ -1,15 +1,16 @@
 use glam::Vec2;
+use serde::{Deserialize, Serialize};
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ShapeType {
     Rect,
     Ellipse,
     Line,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Element {
     pub id: u64,
     pub shape: ShapeType,
@@ -17,7 +18,7 @@ pub struct Element {
     pub pos: Vec2,
     /// (width, height) for Rect/Ellipse; (dx, dy) end-delta for Line.
     pub size: Vec2,
-    pub rotation: f32, // Rotation in radians
+    pub rotation: f32,
     pub color: [f32; 4],
     pub selected: bool,
 }
@@ -48,35 +49,118 @@ impl Element {
 
 // ── Operations ───────────────────────────────────────────────────────────────
 
-pub type ElementUpdate = (Vec2, Vec2, f32);
-
-#[derive(Clone, Debug)]
-pub enum Op {
-    AddElement(Element),
-    DeleteElement { id: u64 },
-    UpdateElements { updates: Vec<(u64, ElementUpdate, ElementUpdate)> }, // (id, old, new)
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ElementTransform {
+    pub pos: Vec2,
+    pub size: Vec2,
+    pub rotation: f32,
 }
 
-// inverse of an op that was already applied to the board
-fn inverse(op: &Op, board: &Board) -> Option<Op> {
+impl ElementTransform {
+    pub fn new(pos: Vec2, size: Vec2, rotation: f32) -> Self {
+        Self { pos, size, rotation }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum ElementPropertyPatch {
+    Transform {
+        before: ElementTransform,
+        after: ElementTransform,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct ElementPropertyChange {
+    pub id: u64,
+    pub patch: ElementPropertyPatch,
+}
+
+#[derive(Clone, Debug)]
+pub enum BoardOperation {
+    AddElement(Element),
+    DeleteElement(Element),
+    SetProperty { changes: Vec<ElementPropertyChange> },
+}
+
+#[derive(Clone, Debug)]
+struct HistoryEntry {
+    undo: BoardOperation,
+    redo: BoardOperation,
+}
+
+fn inverse(op: &BoardOperation) -> BoardOperation {
     match op {
-        Op::AddElement(e) => Some(Op::DeleteElement { id: e.id }),
-        Op::DeleteElement { id } => {
-            board.elements.iter().find(|e| e.id == *id).map(|e| Op::AddElement(e.clone()))
+        BoardOperation::AddElement(element) => BoardOperation::DeleteElement(element.clone()),
+        BoardOperation::DeleteElement(element) => BoardOperation::AddElement(element.clone()),
+        BoardOperation::SetProperty { changes } => BoardOperation::SetProperty {
+            changes: changes
+                .iter()
+                .map(|change| ElementPropertyChange {
+                    id: change.id,
+                    patch: match &change.patch {
+                        ElementPropertyPatch::Transform { before, after } => {
+                            ElementPropertyPatch::Transform {
+                                before: *after,
+                                after: *before,
+                            }
+                        }
+                    },
+                })
+                .collect(),
+        },
+    }
+}
+
+fn log_operation(op: &BoardOperation) {
+    match op {
+        BoardOperation::AddElement(element) => {
+            println!(
+                "[ops] ADD_ELEMENT id={} shape={:?} pos=({:.1}, {:.1}) size=({:.1}, {:.1})",
+                element.id,
+                element.shape,
+                element.pos.x,
+                element.pos.y,
+                element.size.x,
+                element.size.y,
+            );
         }
-        Op::UpdateElements { updates } => Some(Op::UpdateElements {
-            updates: updates.iter().map(|&(id, old, new)| (id, new, old)).collect(),
-        }),
+        BoardOperation::DeleteElement(element) => {
+            println!("[ops] DELETE_ELEMENT id={} shape={:?}", element.id, element.shape);
+        }
+        BoardOperation::SetProperty { changes } => {
+            println!("[ops] SET_PROPERTY count={}", changes.len());
+            for change in changes {
+                match &change.patch {
+                    ElementPropertyPatch::Transform { before, after } => {
+                        println!(
+                            "[ops]   id={} transform pos=({:.1}, {:.1})->({:.1}, {:.1}) size=({:.1}, {:.1})->({:.1}, {:.1}) rot={:.3}->{:.3}",
+                            change.id,
+                            before.pos.x,
+                            before.pos.y,
+                            after.pos.x,
+                            after.pos.y,
+                            before.size.x,
+                            before.size.y,
+                            after.size.x,
+                            after.size.y,
+                            before.rotation,
+                            after.rotation,
+                        );
+                    }
+                }
+            }
+        }
     }
 }
 
 // ── Board ────────────────────────────────────────────────────────────────────
 
-#[allow(dead_code)]
 pub struct Board {
     pub elements: Vec<Element>,
-    pub undo_stack: Vec<Op>,
-    pub redo_stack: Vec<Op>,
+    undo_stack: Vec<HistoryEntry>,
+    redo_stack: Vec<HistoryEntry>,
+    emitted_ops: Vec<BoardOperation>,
     next_id: u64,
 }
 
@@ -86,6 +170,7 @@ impl Board {
             elements: Vec::new(),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            emitted_ops: Vec::new(),
             next_id: 1,
         }
     }
@@ -96,27 +181,61 @@ impl Board {
         id
     }
 
-    // Apply an op and push its inverse onto the undo stack.
-    pub fn apply_op(&mut self, op: Op) {
-        let inv = inverse(&op, self);
-        self.execute(&op);
-        if let Some(inv) = inv {
-            self.undo_stack.push(inv);
-        }
-        // Any new op clears the redo stack.
-        self.redo_stack.clear();
+    pub fn next_available_id(&self) -> u64 {
+        self.next_id
     }
 
-    fn execute(&mut self, op: &Op) {
+    pub fn apply_operation(&mut self, op: BoardOperation) {
+        let entry = HistoryEntry {
+            undo: inverse(&op),
+            redo: op.clone(),
+        };
+        self.execute(&op);
+        self.undo_stack.push(entry);
+        self.redo_stack.clear();
+        log_operation(&op);
+        self.emitted_ops.push(op);
+    }
+
+    pub fn insert_element_untracked(&mut self, element: Element) {
+        self.execute(&BoardOperation::AddElement(element));
+    }
+
+    pub fn restore_snapshot(&mut self, mut elements: Vec<Element>, next_id: u64) {
+        for element in &mut elements {
+            element.selected = false;
+        }
+        self.elements = elements;
+        self.next_id = next_id.max(1);
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+        self.emitted_ops.clear();
+    }
+
+    #[allow(dead_code)]
+    pub fn take_emitted_ops(&mut self) -> Vec<BoardOperation> {
+        std::mem::take(&mut self.emitted_ops)
+    }
+
+    fn execute(&mut self, op: &BoardOperation) {
         match op {
-            Op::AddElement(e) => self.elements.push(e.clone()),
-            Op::DeleteElement { id } => self.elements.retain(|e| e.id != *id),
-            Op::UpdateElements { updates } => {
-                for (id, _old, new) in updates {
-                    if let Some(e) = self.elements.iter_mut().find(|e| e.id == *id) {
-                        e.pos = new.0;
-                        e.size = new.1;
-                        e.rotation = new.2;
+            BoardOperation::AddElement(element) => {
+                self.next_id = self.next_id.max(element.id.saturating_add(1));
+                self.elements.retain(|existing| existing.id != element.id);
+                self.elements.push(element.clone());
+            }
+            BoardOperation::DeleteElement(element) => {
+                self.elements.retain(|existing| existing.id != element.id);
+            }
+            BoardOperation::SetProperty { changes } => {
+                for change in changes {
+                    let after = match &change.patch {
+                        ElementPropertyPatch::Transform { after, .. } => after,
+                    };
+                    if let Some(element) = self.elements.iter_mut().find(|e| e.id == change.id) {
+                        element.pos = after.pos;
+                        element.size = after.size;
+                        element.rotation = after.rotation;
                     }
                 }
             }
@@ -124,24 +243,16 @@ impl Board {
     }
 
     pub fn undo(&mut self) {
-        if let Some(inv) = self.undo_stack.pop() {
-            // On undo we want to push the forward-op onto redo, so compute
-            // the inverse of the inverse (= the original forward op).
-            let fwd = inverse(&inv, self);
-            self.execute(&inv);
-            if let Some(fwd) = fwd {
-                self.redo_stack.push(fwd);
-            }
+        if let Some(entry) = self.undo_stack.pop() {
+            self.execute(&entry.undo);
+            self.redo_stack.push(entry);
         }
     }
 
     pub fn redo(&mut self) {
-        if let Some(fwd) = self.redo_stack.pop() {
-            let inv = inverse(&fwd, self);
-            self.execute(&fwd);
-            if let Some(inv) = inv {
-                self.undo_stack.push(inv);
-            }
+        if let Some(entry) = self.redo_stack.pop() {
+            self.execute(&entry.redo);
+            self.undo_stack.push(entry);
         }
     }
 
@@ -154,42 +265,75 @@ impl Board {
     }
 
     pub fn delete_selected(&mut self) {
-        let ids: Vec<u64> = self.elements.iter().filter(|e| e.selected).map(|e| e.id).collect();
-        for id in ids {
-            self.apply_op(Op::DeleteElement { id });
+        let selected: Vec<Element> = self.elements.iter().filter(|e| e.selected).cloned().collect();
+        for element in selected {
+            self.apply_operation(BoardOperation::DeleteElement(element));
         }
     }
 
     #[allow(dead_code)]
     pub fn move_selected(&mut self, delta: Vec2) {
-        let updates: Vec<(u64, ElementUpdate, ElementUpdate)> = self
+        let changes: Vec<ElementPropertyChange> = self
             .elements
             .iter()
             .filter(|e| e.selected)
-            .map(|e| (e.id, (e.pos, e.size, e.rotation), (e.pos + delta, e.size, e.rotation)))
+            .map(|element| ElementPropertyChange {
+                id: element.id,
+                patch: ElementPropertyPatch::Transform {
+                    before: ElementTransform::new(element.pos, element.size, element.rotation),
+                    after: ElementTransform::new(
+                        element.pos + delta,
+                        element.size,
+                        element.rotation,
+                    ),
+                },
+            })
             .collect();
-        if !updates.is_empty() {
-            self.apply_op(Op::UpdateElements { updates });
+        if !changes.is_empty() {
+            self.apply_operation(BoardOperation::SetProperty { changes });
         }
     }
 
     pub fn deselect_all(&mut self) {
-        for e in &mut self.elements {
-            e.selected = false;
+        for element in &mut self.elements {
+            element.selected = false;
         }
     }
 
     pub fn select_only(&mut self, id: u64) {
-        for e in &mut self.elements {
-            e.selected = e.id == id;
+        for element in &mut self.elements {
+            element.selected = element.id == id;
         }
+    }
+
+    pub fn selected_transform_changes(
+        &self,
+        originals: &[(u64, Vec2, Vec2, f32)],
+    ) -> Vec<ElementPropertyChange> {
+        self.elements
+            .iter()
+            .filter(|element| element.selected)
+            .filter_map(|element| {
+                originals
+                    .iter()
+                    .find(|&&(id, _, _, _)| id == element.id)
+                    .and_then(|&(_, old_pos, old_size, old_rotation)| {
+                        let before = ElementTransform::new(old_pos, old_size, old_rotation);
+                        let after = ElementTransform::new(element.pos, element.size, element.rotation);
+                        (before != after).then_some(ElementPropertyChange {
+                            id: element.id,
+                            patch: ElementPropertyPatch::Transform { before, after },
+                        })
+                    })
+            })
+            .collect()
     }
 
     /// Hit-test a world-space point against elements (last-on-top).
     pub fn hit_test(&self, p: Vec2) -> Option<u64> {
-        for e in self.elements.iter().rev() {
-            if element_hit(e, p) {
-                return Some(e.id);
+        for element in self.elements.iter().rev() {
+            if element_hit(element, p) {
+                return Some(element.id);
             }
         }
         None
@@ -204,7 +348,7 @@ fn element_hit(e: &Element, mut p: Vec2) -> bool {
     let dy = p.y - center.y;
     p.x = center.x + dx * cos_r + dy * sin_r;
     p.y = center.y - dx * sin_r + dy * cos_r;
-    
+
     match e.shape {
         ShapeType::Rect => {
             let min_x = e.pos.x.min(e.pos.x + e.size.x);
@@ -223,7 +367,6 @@ fn element_hit(e: &Element, mut p: Vec2) -> bool {
             d.dot(d) <= 1.0
         }
         ShapeType::Line => {
-            // hit within 8 world units of the line segment
             let a = e.pos;
             let b = e.pos + e.size;
             dist_point_segment(p, a, b) <= 8.0

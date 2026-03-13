@@ -34,3 +34,19 @@ only fire when finalized (e.g. on mouse up) to avoid spamming updates during dra
 for debug function like alt+B, don't fire ops
 
 also the input.rs is too large now, please separte file and folder
+
+Implemented notes:
+- finalized user ops now come from completed create/delete/transform actions only
+- debug spawn still bypasses op recording
+- desktop snapshot save/load uses Ctrl+S and Ctrl+O with snapshot.bin in the app working directory
+- snapshot persists current elements plus next id, and clears history/selection on load
+
+
+
+
+
+
+
+---
+
+fontdue 

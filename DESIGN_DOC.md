@@ -216,7 +216,7 @@ This reduces network traffic.
 
 
 # TBD
-* text rendering
+* text rendering (fontdue) 
 * image uploading
 * image rendering
 

@@ -4,6 +4,7 @@ mod camera;
 mod debug;
 mod input;
 mod renderer;
+mod snapshot;
 mod spatial;
 mod stats;
 mod toolbar;

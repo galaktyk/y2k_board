@@ -10,7 +10,7 @@ pub fn spawn_debug_shapes(board: &mut Board, camera: &Camera, screen_size: Vec2)
         .wrapping_mul(0x9e3779b97f4a7c15)
         ^ 0xdeadbeefcafe1234;
         
-    let mut rng = |s: &mut u64| -> f32 {
+    let rng = |s: &mut u64| -> f32 {
         *s ^= *s << 13;
         *s ^= *s >> 7;
         *s ^= *s << 17;
@@ -33,7 +33,7 @@ pub fn spawn_debug_shapes(board: &mut Board, camera: &Camera, screen_size: Vec2)
         let color = [rc0 * 0.7 + 0.3, rc1 * 0.7 + 0.3, rc2 * 0.7 + 0.3, 0.85];
         let id    = board.next_id();
         
-        board.elements.push(Element { 
+        board.insert_element_untracked(Element {
             id, 
             shape, 
             pos, 

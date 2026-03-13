@@ -2,12 +2,13 @@ use miniquad::*;
 use glam::Vec2;
 use std::time::Instant;
 
-use crate::board::{Board, Element, ShapeType};
+use crate::board::Board;
 use crate::camera::Camera;
 use crate::input::{self, InputState};
 use crate::renderer::{InstanceData, Renderer};
+use crate::snapshot;
 use crate::spatial::SpatialGrid;
-use crate::toolbar::{self, Toolbar};
+use crate::toolbar::{self, Toolbar, ToolbarAction};
 use crate::stats;
 
 pub struct App {
@@ -77,6 +78,38 @@ impl App {
             out.extend(toolbar::element_to_instances(prev, 0.5));
         }
         out
+    }
+
+    fn save_snapshot(&self) {
+        match snapshot::save_to_default_path(&self.board) {
+            Ok(path) => println!("Saved snapshot to {}", path.display()),
+            Err(err) => eprintln!("Failed to save snapshot: {err}"),
+        }
+    }
+
+    fn load_snapshot(&mut self) {
+        match snapshot::load_from_default_path() {
+            Ok(snapshot_data) => {
+                self.board
+                    .restore_snapshot(snapshot_data.elements, snapshot_data.next_id);
+                self.camera = Camera::new();
+                self.input = InputState::new();
+                self.toolbar = Toolbar::new();
+                self.dirty = true;
+                println!("Loaded snapshot from snapshot.bin");
+            }
+            Err(err) => eprintln!("Failed to load snapshot: {err}"),
+        }
+    }
+
+    fn handle_toolbar_action(&mut self, action: ToolbarAction) {
+        match action {
+            ToolbarAction::SetTool(tool) => self.toolbar.active_tool = tool,
+            ToolbarAction::Save => self.save_snapshot(),
+            ToolbarAction::Load => self.load_snapshot(),
+            ToolbarAction::Undo => self.board.undo(),
+            ToolbarAction::Redo => self.board.redo(),
+        }
     }
 }
 
@@ -150,10 +183,12 @@ impl EventHandler for App {
     }
 
     fn mouse_button_down_event(&mut self, button: MouseButton, x: f32, y: f32) {
-        input::on_mouse_down(
+        if let Some(action) = input::on_mouse_down(
             &mut self.input, &mut self.board, &self.camera,
             &mut self.toolbar, self.screen_size, x, y, button,
-        );
+        ) {
+            self.handle_toolbar_action(action);
+        }
         self.dirty = true;
     }
 
@@ -181,6 +216,14 @@ impl EventHandler for App {
     fn key_down_event(&mut self, keycode: KeyCode, keymods: KeyMods, _repeat: bool) {
         if keycode == KeyCode::Space {
             self.input.space_held = true;
+        }
+        if keymods.ctrl && keycode == KeyCode::S {
+            self.save_snapshot();
+            return;
+        }
+        if keymods.ctrl && keycode == KeyCode::O {
+            self.load_snapshot();
+            return;
         }
         if keycode == KeyCode::B && keymods.alt && keymods.ctrl {
             crate::debug::spawn_debug_shapes(&mut self.board, &self.camera, self.screen_size);
