@@ -116,7 +116,7 @@ pub fn build_stats_instances(
 
     // Lines listed top → bottom inside the panel
     let lines: [String; 4] = [
-        format!("ZOOM {:.2}X",  zoom),
+        format!("ZOOM {:.3}X",  zoom),
         format!("OBJ  {}",      obj_count),
         format!("FPS  {:.0}",   fps),
         format!("FT   {:.1}MS", frame_ms),

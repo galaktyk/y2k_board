@@ -76,7 +76,7 @@ void main() {
 "#;
 
 const FRAGMENT_SRC: &str = r#"#version 100
-precision mediump float;
+precision highp float;
 
 varying vec2 v_uv;
 varying vec4 v_color;
@@ -124,23 +124,23 @@ const GRID_VERTEX_SRC: &str = r#"#version 100
 attribute vec2 a_pos;
 
 uniform mat4 u_inv_mvp;   // maps clip coords back to world space
-varying vec2 v_world;
+uniform float u_cell;
+varying vec2 v_cell;
 
 void main() {
     gl_Position = vec4(a_pos, 0.0, 1.0);
     vec4 w = u_inv_mvp * vec4(a_pos, 0.0, 1.0);
-    v_world = w.xy / w.w;
+    v_cell = (w.xy / w.w) / u_cell;
 }
 "#;
 
 const GRID_FRAGMENT_SRC: &str = r#"#version 100
-precision mediump float;
+precision highp float;
 
-varying vec2 v_world;
-uniform float u_cell;    // grid cell size in world units (adapted to zoom)
+varying vec2 v_cell;
 
 void main() {
-    vec2 f = fract(v_world / u_cell);
+    vec2 f = fract(v_cell);
     vec2 d = min(f, 1.0 - f);
     float line = min(d.x, d.y);
     float a = 1.0 - smoothstep(0.0, 0.04, line);
