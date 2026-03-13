@@ -178,14 +178,16 @@ pub fn on_mouse_up(
             let min_size = 4.0f32;
             if prev.size.x.abs() >= min_size || prev.size.y.abs() >= min_size {
                 let mut elem = prev;
-                // Normalise so size is always positive
-                if elem.size.x < 0.0 {
-                    elem.pos.x += elem.size.x;
-                    elem.size.x = -elem.size.x;
-                }
-                if elem.size.y < 0.0 {
-                    elem.pos.y += elem.size.y;
-                    elem.size.y = -elem.size.y;
+                // Normalise so size is always positive, except for lines
+                if elem.shape != ShapeType::Line {
+                    if elem.size.x < 0.0 {
+                        elem.pos.x += elem.size.x;
+                        elem.size.x = -elem.size.x;
+                    }
+                    if elem.size.y < 0.0 {
+                        elem.pos.y += elem.size.y;
+                        elem.size.y = -elem.size.y;
+                    }
                 }
                 let _ = camera; let _ = screen_size; let _ = toolbar;
                 elem.id = board.next_id();

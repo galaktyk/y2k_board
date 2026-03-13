@@ -39,11 +39,36 @@ varying vec2 v_uv;
 varying vec4 v_color;
 varying float v_shape;
 varying float v_alpha;
+varying vec2 v_line_p;
+varying float v_line_len;
 
 void main() {
-    vec2 world_pos = i_pos + a_pos * i_size;
+    vec2 world_pos;
+    if (i_shape > 1.5) {
+        // Line
+        vec2 dir = i_size;
+        float len = length(dir);
+        if (len < 0.0001) { len = 0.0001; }
+        vec2 u = dir / len;
+        vec2 v = vec2(-u.y, u.x);
+        
+        float margin = 8.0; // half-thickness + antialiasing
+        
+        vec2 p = vec2(
+            mix(-margin, len + margin, a_pos.x),
+            mix(-margin, margin, a_pos.y)
+        );
+        world_pos = i_pos + p.x * u + p.y * v;
+        
+        v_line_p = p;
+        v_line_len = len;
+        v_uv = a_pos;
+    } else {
+        world_pos = i_pos + a_pos * i_size;
+        v_uv = a_pos;
+    }
+
     gl_Position   = u_mvp * vec4(world_pos, 0.0, 1.0);
-    v_uv    = a_pos;          // 0..1
     v_color = i_color;
     v_shape = i_shape;
     v_alpha = i_alpha;
@@ -57,13 +82,8 @@ varying vec2 v_uv;
 varying vec4 v_color;
 varying float v_shape;
 varying float v_alpha;
-
-// Distance from p to segment [a,b].
-float dist_seg(vec2 p, vec2 a, vec2 b) {
-    vec2 ab = b - a;
-    float t = clamp(dot(p - a, ab) / dot(ab, ab), 0.0, 1.0);
-    return length(p - (a + t * ab));
-}
+varying vec2 v_line_p;
+varying float v_line_len;
 
 void main() {
     float alpha = v_color.a * v_alpha;
@@ -84,15 +104,13 @@ void main() {
         gl_FragColor = vec4(v_color.rgb, alpha * a);
 
     } else {
-        // Line: uv.x goes 0→1 along the segment (in a thin bounding box),
-        // uv.y is the perpendicular. We draw a thick anti-aliased stroke.
-        float thickness = 0.05;  // fraction of box height — renderer sets height = 3px
-        float dy = abs(uv.y - 0.5);
-        float a = smoothstep(0.5, 0.5 - 0.05, dy);
-        // cap ends
-        float dx = min(uv.x, 1.0 - uv.x);
-        float cap = smoothstep(0.0, 0.03, dx);
-        gl_FragColor = vec4(v_color.rgb, alpha * a * cap);
+        // Line
+        vec2 p = v_line_p;
+        float dx = p.x - clamp(p.x, 0.0, v_line_len);
+        float d = length(vec2(dx, p.y));
+        float thickness = 4.0; // visual half-thickness
+        float a = 1.0 - smoothstep(thickness - 1.0, thickness + 1.0, d);
+        gl_FragColor = vec4(v_color.rgb, alpha * a);
     }
 }
 "#;
