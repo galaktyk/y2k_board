@@ -167,7 +167,7 @@ impl Renderer {
         );
 
         // ── Instance buffer ───────────────────────────────────────────────
-        let max_instances = 20_000usize;
+        let max_instances = 100_000usize;
         let instance_buffer = ctx.new_buffer(
             BufferType::VertexBuffer,
             BufferUsage::Stream,

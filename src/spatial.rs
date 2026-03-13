@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use glam::Vec2;
 
-const CELL_SIZE: f32 = 64.0;
+const CELL_SIZE: f32 = 512.0;
 
 fn cell(p: Vec2) -> (i32, i32) {
     (p.x.div_euclid(CELL_SIZE) as i32, p.y.div_euclid(CELL_SIZE) as i32)

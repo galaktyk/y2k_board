@@ -34,7 +34,7 @@ impl Camera {
     /// Zoom toward a screen-space anchor point (keep that point fixed in world space).
     pub fn zoom_toward(&mut self, anchor_screen: Vec2, screen_size: Vec2, factor: f32) {
         let world_before = self.screen_to_world(anchor_screen, screen_size);
-        self.zoom = (self.zoom * factor).clamp(0.05, 20.0);
+        self.zoom = (self.zoom * factor).clamp(0.002, 20.0);
         let world_after = self.screen_to_world(anchor_screen, screen_size);
         self.pan -= world_after - world_before;
     }

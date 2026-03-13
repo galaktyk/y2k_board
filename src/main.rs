@@ -4,6 +4,7 @@ mod camera;
 mod input;
 mod renderer;
 mod spatial;
+mod stats;
 mod toolbar;
 
 use miniquad::conf;

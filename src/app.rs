@@ -1,5 +1,6 @@
 use miniquad::*;
 use glam::Vec2;
+use std::time::Instant;
 
 use crate::board::{Board, Element, ShapeType};
 use crate::camera::Camera;
@@ -7,6 +8,7 @@ use crate::input::{self, InputState};
 use crate::renderer::{InstanceData, Renderer};
 use crate::spatial::SpatialGrid;
 use crate::toolbar::{self, Toolbar};
+use crate::stats;
 
 pub struct App {
     ctx: Box<dyn RenderingBackend>,
@@ -18,6 +20,12 @@ pub struct App {
     spatial: SpatialGrid,
     screen_size: Vec2,
     dirty: bool,
+    // ── stats ─────────────────────────────────────────────────────────────
+    last_frame:   Instant,
+    frame_ms:     f32,
+    fps:          f32,
+    fps_accum:    f32,
+    fps_frames:   u32,
 }
 
 impl App {
@@ -34,6 +42,11 @@ impl App {
             spatial: SpatialGrid::new(),
             screen_size: Vec2::new(800.0, 600.0),
             dirty: true,
+            last_frame:  Instant::now(),
+            frame_ms:    0.0,
+            fps:         0.0,
+            fps_accum:   0.0,
+            fps_frames:  0,
         }
     }
 
@@ -70,6 +83,20 @@ impl EventHandler for App {
     fn update(&mut self) {}
 
     fn draw(&mut self) {
+        // ── Frame timing ──────────────────────────────────────────────────
+        let now   = Instant::now();
+        let dt_ms = now.duration_since(self.last_frame).as_secs_f32() * 1000.0;
+        self.last_frame = now;
+        self.frame_ms   = dt_ms;
+
+        self.fps_accum  += dt_ms;
+        self.fps_frames += 1;
+        if self.fps_accum >= 500.0 {
+            self.fps       = self.fps_frames as f32 / (self.fps_accum / 1000.0);
+            self.fps_accum  = 0.0;
+            self.fps_frames = 0;
+        }
+
         if self.dirty {
             self.rebuild_spatial();
             self.dirty = false;
@@ -90,6 +117,16 @@ impl EventHandler for App {
         );
         let screen_mvp = Renderer::screen_mvp(self.screen_size);
         self.renderer.draw_instances(&mut *self.ctx, &tb_inst, screen_mvp);
+
+        // ── Stats overlay ─────────────────────────────────────────────────
+        let stats_inst = stats::build_stats_instances(
+            self.camera.zoom,
+            self.board.elements.len(),
+            self.fps,
+            self.frame_ms,
+            self.screen_size,
+        );
+        self.renderer.draw_instances(&mut *self.ctx, &stats_inst, screen_mvp);
 
         self.ctx.end_render_pass();
         self.ctx.commit_frame();
