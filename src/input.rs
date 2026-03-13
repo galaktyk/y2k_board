@@ -40,6 +40,8 @@ pub enum HandleDir {
     TR,
     BR,
     BL,
+    LineStart,
+    LineEnd,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -143,14 +145,23 @@ pub fn on_mouse_down(
                 if handle_hit.is_some() { break; }
             }
 
-            if let Some((_id, h_idx)) = handle_hit {
-                state.drag_mode = match h_idx {
-                    0 => DragMode::ResizingHandle(HandleDir::TL),
-                    1 => DragMode::ResizingHandle(HandleDir::TR),
-                    2 => DragMode::ResizingHandle(HandleDir::BR),
-                    3 => DragMode::ResizingHandle(HandleDir::BL),
-                    4 => DragMode::Rotating,
-                    _ => unreachable!(),
+            if let Some((id, h_idx)) = handle_hit {
+                let elem = board.elements.iter().find(|e| e.id == id).unwrap();
+                state.drag_mode = if elem.shape == ShapeType::Line {
+                    match h_idx {
+                        0 => DragMode::ResizingHandle(HandleDir::LineStart),
+                        1 => DragMode::ResizingHandle(HandleDir::LineEnd),
+                        _ => unreachable!(),
+                    }
+                } else {
+                    match h_idx {
+                        0 => DragMode::ResizingHandle(HandleDir::TL),
+                        1 => DragMode::ResizingHandle(HandleDir::TR),
+                        2 => DragMode::ResizingHandle(HandleDir::BR),
+                        3 => DragMode::ResizingHandle(HandleDir::BL),
+                        4 => DragMode::Rotating,
+                        _ => unreachable!(),
+                    }
                 };
                 state.move_origin = board.elements.iter()
                     .filter(|e| e.selected)
@@ -302,53 +313,68 @@ pub fn on_mouse_move(
                             e.rotation = orig_rot + angle_diff;
                         }
                         DragMode::ResizingHandle(dir) => {
-                            // First map world diff back into local unrotated space
-                            let c = orig_rot.cos();
-                            let s = orig_rot.sin();
-                            let dx = state.move_delta.x;
-                            let dy = state.move_delta.y;
-                            let l_dx = dx * c + dy * s;
-                            let l_dy = -dx * s + dy * c;
+                            if e.shape == ShapeType::Line {
+                                match dir {
+                                    HandleDir::LineStart => {
+                                        let old_end = orig_pos + orig_size;
+                                        e.pos = orig_pos + state.move_delta;
+                                        e.size = old_end - e.pos;
+                                    }
+                                    HandleDir::LineEnd => {
+                                        e.size = orig_size + state.move_delta;
+                                    }
+                                    _ => {}
+                                }
+                            } else {
+                                // First map world diff back into local unrotated space
+                                let c = orig_rot.cos();
+                                let s = orig_rot.sin();
+                                let dx = state.move_delta.x;
+                                let dy = state.move_delta.y;
+                                let l_dx = dx * c + dy * s;
+                                let l_dy = -dx * s + dy * c;
 
-                            let mut new_pos = orig_pos;
-                            let mut new_size = orig_size;
+                                let mut new_pos = orig_pos;
+                                let mut new_size = orig_size;
 
-                            match dir {
-                                HandleDir::TL => {
-                                    new_pos += Vec2::new(l_dx, l_dy);
-                                    new_size -= Vec2::new(l_dx, l_dy);
+                                match dir {
+                                    HandleDir::TL => {
+                                        new_pos += Vec2::new(l_dx, l_dy);
+                                        new_size -= Vec2::new(l_dx, l_dy);
+                                    }
+                                    HandleDir::TR => {
+                                        new_pos.y += l_dy;
+                                        new_size.x += l_dx;
+                                        new_size.y -= l_dy;
+                                    }
+                                    HandleDir::BL => {
+                                        new_pos.x += l_dx;
+                                        new_size.x -= l_dx;
+                                        new_size.y += l_dy;
+                                    }
+                                    HandleDir::BR => {
+                                        new_size += Vec2::new(l_dx, l_dy);
+                                    }
+                                    _ => {}
                                 }
-                                HandleDir::TR => {
-                                    new_pos.y += l_dy;
-                                    new_size.x += l_dx;
-                                    new_size.y -= l_dy;
-                                }
-                                HandleDir::BL => {
-                                    new_pos.x += l_dx;
-                                    new_size.x -= l_dx;
-                                    new_size.y += l_dy;
-                                }
-                                HandleDir::BR => {
-                                    new_size += Vec2::new(l_dx, l_dy);
-                                }
+
+                                // Keep pos in world space: the new_pos we computed is as if the top-left moved in local space 
+                                // *relative to the original rotation*.
+                                // It's actually easier to compute the new local center, and rotate it into world space.
+                                
+                                let local_center = new_pos + new_size * 0.5;
+                                let orig_local_center = orig_pos + orig_size * 0.5;
+                                let d_cx = local_center.x - orig_local_center.x;
+                                let d_cy = local_center.y - orig_local_center.y;
+                                
+                                let w_dcx = d_cx * c - d_cy * s;
+                                let w_dcy = d_cx * s + d_cy * c;
+                                
+                                let w_center = orig_pos + orig_size * 0.5 + Vec2::new(w_dcx, w_dcy);
+                                
+                                e.size = new_size;
+                                e.pos = w_center - new_size * 0.5;
                             }
-
-                            // Keep pos in world space: the new_pos we computed is as if the top-left moved in local space 
-                            // *relative to the original rotation*.
-                            // It's actually easier to compute the new local center, and rotate it into world space.
-                            
-                            let local_center = new_pos + new_size * 0.5;
-                            let orig_local_center = orig_pos + orig_size * 0.5;
-                            let d_cx = local_center.x - orig_local_center.x;
-                            let d_cy = local_center.y - orig_local_center.y;
-                            
-                            let w_dcx = d_cx * c - d_cy * s;
-                            let w_dcy = d_cx * s + d_cy * c;
-                            
-                            let w_center = orig_pos + orig_size * 0.5 + Vec2::new(w_dcx, w_dcy);
-                            
-                            e.size = new_size;
-                            e.pos = w_center - new_size * 0.5;
                         }
                         DragMode::None => {}
                     }
@@ -435,9 +461,12 @@ fn default_color(shape: ShapeType) -> [f32; 4] {
     }
 }
 
-pub fn get_element_handles(e: &Element) -> Option<[Vec2; 5]> {
+pub fn get_element_handles(e: &Element) -> Option<Vec<Vec2>> {
     if e.shape == ShapeType::Line {
-        return None;
+        return Some(vec![
+            e.pos,             // LineStart
+            e.pos + e.size,    // LineEnd
+        ]);
     }
     let center = e.pos + e.size * 0.5;
     let c = e.rotation.cos();
@@ -450,7 +479,7 @@ pub fn get_element_handles(e: &Element) -> Option<[Vec2; 5]> {
     let hh = e.size.y * 0.5;
     let th = -hh - 30.0;
 
-    Some([
+    Some(vec![
         rot(-hw, -hh), // TL
         rot(hw, -hh),  // TR
         rot(hw, hh),   // BR
@@ -466,44 +495,57 @@ pub fn handles_to_instances(e: &Element) -> Vec<InstanceData> {
         None => return out,
     };
 
-    let center = e.pos + e.size * 0.5;
-    let c = e.rotation.cos();
-    let s = e.rotation.sin();
-    let rot = |rx: f32, ry: f32| -> Vec2 {
-        center + Vec2::new(rx * c - ry * s, rx * s + ry * c)
-    };
-    
-    let stick_center = rot(0.0, -e.size.y * 0.5 - 15.0);
-
-    out.push(InstanceData {
-        pos: [stick_center.x - 0.5, stick_center.y - 15.0],
-        size: [1.0, 30.0],
-        rotation: e.rotation,
-        color: [1.0, 1.0, 1.0, 1.0],
-        shape_type: 0.0, // Rect
-        alpha: 1.0,
-    });
-
     let s = 10.0;
-    for i in 0..4 {
+    if e.shape == ShapeType::Line {
+        for pt in handles {
+            out.push(InstanceData {
+                pos: [pt.x - s*0.5, pt.y - s*0.5],
+                size: [s, s],
+                rotation: 0.0,
+                color: [1.0, 1.0, 1.0, 1.0],
+                shape_type: 0.0,
+                alpha: 1.0,
+            });
+        }
+    } else {
+        let center = e.pos + e.size * 0.5;
+        let c = e.rotation.cos();
+        let s_rot = e.rotation.sin();
+        let rot = |rx: f32, ry: f32| -> Vec2 {
+            center + Vec2::new(rx * c - ry * s_rot, rx * s_rot + ry * c)
+        };
+        
+        let stick_center = rot(0.0, -e.size.y * 0.5 - 15.0);
+
         out.push(InstanceData {
-            pos: [handles[i].x - s*0.5, handles[i].y - s*0.5],
+            pos: [stick_center.x - 0.5, stick_center.y - 15.0],
+            size: [1.0, 30.0],
+            rotation: e.rotation,
+            color: [1.0, 1.0, 1.0, 1.0],
+            shape_type: 0.0, // Rect
+            alpha: 1.0,
+        });
+
+        for i in 0..4 {
+            out.push(InstanceData {
+                pos: [handles[i].x - s*0.5, handles[i].y - s*0.5],
+                size: [s, s],
+                rotation: e.rotation,
+                color: [1.0, 1.0, 1.0, 1.0],
+                shape_type: 0.0,
+                alpha: 1.0,
+            });
+        }
+
+        out.push(InstanceData {
+            pos: [handles[4].x - s*0.5, handles[4].y - s*0.5],
             size: [s, s],
             rotation: e.rotation,
             color: [1.0, 1.0, 1.0, 1.0],
-            shape_type: 0.0,
+            shape_type: 1.0,
             alpha: 1.0,
         });
     }
-
-    out.push(InstanceData {
-        pos: [handles[4].x - s*0.5, handles[4].y - s*0.5],
-        size: [s, s],
-        rotation: e.rotation,
-        color: [1.0, 1.0, 1.0, 1.0],
-        shape_type: 1.0,
-        alpha: 1.0,
-    });
 
     out
 }
