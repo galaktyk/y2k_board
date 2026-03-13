@@ -11,4 +11,10 @@ bincode = "1"
 cosmic-text = "0.18"
 
 [profile.release]
-opt-level = 3
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+debug = 0
+incremental = false

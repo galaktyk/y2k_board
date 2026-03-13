@@ -37,7 +37,6 @@ pub struct TextSystem {
     mono_atlas: Atlas,
     emoji_atlas: Atlas,
     overlay_ready: bool,
-    fallback_keys: HashMap<u32, CacheKey>,
 }
 
 impl TextSystem {
@@ -51,7 +50,6 @@ impl TextSystem {
             mono_atlas: Atlas::new(TEXT_ATLAS_SIZE, true),
             emoji_atlas: Atlas::new(EMOJI_ATLAS_SIZE, false),
             overlay_ready: false,
-            fallback_keys: HashMap::new(),
         }
     }
 
@@ -222,18 +220,14 @@ impl TextSystem {
     ) {
         let origin = (element.pos + element.size * 0.5).to_array();
         let default_color = layout.text.color;
-        let fallback_key = self.fallback_cache_key(layout.text.font_size);
 
         for run in layout.buffer.layout_runs() {
             for glyph in run.glyphs {
                 let physical = glyph.physical((0.0, run.line_y), 1.0);
                 let resolved = self
-                    .resolve_glyph(ctx, mono_texture, emoji_texture, physical.cache_key)
-                    .or_else(|| {
-                        fallback_key.and_then(|key| {
-                            self.resolve_glyph(ctx, mono_texture, emoji_texture, key)
-                        })
-                    });
+                    .resolve_glyph(ctx, mono_texture, emoji_texture, physical.cache_key);
+                // Skip fallback for missing glyphs - prevents space characters from showing as tofu
+                // Missing glyphs will simply not be rendered (invisible)
                 let Some(resolved) = resolved else {
                     continue;
                 };
@@ -313,31 +307,6 @@ impl TextSystem {
                 })
             }
         }
-    }
-
-    fn fallback_cache_key(&mut self, font_size: f32) -> Option<CacheKey> {
-        let key = font_size.to_bits();
-        if let Some(cache_key) = self.fallback_keys.get(&key) {
-            return Some(*cache_key);
-        }
-
-        let metrics = Metrics::new(font_size.max(8.0), (font_size * 1.35).max(font_size + 4.0));
-        let attrs = Attrs::new().color(Color::rgb(0, 0, 0));
-        let mut buffer = Buffer::new(&mut self.font_system, metrics);
-        buffer.set_size(
-            &mut self.font_system,
-            Some((font_size * 2.0).max(16.0)),
-            Some(metrics.line_height.max(16.0)),
-        );
-        buffer.set_wrap(&mut self.font_system, Wrap::None);
-        buffer.set_text(&mut self.font_system, "■", &attrs, Shaping::Advanced, None);
-        buffer.shape_until_scroll(&mut self.font_system, true);
-
-        let run = buffer.layout_runs().next()?;
-        let glyph = run.glyphs.first()?;
-        let cache_key = glyph.physical((0.0, run.line_y), 1.0).cache_key;
-        self.fallback_keys.insert(key, cache_key);
-        Some(cache_key)
     }
 
     fn ensure_overlay_pixel(&mut self, ctx: &mut dyn RenderingBackend, text_atlas: TextureId) {
@@ -518,6 +487,10 @@ fn caret_geometry(buffer: &Buffer, cursor: Cursor) -> Option<(f32, f32, f32)> {
     for run in buffer.layout_runs() {
         if run.line_i != cursor.line {
             continue;
+        }
+        // Handle cursor at the very beginning (leftmost edge)
+        if cursor.index == 0 {
+            return Some((0.0, run.line_top, run.line_height));
         }
         if let Some((x, _)) = run.highlight(cursor, cursor) {
             return Some((x, run.line_top, run.line_height));

@@ -1,32 +1,23 @@
+
+some emoji not works like 😆😁 but ❤️✋ works fine
+
+---
+add multiple selection with drag over
+ (show area rectangle while dragging)
+when drag finished, show big selection rectangle (also with handles for resizing/rotating)
+drag start anywhere inside that big rectangle will drag whole selection 
+
+
+---
+
+Then enable only what you need.
+
+----
+
 change default color for text
 1. text in shapes -> black
 2. own text element in board -> white
+nit text bug
+- space character become tofu square
+- edit cursor not show when on left most edge of text
 
----
-BIG FEATURE: Text rendering
-use cosmic text to render and text-edit text
-
-
-
-1. add new tool "Text" box, create similar to rect but with text rendering inside and transparent background
-2. for rect and ellipse, add ability to add text rendering inside the shape by double clicking the shape, this will create a text element as a child of the shape, and the text will be rendered inside the shape with word wrap and clipping to the shape bounds
-(edit in place, no separate editor window)
-
-
-
-
-
-so  cosmic text output bitmap with correct vowel like "ดื่มด่ำ 好き　你好"
-i add all text visible to atlas with existing culling system
-send atlas to GPU  element use atlas uv to draw
-
-
-
-## how to render
-have pre alloc this on GPU
-text_atlas:  1024×1024 R8   = 1MB   — all text glyphs
-emoji_atlas: 1024×1024 RGBA = 4MB   — emoji
-use update_texture_part to update only part of the atlas when new text is added, this is fast and efficient
-
-
----

@@ -239,7 +239,11 @@ pub fn on_mouse_up(
                 let _ = screen_size;
                 element.id = board.next_id();
                 if element.shape == ShapeType::Text {
-                    element.text = Some(crate::board::TextData::default());
+                    element.text = Some(crate::board::TextData {
+                        content: String::new(),
+                        font_size: 24.0,
+                        color: [1.0, 1.0, 1.0, 1.0],
+                    });
                 }
                 board.apply_operation(BoardOperation::AddElement(element));
                 if matches!(toolbar.active_tool, Tool::Text) {
@@ -392,7 +396,11 @@ pub fn on_mouse_move(
             color: default_color(shape),
             selected: false,
             text: if shape == ShapeType::Text {
-                Some(crate::board::TextData::default())
+                Some(crate::board::TextData {
+                    content: String::new(),
+                    font_size: 24.0,
+                    color: [1.0, 1.0, 1.0, 1.0],
+                })
             } else {
                 None
             },
