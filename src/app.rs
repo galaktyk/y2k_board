@@ -107,8 +107,11 @@ impl EventHandler for App {
 
         self.renderer.draw_background_grid(&mut *self.ctx, &self.camera, self.screen_size);
 
+        // Draw board elements and toolbar in separate passes since they use different MVP matrices.
         let board_inst = self.board_instances();
         let board_mvp = Renderer::camera_mvp(&self.camera, self.screen_size);
+
+        // Board elements
         self.renderer.draw_instances(&mut *self.ctx, &board_inst, board_mvp);
 
         let tb_inst = self.toolbar.build_instances(
@@ -117,6 +120,8 @@ impl EventHandler for App {
             self.board.can_redo(),
         );
         let screen_mvp = Renderer::screen_mvp(self.screen_size);
+
+        // Toolbar (full opacity, screen-space)
         self.renderer.draw_instances(&mut *self.ctx, &tb_inst, screen_mvp);
 
         // ── Stats overlay ─────────────────────────────────────────────────

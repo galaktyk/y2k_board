@@ -1,6 +1,6 @@
-use miniquad::*;
-use glam::Vec2;
 use crate::camera::Camera;
+use glam::Vec2;
+use miniquad::*;
 
 // ── Instance data ─────────────────────────────────────────────────────────────
 
@@ -178,10 +178,18 @@ impl Renderer {
             BufferUsage::Immutable,
             BufferSource::slice(&quad_verts),
         );
+        eprintln!(
+            "[Renderer] Quad vertex buffer created: {} bytes",
+            quad_verts.len() * std::mem::size_of::<f32>()
+        );
         let index_buf = ctx.new_buffer(
             BufferType::IndexBuffer,
             BufferUsage::Immutable,
             BufferSource::slice(&indices),
+        );
+        eprintln!(
+            "[Renderer] Index buffer created: {} bytes",
+            indices.len() * std::mem::size_of::<u16>()
         );
 
         // ── Instance buffer ───────────────────────────────────────────────
@@ -190,6 +198,11 @@ impl Renderer {
             BufferType::VertexBuffer,
             BufferUsage::Stream,
             BufferSource::empty::<InstanceData>(max_instances),
+        );
+        eprintln!(
+            "[Renderer] Instance buffer created: {} MB (max {} instances)",
+            (max_instances * std::mem::size_of::<InstanceData>()) / (1024 * 1024),
+            max_instances
         );
 
         // ── Shape pipeline ────────────────────────────────────────────────
@@ -220,8 +233,8 @@ impl Renderer {
                 // buffer 0: a_pos
                 VertexAttribute::with_buffer("a_pos", VertexFormat::Float2, 0),
                 // buffer 1: per-instance
-                VertexAttribute::with_buffer("i_pos",   VertexFormat::Float2, 1),
-                VertexAttribute::with_buffer("i_size",  VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_pos", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_size", VertexFormat::Float2, 1),
                 VertexAttribute::with_buffer("i_color", VertexFormat::Float4, 1),
                 VertexAttribute::with_buffer("i_shape", VertexFormat::Float1, 1),
                 VertexAttribute::with_buffer("i_alpha", VertexFormat::Float1, 1),
@@ -261,10 +274,18 @@ impl Renderer {
             BufferUsage::Immutable,
             BufferSource::slice(&fsq_verts),
         );
+        eprintln!(
+            "[Renderer] FSQ vertex buffer created: {} bytes",
+            fsq_verts.len() * std::mem::size_of::<f32>()
+        );
         let fsq_idx_buf = ctx.new_buffer(
             BufferType::IndexBuffer,
             BufferUsage::Immutable,
             BufferSource::slice(&indices),
+        );
+        eprintln!(
+            "[Renderer] FSQ index buffer created: {} bytes",
+            indices.len() * std::mem::size_of::<u16>()
         );
 
         let grid_shader = ctx
@@ -277,7 +298,7 @@ impl Renderer {
                     uniforms: UniformBlockLayout {
                         uniforms: vec![
                             UniformDesc::new("u_inv_mvp", UniformType::Mat4),
-                            UniformDesc::new("u_cell",    UniformType::Float1),
+                            UniformDesc::new("u_cell", UniformType::Float1),
                         ],
                     },
                     images: vec![],
@@ -287,7 +308,11 @@ impl Renderer {
 
         let grid_pipeline = ctx.new_pipeline(
             &[BufferLayout::default()],
-            &[VertexAttribute::with_buffer("a_pos", VertexFormat::Float2, 0)],
+            &[VertexAttribute::with_buffer(
+                "a_pos",
+                VertexFormat::Float2,
+                0,
+            )],
             grid_shader,
             PipelineParams {
                 color_blend: Some(BlendState::new(
@@ -305,7 +330,13 @@ impl Renderer {
             images: vec![],
         };
 
-        Self { shape_pipeline, shape_bindings, instance_buffer, grid_pipeline, grid_bindings }
+        Self {
+            shape_pipeline,
+            shape_bindings,
+            instance_buffer,
+            grid_pipeline,
+            grid_bindings,
+        }
     }
 
     // ── MVP helpers ────────────────────────────────────────────────────────
@@ -320,7 +351,7 @@ impl Renderer {
         // Ortho: maps world rect [pan ± half/zoom] to clip [-1..1]
         let l = px - w * 0.5 / z;
         let r = px + w * 0.5 / z;
-        let b = py + h * 0.5 / z;   // flip y: world-y up = screen-y down
+        let b = py + h * 0.5 / z; // flip y: world-y up = screen-y down
         let t = py - h * 0.5 / z;
         glam::Mat4::orthographic_rh_gl(l, r, b, t, -1.0, 1.0)
     }
@@ -364,7 +395,9 @@ impl Renderer {
         if instances.is_empty() {
             return;
         }
+
         ctx.buffer_update(self.instance_buffer, BufferSource::slice(instances));
+
         ctx.apply_pipeline(&self.shape_pipeline);
         ctx.apply_bindings(&self.shape_bindings);
         ctx.apply_uniforms(UniformsSource::table(&ShapeUniforms {
