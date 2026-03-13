@@ -554,10 +554,11 @@ impl EventHandler for App {
     }
 
     fn mouse_motion_event(&mut self, x: f32, y: f32) {
-        self.input.mouse_pos = Vec2::new(x, y);
+        let mouse_pos = Vec2::new(x, y);
         if self.input.text_selecting {
             if let Some(id) = self.input.active_text_id {
-                if let Some(cursor_byte) = self.text_cursor_from_screen(id, self.input.mouse_pos) {
+                self.input.mouse_pos = mouse_pos;
+                if let Some(cursor_byte) = self.text_cursor_from_screen(id, mouse_pos) {
                     self.set_text_cursor(cursor_byte, true);
                     self.request_redraw();
                     return;

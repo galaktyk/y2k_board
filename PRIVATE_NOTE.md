@@ -1,3 +1,12 @@
+when mouse down on resizer handle, exit text edit mode and start resizing
+
+
+---
+
+ Set the Caret/Candidate Position Hint for IME and emoji input
+ canvas has a world transform (pan + zoom), so you must convert:
+
+---
 
 some emoji not works like 😆😁 but ❤️✋ works fine
 
