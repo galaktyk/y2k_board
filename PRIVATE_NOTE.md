@@ -1,5 +1,6 @@
 
-
+change boder to be real border (not blob big shadow)
+---
 culling optimize
 - if shape or text element  size is smaller than 20px, skip render text
 wait this seems to do a loop check

@@ -542,11 +542,21 @@ impl EventHandler for App {
     fn mouse_button_up_event(&mut self, button: MouseButton, x: f32, y: f32) {
         let had_drag = self.input.drag_mode != DragMode::None;
         let had_preview = self.input.preview.is_some();
+        let active_before_up = self.input.active_text_id;
         input::on_mouse_up(
             &mut self.input, &mut self.board, &self.camera,
             &mut self.toolbar, self.screen_size, x, y, button,
         );
         self.input.text_selecting = false;
+        let active_after_up = self.input.active_text_id;
+        if active_before_up != active_after_up {
+            if active_before_up.is_some() {
+                self.finish_text_edit(true);
+            }
+            if let Some(id) = active_after_up {
+                self.begin_text_edit(id);
+            }
+        }
 
         if had_drag || had_preview {
             self.spatial_dirty = true;

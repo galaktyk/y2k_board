@@ -239,7 +239,8 @@ pub fn on_mouse_up(
                 }
                 let _ = camera;
                 let _ = screen_size;
-                element.id = board.next_id();
+                let new_id = board.next_id();
+                element.id = new_id;
                 if element.shape == ShapeType::Text {
                     element.text = Some(crate::board::TextData {
                         content: String::new(),
@@ -248,8 +249,10 @@ pub fn on_mouse_up(
                     });
                 }
                 board.apply_operation(BoardOperation::AddElement(element));
+                board.deselect_all();
+                board.select_only(new_id);
                 if matches!(toolbar.active_tool, Tool::Text) {
-                    state.active_text_id = Some(board.next_available_id().saturating_sub(1));
+                    state.active_text_id = Some(new_id);
                     state.text_cursor = 0;
                 }
                 toolbar.active_tool = Tool::Select;
