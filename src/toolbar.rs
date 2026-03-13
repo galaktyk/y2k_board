@@ -178,15 +178,7 @@ pub fn element_to_instances(
         crate::board::ShapeType::Line    => 2.0,
     };
 
-    out.push(InstanceData {
-        pos:        e.pos.to_array(),
-        size:       e.size.to_array(),
-        color:      e.color,
-        shape_type: st,
-        alpha,
-    });
-
-    // Selection highlight: a slightly larger, blue-ish semi-transparent copy
+    // Selection highlight: a slightly larger, blue-ish semi-transparent copy underneath
     if e.selected {
         let expand = 3.0f32;
         let sel_color = [0.25, 0.55, 1.0, 0.45];
@@ -198,6 +190,15 @@ pub fn element_to_instances(
             alpha,
         });
     }
+
+    out.push(InstanceData {
+        pos:        e.pos.to_array(),
+        size:       e.size.to_array(),
+        color:      e.color,
+        shape_type: st,
+        alpha,
+    });
+
 
     out
 }
