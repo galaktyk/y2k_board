@@ -118,13 +118,20 @@ pub fn build_stats_instances(
     let pad     = 8.0f32;
 
     let text_color = [0.88f32, 0.92, 0.96, 1.0];
+    let frame_label = if frame_ms >= 10.0 {
+        format!("FT   {:.1}MS", frame_ms)
+    } else if frame_ms >= 1.0 {
+        format!("FT   {:.2}MS", frame_ms)
+    } else {
+        format!("FT   {:.3}MS", frame_ms)
+    };
 
     // Lines listed top → bottom inside the panel
     let lines: [String; 4] = [
         format!("ZOOM {:.3}X",  zoom),
         format!("OBJ  {}",      obj_count),
         format!("FPS  {:.0}",   fps),
-        format!("FT   {:.1}MS", frame_ms),
+        frame_label,
     ];
 
     let max_chars = lines.iter().map(|l| l.chars().count()).max().unwrap_or(1) as f32;

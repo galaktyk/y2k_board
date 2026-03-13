@@ -209,14 +209,14 @@ This reduces network traffic.
 ---
 
 
-# Sprint 2
-* ops CRDT system
-* snapshot save/load
+# Sprint 3
+
+
 
 
 
 # TBD
-* text rendering (fontdue) 
+
 * image uploading
 * image rendering
 

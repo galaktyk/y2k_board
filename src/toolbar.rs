@@ -180,40 +180,54 @@ impl Toolbar {
 
 /// Convert a world-space element into one or more InstanceData entries.
 /// `selected` adds a highlight border.
+pub fn element_instance(
+    e: &crate::board::Element,
+    alpha: f32,
+) -> InstanceData {
+    let st = match e.shape {
+        crate::board::ShapeType::Rect => 0.0,
+        crate::board::ShapeType::Ellipse => 1.0,
+        crate::board::ShapeType::Line => 2.0,
+    };
+
+    InstanceData {
+        pos: e.pos.to_array(),
+        size: e.size.to_array(),
+        rotation: e.rotation,
+        color: e.color,
+        shape_type: st,
+        alpha,
+    }
+}
+
+pub fn selection_instance(
+    e: &crate::board::Element,
+    alpha: f32,
+) -> Option<InstanceData> {
+    if !e.selected {
+        return None;
+    }
+
+    let st = match e.shape {
+        crate::board::ShapeType::Rect => 0.0,
+        crate::board::ShapeType::Ellipse => 1.0,
+        crate::board::ShapeType::Line => 2.0,
+    };
+    let expand = 3.0f32;
+
+    Some(InstanceData {
+        pos: (e.pos - Vec2::splat(expand)).to_array(),
+        size: (e.size + Vec2::splat(expand * 2.0)).to_array(),
+        rotation: e.rotation,
+        color: [0.25, 0.55, 1.0, 0.45],
+        shape_type: st,
+        alpha,
+    })
+}
+
 pub fn element_to_instances(
     e: &crate::board::Element,
     alpha: f32,
 ) -> Vec<InstanceData> {
-    let mut out = Vec::new();
-    let st = match e.shape {
-        crate::board::ShapeType::Rect    => 0.0,
-        crate::board::ShapeType::Ellipse => 1.0,
-        crate::board::ShapeType::Line    => 2.0,
-    };
-
-    // Selection highlight: a slightly larger, blue-ish semi-transparent copy underneath
-    if e.selected {
-        let expand = 3.0f32;
-        let sel_color = [0.25, 0.55, 1.0, 0.45];
-        out.push(InstanceData {
-            pos:  (e.pos - Vec2::splat(expand)).to_array(),
-            size: (e.size + Vec2::splat(expand * 2.0)).to_array(),
-            rotation: e.rotation,
-            color: sel_color,
-            shape_type: st,
-            alpha,
-        });
-    }
-
-    out.push(InstanceData {
-        pos:        e.pos.to_array(),
-        size:       e.size.to_array(),
-        rotation:   e.rotation,
-        color:      e.color,
-        shape_type: st,
-        alpha,
-    });
-
-
-    out
+    vec![element_instance(e, alpha)]
 }

@@ -17,6 +17,10 @@ fn main() {
         window_width: 1280,
         window_height: 800,
         high_dpi: true,
+        platform: conf::Platform {
+            blocking_event_loop: true,
+            ..Default::default()
+        },
         ..Default::default()
     };
     miniquad::start(conf, || Box::new(app::App::new()));
