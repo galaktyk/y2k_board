@@ -1,7 +1,9 @@
-when mouse down on resizer handle, exit text edit mode and start resizing
 
+
+is this html correct? i only see backscreen when open http://localhost:8080/ without any error in console
 
 ---
+
 
  Set the Caret/Candidate Position Hint for IME and emoji input
  canvas has a world transform (pan + zoom), so you must convert:

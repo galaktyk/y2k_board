@@ -93,6 +93,8 @@ pub fn on_mouse_down(
                         _ => unreachable!(),
                     }
                 };
+                state.active_text_id = None;
+                state.text_selecting = false;
                 state.move_origin = board
                     .elements
                     .iter()
