@@ -32,6 +32,7 @@ impl App {
     pub fn new() -> Self {
         let mut ctx = window::new_rendering_backend();
         let renderer = Renderer::new(&mut *ctx);
+        let (w, h) = window::screen_size();
         Self {
             ctx,
             renderer,
@@ -40,7 +41,7 @@ impl App {
             toolbar: Toolbar::new(),
             input: InputState::new(),
             spatial: SpatialGrid::new(),
-            screen_size: Vec2::new(800.0, 600.0),
+            screen_size: Vec2::new(w, h),
             dirty: true,
             last_frame:  Instant::now(),
             frame_ms:    0.0,
