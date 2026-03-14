@@ -1,6 +1,7 @@
 use glam::Vec2;
 
 use crate::board::{Element, ShapeType};
+use crate::input::state::SelectionBounds;
 use crate::renderer::InstanceData;
 
 pub fn get_element_handles(e: &Element) -> Option<Vec<Vec2>> {
@@ -19,6 +20,20 @@ pub fn get_element_handles(e: &Element) -> Option<Vec<Vec2>> {
     let th = -hh - 30.0;
 
     Some(vec![rot(-hw, -hh), rot(hw, -hh), rot(hw, hh), rot(-hw, hh), rot(0.0, th)])
+}
+
+pub fn get_selection_bounds_handles(bounds: SelectionBounds) -> Vec<Vec2> {
+    let min = bounds.min();
+    let max = bounds.max();
+    let top_center = Vec2::new((min.x + max.x) * 0.5, min.y - 30.0);
+
+    vec![
+        min,
+        Vec2::new(max.x, min.y),
+        max,
+        Vec2::new(min.x, max.y),
+        top_center,
+    ]
 }
 
 pub fn handles_to_instances(e: &Element) -> Vec<InstanceData> {
@@ -55,6 +70,36 @@ pub fn handles_to_instances(e: &Element) -> Vec<InstanceData> {
         [stick_center.x - 1.0, stick_center.y - 15.0],
         [2.0, 30.0],
         e.rotation,
+        [1.0, 1.0, 1.0, 0.9],
+        0.0,
+        1.0,
+    ));
+
+    for pt in handles {
+        out.push(InstanceData::new(
+            [pt.x - handle_size * 0.5, pt.y - handle_size * 0.5],
+            [handle_size, handle_size],
+            0.0,
+            [1.0, 1.0, 1.0, 1.0],
+            1.0,
+            1.0,
+        ));
+    }
+
+    out
+}
+
+pub fn selection_bounds_handles_to_instances(bounds: SelectionBounds) -> Vec<InstanceData> {
+    let mut out = Vec::new();
+    let handles = get_selection_bounds_handles(bounds);
+    let handle_size = 10.0;
+    let top_center = bounds.pos + Vec2::new(bounds.size.x * 0.5, 0.0);
+    let stick_center = Vec2::new(top_center.x, bounds.pos.y - 15.0);
+
+    out.push(InstanceData::new(
+        [stick_center.x - 1.0, stick_center.y - 15.0],
+        [2.0, 30.0],
+        0.0,
         [1.0, 1.0, 1.0, 0.9],
         0.0,
         1.0,

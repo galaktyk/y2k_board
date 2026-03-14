@@ -1,4 +1,11 @@
 
+add drag preview  (show area rectangle while dragging)
+add multiple selection 
+
+### multiple selection
+handles for resizing/rotating apply to whole selection in correct scale
+drag start anywhere inside that big rectangle will drag whole selection (easy hit test so you dont need to hit exactly on small element) 
+
 
 
 ---
@@ -13,13 +20,6 @@ text render optimize
 
 
 ---
-
-
-add multiple selection with drag over
- (show area rectangle while dragging)
-when drag finished, show big selection rectangle (also with handles for resizing/rotating)
-drag start anywhere inside that big rectangle will drag whole selection 
-
 
 ---
 

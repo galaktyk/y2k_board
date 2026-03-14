@@ -1,12 +1,130 @@
 use glam::Vec2;
 
 
-use crate::board::{Board, BoardOperation, Element, ShapeType};
+use crate::board::{Board, BoardOperation, Element, ElementPropertyChange, ElementPropertyPatch, ElementTransform, ShapeType};
 use crate::camera::Camera;
-use crate::input::handles::get_element_handles;
+use crate::input::handles::{get_element_handles, get_selection_bounds_handles};
 use crate::input::preview::default_color;
-use crate::input::state::{DragMode, HandleDir, InputState};
+use crate::input::state::{DragMode, HandleDir, InputState, SelectionBounds};
 use crate::toolbar::{Tool, Toolbar, ToolbarAction, TOOLBAR_HEIGHT};
+
+const HANDLE_HIT_RADIUS: f32 = 15.0;
+const MARQUEE_MIN_SIZE: f32 = 4.0;
+
+fn begin_transform_drag(
+    state: &mut InputState,
+    board: &Board,
+    drag_mode: DragMode,
+    world: Vec2,
+) {
+    state.drag_mode = drag_mode;
+    state.move_origin = board
+        .elements
+        .iter()
+        .filter(|element| element.selected)
+        .map(|element| (element.id, element.pos, element.size, element.rotation))
+        .collect();
+    state.move_start_world = world;
+    state.move_delta = Vec2::ZERO;
+    state.transform_bounds_origin = board.selected_bounds();
+    state.drag_selection_bounds = state.transform_bounds_origin;
+}
+
+fn move_changes_from_delta(state: &InputState) -> Vec<ElementPropertyChange> {
+    state
+        .move_origin
+        .iter()
+        .filter_map(|&(id, pos, size, rotation)| {
+            let before = ElementTransform::new(pos, size, rotation);
+            let after = ElementTransform::new(pos + state.move_delta, size, rotation);
+            (before != after).then_some(ElementPropertyChange {
+                id,
+                patch: ElementPropertyPatch::Transform { before, after },
+            })
+        })
+        .collect()
+}
+
+fn selection_handle_hit(board: &Board, world: Vec2) -> Option<DragMode> {
+    if board.selected_count() > 1 {
+        let bounds = board.selected_bounds()?;
+        for (index, point) in get_selection_bounds_handles(bounds).iter().enumerate() {
+            let delta = world - *point;
+            if delta.length_squared() < HANDLE_HIT_RADIUS * HANDLE_HIT_RADIUS {
+                return Some(match index {
+                    0 => DragMode::ResizingHandle(HandleDir::TL),
+                    1 => DragMode::ResizingHandle(HandleDir::TR),
+                    2 => DragMode::ResizingHandle(HandleDir::BR),
+                    3 => DragMode::ResizingHandle(HandleDir::BL),
+                    4 => DragMode::Rotating,
+                    _ => unreachable!(),
+                });
+            }
+        }
+        return None;
+    }
+
+    for element in board.elements.iter().filter(|element| element.selected).rev() {
+        if let Some(handles) = get_element_handles(element) {
+            for (index, point) in handles.iter().enumerate() {
+                let delta = world - *point;
+                if delta.length_squared() < HANDLE_HIT_RADIUS * HANDLE_HIT_RADIUS {
+                    return Some(if element.shape == ShapeType::Line {
+                        match index {
+                            0 => DragMode::ResizingHandle(HandleDir::LineStart),
+                            1 => DragMode::ResizingHandle(HandleDir::LineEnd),
+                            _ => unreachable!(),
+                        }
+                    } else {
+                        match index {
+                            0 => DragMode::ResizingHandle(HandleDir::TL),
+                            1 => DragMode::ResizingHandle(HandleDir::TR),
+                            2 => DragMode::ResizingHandle(HandleDir::BR),
+                            3 => DragMode::ResizingHandle(HandleDir::BL),
+                            4 => DragMode::Rotating,
+                            _ => unreachable!(),
+                        }
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn rotate_point(point: Vec2, center: Vec2, angle: f32) -> Vec2 {
+    let offset = point - center;
+    let cos_a = angle.cos();
+    let sin_a = angle.sin();
+    center + Vec2::new(
+        offset.x * cos_a - offset.y * sin_a,
+        offset.x * sin_a + offset.y * cos_a,
+    )
+}
+
+fn scale_point_from_anchor(point: Vec2, anchor: Vec2, scale_x: f32, scale_y: f32) -> Vec2 {
+    anchor + Vec2::new((point.x - anchor.x) * scale_x, (point.y - anchor.y) * scale_y)
+}
+
+fn group_resize_from_handle(
+    bounds: SelectionBounds,
+    dir: HandleDir,
+    world: Vec2,
+) -> Option<(Vec2, f32, f32)> {
+    let min = bounds.min();
+    let max = bounds.max();
+    let width = bounds.size.x.max(1.0);
+    let height = bounds.size.y.max(1.0);
+
+    match dir {
+        HandleDir::TL => Some((max, (max.x - world.x) / width, (max.y - world.y) / height)),
+        HandleDir::TR => Some((Vec2::new(min.x, max.y), (world.x - min.x) / width, (max.y - world.y) / height)),
+        HandleDir::BR => Some((min, (world.x - min.x) / width, (world.y - min.y) / height)),
+        HandleDir::BL => Some((Vec2::new(max.x, min.y), (max.x - world.x) / width, (world.y - min.y) / height)),
+        _ => None,
+    }
+}
 
 pub fn on_mouse_down(
     state: &mut InputState,
@@ -57,58 +175,36 @@ pub fn on_mouse_down(
     match toolbar.active_tool {
         Tool::Select => {
             let now = miniquad::date::now();
-            let mut handle_hit = None;
-            for e in board.elements.iter().filter(|e| e.selected).rev() {
-                if let Some(handles) = get_element_handles(e) {
-                    let hit_radius = 15.0f32;
-                    for (index, &pt) in handles.iter().enumerate() {
-                        let dx = world.x - pt.x;
-                        let dy = world.y - pt.y;
-                        if dx * dx + dy * dy < hit_radius * hit_radius {
-                            handle_hit = Some((e.id, index));
-                            break;
-                        }
-                    }
-                }
-                if handle_hit.is_some() {
-                    break;
-                }
-            }
-
-            if let Some((id, handle_index)) = handle_hit {
-                let element = board.elements.iter().find(|e| e.id == id).unwrap();
-                state.drag_mode = if element.shape == ShapeType::Line {
-                    match handle_index {
-                        0 => DragMode::ResizingHandle(HandleDir::LineStart),
-                        1 => DragMode::ResizingHandle(HandleDir::LineEnd),
-                        _ => unreachable!(),
-                    }
-                } else {
-                    match handle_index {
-                        0 => DragMode::ResizingHandle(HandleDir::TL),
-                        1 => DragMode::ResizingHandle(HandleDir::TR),
-                        2 => DragMode::ResizingHandle(HandleDir::BR),
-                        3 => DragMode::ResizingHandle(HandleDir::BL),
-                        4 => DragMode::Rotating,
-                        _ => unreachable!(),
-                    }
-                };
+            if let Some(drag_mode) = selection_handle_hit(board, world) {
                 state.active_text_id = None;
                 state.text_selecting = false;
-                state.move_origin = board
-                    .elements
-                    .iter()
-                    .filter(|e| e.selected)
-                    .map(|e| (e.id, e.pos, e.size, e.rotation))
-                    .collect();
-                state.move_start_world = world;
-                state.move_delta = Vec2::ZERO;
+                begin_transform_drag(state, board, drag_mode, world);
                 return None;
+            }
+
+            if board.selected_count() > 1 {
+                if let Some(bounds) = board.selected_bounds() {
+                    if bounds.contains(world) {
+                        state.active_text_id = None;
+                        state.text_selecting = false;
+                        begin_transform_drag(state, board, DragMode::MoveSelected, world);
+                        return None;
+                    }
+                }
             }
 
             if let Some(id) = board.hit_test(world) {
                 if state.active_text_id.is_some() && state.active_text_id != Some(id) {
                     state.active_text_id = None;
+                }
+
+                if state.shift_held {
+                    state.last_click_id = None;
+                    state.last_click_at = None;
+                    state.text_selecting = false;
+                    board.toggle_selected(id);
+                    state.drag_selection_bounds = board.selected_bounds();
+                    return None;
                 }
 
                 let is_double_click = state.last_click_id == Some(id)
@@ -121,11 +217,7 @@ pub fn on_mouse_down(
                 state.last_click_at = Some(now);
 
                 let already_selected = board
-                    .elements
-                    .iter()
-                    .find(|e| e.id == id)
-                    .map(|e| e.selected)
-                    .unwrap_or(false);
+                    .is_selected(id);
                 if !already_selected {
                     board.deselect_all();
                     board.select_only(id);
@@ -154,21 +246,18 @@ pub fn on_mouse_down(
                     return None;
                 }
 
-                state.move_origin = board
-                    .elements
-                    .iter()
-                    .filter(|e| e.selected)
-                    .map(|e| (e.id, e.pos, e.size, e.rotation))
-                    .collect();
-                state.drag_mode = DragMode::MoveSelected;
-                state.move_start_world = world;
-                state.move_delta = Vec2::ZERO;
+                begin_transform_drag(state, board, DragMode::MoveSelected, world);
             } else {
                 state.last_click_id = None;
                 state.last_click_at = None;
                 state.active_text_id = None;
                 state.text_selecting = false;
-                board.deselect_all();
+                state.drag_mode = DragMode::MarqueeSelect;
+                state.move_start_world = world;
+                state.move_delta = Vec2::ZERO;
+                state.marquee_bounds = Some(SelectionBounds::from_points(world, world));
+                state.drag_selection_bounds = None;
+                state.transform_bounds_origin = None;
             }
         }
         Tool::Rect | Tool::Ellipse | Tool::Line | Tool::Text => {
@@ -212,14 +301,38 @@ pub fn on_mouse_up(
     state.text_selecting = false;
 
     if state.drag_mode != DragMode::None {
-        let changes = board.selected_transform_changes(&state.move_origin);
-        if !changes.is_empty() {
-            board.apply_operation(BoardOperation::SetProperty { changes });
+        match state.drag_mode {
+            DragMode::MarqueeSelect => {
+                if let Some(bounds) = state.marquee_bounds.take() {
+                    if bounds.size.x >= MARQUEE_MIN_SIZE || bounds.size.y >= MARQUEE_MIN_SIZE {
+                        board.select_intersecting_bounds(bounds, state.shift_held);
+                    } else if !state.shift_held {
+                        board.deselect_all();
+                    }
+                } else if !state.shift_held {
+                    board.deselect_all();
+                }
+            }
+            DragMode::MoveSelected => {
+                let changes = move_changes_from_delta(state);
+                if !changes.is_empty() {
+                    board.apply_operation(BoardOperation::SetProperty { changes });
+                }
+            }
+            _ => {
+                let changes = board.selected_transform_changes(&state.move_origin);
+                if !changes.is_empty() {
+                    board.apply_operation(BoardOperation::SetProperty { changes });
+                }
+            }
         }
     }
     state.drag_mode = DragMode::None;
     state.move_delta = Vec2::ZERO;
     state.move_origin.clear();
+    state.marquee_bounds = None;
+    state.drag_selection_bounds = None;
+    state.transform_bounds_origin = None;
 
     if state.dragging_tool {
         state.dragging_tool = false;
@@ -286,7 +399,21 @@ pub fn on_mouse_move(
     let world = camera.screen_to_world(state.mouse_pos, screen_size);
 
     if state.drag_mode != DragMode::None {
+        if state.drag_mode == DragMode::MarqueeSelect {
+            state.marquee_bounds = Some(SelectionBounds::from_points(state.move_start_world, world));
+            return;
+        }
+
         state.move_delta = world - state.move_start_world;
+        if state.drag_mode == DragMode::MoveSelected {
+            state.drag_selection_bounds = state
+                .transform_bounds_origin
+                .map(|bounds| SelectionBounds::new(bounds.pos + state.move_delta, bounds.size));
+            return;
+        }
+
+        let is_group_transform = state.move_origin.len() > 1;
+
         for element in &mut board.elements {
             if element.selected {
                 if let Some(&(_, orig_pos, orig_size, orig_rot)) = state
@@ -295,21 +422,72 @@ pub fn on_mouse_move(
                     .find(|&&(id, _, _, _)| id == element.id)
                 {
                     match state.drag_mode {
-                        DragMode::MoveSelected => {
-                            element.pos = orig_pos + state.move_delta;
-                            element.bump_text_generation();
-                        }
                         DragMode::Rotating => {
-                            let center = orig_pos + orig_size * 0.5;
-                            let start_vec = state.move_start_world - center;
-                            let current_vec = world - center;
-                            let angle_diff =
-                                current_vec.y.atan2(current_vec.x) - start_vec.y.atan2(start_vec.x);
-                            element.rotation = orig_rot + angle_diff;
+                            if is_group_transform {
+                                let Some(bounds) = state.transform_bounds_origin else {
+                                    continue;
+                                };
+                                let center = bounds.center();
+                                let start_vec = state.move_start_world - center;
+                                let current_vec = world - center;
+                                let angle_diff = current_vec.y.atan2(current_vec.x)
+                                    - start_vec.y.atan2(start_vec.x);
+
+                                if element.shape == ShapeType::Line {
+                                    let start = rotate_point(orig_pos, center, angle_diff);
+                                    let end = rotate_point(orig_pos + orig_size, center, angle_diff);
+                                    element.pos = start;
+                                    element.size = end - start;
+                                } else {
+                                    let original_center = orig_pos + orig_size * 0.5;
+                                    let rotated_center = rotate_point(original_center, center, angle_diff);
+                                    element.pos = rotated_center - orig_size * 0.5;
+                                    element.rotation = orig_rot + angle_diff;
+                                }
+                            } else {
+                                let center = orig_pos + orig_size * 0.5;
+                                let start_vec = state.move_start_world - center;
+                                let current_vec = world - center;
+                                let angle_diff = current_vec.y.atan2(current_vec.x)
+                                    - start_vec.y.atan2(start_vec.x);
+                                element.rotation = orig_rot + angle_diff;
+                            }
                             element.bump_text_generation();
                         }
                         DragMode::ResizingHandle(dir) => {
-                            if element.shape == ShapeType::Line {
+                            if is_group_transform {
+                                let Some(bounds) = state.transform_bounds_origin else {
+                                    continue;
+                                };
+                                let Some((anchor, scale_x, scale_y)) =
+                                    group_resize_from_handle(bounds, dir, world)
+                                else {
+                                    continue;
+                                };
+
+                                if element.shape == ShapeType::Line {
+                                    let start = scale_point_from_anchor(orig_pos, anchor, scale_x, scale_y);
+                                    let end = scale_point_from_anchor(
+                                        orig_pos + orig_size,
+                                        anchor,
+                                        scale_x,
+                                        scale_y,
+                                    );
+                                    element.pos = start;
+                                    element.size = end - start;
+                                } else {
+                                    let original_center = orig_pos + orig_size * 0.5;
+                                    let scaled_center =
+                                        scale_point_from_anchor(original_center, anchor, scale_x, scale_y);
+                                    let new_size = Vec2::new(
+                                        orig_size.x * scale_x.abs(),
+                                        orig_size.y * scale_y.abs(),
+                                    )
+                                    .max(Vec2::splat(1.0));
+                                    element.pos = scaled_center - new_size * 0.5;
+                                    element.size = new_size;
+                                }
+                            } else if element.shape == ShapeType::Line {
                                 match dir {
                                     HandleDir::LineStart => {
                                         let old_end = orig_pos + orig_size;
@@ -367,11 +545,12 @@ pub fn on_mouse_move(
                             }
                             element.bump_text_generation();
                         }
-                        DragMode::None => {}
+                        DragMode::MoveSelected | DragMode::MarqueeSelect | DragMode::None => {}
                     }
                 }
             }
         }
+        state.drag_selection_bounds = board.selected_bounds();
         return;
     }
 

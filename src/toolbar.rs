@@ -1,4 +1,6 @@
 use glam::Vec2;
+
+use crate::input::SelectionBounds;
 use crate::renderer::InstanceData;
 use crate::stats::emit_text;
 
@@ -234,6 +236,36 @@ fn outline_instance(
         e.rotation,
         [0.35, 0.65, 1.0, 1.0],
         st,
+        alpha,
+    )
+}
+
+pub fn selection_bounds_instance(
+    bounds: SelectionBounds,
+    alpha: f32,
+) -> InstanceData {
+    bounds_outline_instance(bounds, [0.35, 0.65, 1.0, 1.0], alpha)
+}
+
+pub fn marquee_instance(
+    bounds: SelectionBounds,
+    alpha: f32,
+) -> InstanceData {
+    bounds_outline_instance(bounds, [0.45, 0.78, 1.0, 1.0], alpha)
+}
+
+fn bounds_outline_instance(
+    bounds: SelectionBounds,
+    color: [f32; 4],
+    alpha: f32,
+) -> InstanceData {
+    let expand = 4.0f32;
+    InstanceData::new(
+        (bounds.pos - Vec2::splat(expand)).to_array(),
+        (bounds.size + Vec2::splat(expand * 2.0)).to_array(),
+        0.0,
+        color,
+        3.0,
         alpha,
     )
 }

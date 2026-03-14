@@ -1,6 +1,8 @@
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
 
+use crate::input::SelectionBounds;
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -368,6 +370,66 @@ impl Board {
     pub fn deselect_all(&mut self) {
         for element in &mut self.elements {
             element.selected = false;
+        }
+    }
+
+    pub fn selected_ids(&self) -> Vec<u64> {
+        self.elements
+            .iter()
+            .filter(|element| element.selected)
+            .map(|element| element.id)
+            .collect()
+    }
+
+    pub fn selected_count(&self) -> usize {
+        self.elements.iter().filter(|element| element.selected).count()
+    }
+
+    pub fn is_selected(&self, id: u64) -> bool {
+        self.elements
+            .iter()
+            .find(|element| element.id == id)
+            .map(|element| element.selected)
+            .unwrap_or(false)
+    }
+
+    pub fn toggle_selected(&mut self, id: u64) {
+        if let Some(element) = self.elements.iter_mut().find(|element| element.id == id) {
+            element.selected = !element.selected;
+        }
+    }
+
+    pub fn selected_bounds(&self) -> Option<SelectionBounds> {
+        let mut bounds: Option<(Vec2, Vec2)> = None;
+
+        for element in self.elements.iter().filter(|element| element.selected) {
+            let (min, max) = element.aabb();
+            bounds = Some(match bounds {
+                Some((current_min, current_max)) => (current_min.min(min), current_max.max(max)),
+                None => (min, max),
+            });
+        }
+
+        bounds.map(|(min, max)| SelectionBounds::new(min, max - min))
+    }
+
+    pub fn select_intersecting_bounds(&mut self, bounds: SelectionBounds, additive: bool) {
+        let min = bounds.min();
+        let max = bounds.max();
+
+        if !additive {
+            self.deselect_all();
+        }
+
+        for element in &mut self.elements {
+            let (element_min, element_max) = element.aabb();
+            let intersects = element_min.x <= max.x
+                && element_max.x >= min.x
+                && element_min.y <= max.y
+                && element_max.y >= min.y;
+            if intersects {
+                element.selected = true;
+            }
         }
     }
 

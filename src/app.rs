@@ -162,6 +162,20 @@ fn element_in_range(element: &crate::board::Element, range: VisibleRange) -> boo
         && max.y >= range.min.y
 }
 
+fn offset_instance(mut instance: InstanceData, delta: Vec2) -> InstanceData {
+    instance.pos[0] += delta.x;
+    instance.pos[1] += delta.y;
+    instance
+}
+
+fn offset_text_instance(mut instance: crate::renderer::TextInstanceData, delta: Vec2) -> crate::renderer::TextInstanceData {
+    instance.pos[0] += delta.x;
+    instance.pos[1] += delta.y;
+    instance.origin[0] = instance.origin[0].saturating_add(delta.x.round() as i16);
+    instance.origin[1] = instance.origin[1].saturating_add(delta.y.round() as i16);
+    instance
+}
+
 struct TextEditSession {
     element_id: u64,
     original_text: Option<TextData>,
@@ -314,12 +328,7 @@ impl App {
     }
 
     fn selected_ids(&self) -> Vec<u64> {
-        self.board
-            .elements
-            .iter()
-            .filter(|element| element.selected)
-            .map(|element| element.id)
-            .collect()
+        self.board.selected_ids()
     }
 
     fn sync_board_render_cache(&mut self) -> bool {
@@ -431,33 +440,32 @@ impl EventHandler for App {
         // Draw board elements and toolbar in separate passes since they use different MVP matrices.
         let board_mvp = Renderer::camera_mvp(&self.camera, self.screen_size);
 
-
-
-        // Selection overlay (semi-transparent)    
-        let mut selection_inst = Vec::new();
-        for element in &self.board.elements {
-            if let Some(instance) = toolbar::selection_instance(element, 1.0) {
-                selection_inst.push(instance);
-            }
-        }
-
-        
-        if !selection_inst.is_empty() {
-            self.renderer
-                .draw_instances(&mut *self.ctx, &selection_inst, board_mvp);
-        }
-
-
-
-
-
+        let move_drag_offset = (self.input.drag_mode == DragMode::MoveSelected)
+            .then_some(self.input.move_delta)
+            .filter(|delta| delta.length_squared() > 0.0);
 
         // Board elements
-        self.renderer.draw_instances(
-            &mut *self.ctx,
-            self.board_render_cache.visible_instances(),
-            board_mvp,
-        );
+        let moved_shape_instances;
+        let shape_instances = if let Some(offset) = move_drag_offset {
+            moved_shape_instances = self
+                .board_render_cache
+                .visible_board_indices()
+                .iter()
+                .zip(self.board_render_cache.visible_instances().iter())
+                .map(|(&board_index, &instance)| {
+                    if self.board.elements[board_index].selected {
+                        offset_instance(instance, offset)
+                    } else {
+                        instance
+                    }
+                })
+                .collect::<Vec<_>>();
+            moved_shape_instances.as_slice()
+        } else {
+            self.board_render_cache.visible_instances()
+        };
+        self.renderer
+            .draw_instances(&mut *self.ctx, shape_instances, board_mvp);
 
         // Build current edit snapshot for cache comparison
         let current_edit_snapshot = self.text_edit.as_ref().map(|edit| TextEditSnapshot {
@@ -501,12 +509,48 @@ impl EventHandler for App {
             self.cached_text_draw.as_ref().unwrap()
         };
 
+        let moved_mono_instances;
+        let moved_color_instances;
+        let moved_caret_pos;
+        let mono_instances = if let Some(offset) = move_drag_offset {
+            moved_mono_instances = {
+                let mut instances = text_instances.mono_instances.clone();
+                for range in &text_instances.element_ranges {
+                    if self.board.is_selected(range.element_id) {
+                        for instance in &mut instances[range.mono_start..range.mono_end] {
+                            *instance = offset_text_instance(*instance, offset);
+                        }
+                    }
+                }
+                instances
+            };
+            moved_mono_instances.as_slice()
+        } else {
+            text_instances.mono_instances.as_slice()
+        };
+        let color_instances = if let Some(offset) = move_drag_offset {
+            moved_color_instances = {
+                let mut instances = text_instances.color_instances.clone();
+                for range in &text_instances.element_ranges {
+                    if self.board.is_selected(range.element_id) {
+                        for instance in &mut instances[range.color_start..range.color_end] {
+                            *instance = offset_text_instance(*instance, offset);
+                        }
+                    }
+                }
+                instances
+            };
+            moved_color_instances.as_slice()
+        } else {
+            text_instances.color_instances.as_slice()
+        };
         self.renderer
-            .draw_text_instances(&mut *self.ctx, &text_instances.mono_instances, board_mvp);
+            .draw_text_instances(&mut *self.ctx, mono_instances, board_mvp);
         self.renderer
-            .draw_color_text_instances(&mut *self.ctx, &text_instances.color_instances, board_mvp);
+            .draw_color_text_instances(&mut *self.ctx, color_instances, board_mvp);
 
-        if let Some(world_caret) = text_instances.caret_pos {
+        moved_caret_pos = move_drag_offset.map(|offset| text_instances.caret_pos.map(|pos| pos + offset)).unwrap_or(text_instances.caret_pos);
+        if let Some(world_caret) = moved_caret_pos {
             let screen_caret = self.camera.world_to_screen(world_caret, self.screen_size);
             set_ime_candidate_pos(screen_caret.x as i32, screen_caret.y as i32);
         }
@@ -519,11 +563,58 @@ impl EventHandler for App {
                 .draw_instances(&mut *self.ctx, &preview_inst, board_mvp);
         }
 
+        let mut selection_inst = Vec::new();
+        for element in &self.board.elements {
+            if let Some(instance) = toolbar::selection_instance(element, 1.0) {
+                selection_inst.push(if let Some(offset) = move_drag_offset.filter(|_| element.selected) {
+                    offset_instance(instance, offset)
+                } else {
+                    instance
+                });
+            }
+        }
+        if let Some(bounds) = self
+            .input
+            .drag_selection_bounds
+            .or_else(|| {
+                if self.board.selected_count() > 1 {
+                    self.board.selected_bounds()
+                } else {
+                    None
+                }
+            })
+        {
+            selection_inst.push(toolbar::selection_bounds_instance(bounds, 1.0));
+        }
+        if let Some(bounds) = self.input.marquee_bounds {
+            selection_inst.push(toolbar::marquee_instance(bounds, 1.0));
+        }
+        if !selection_inst.is_empty() {
+            self.renderer
+                .draw_instances(&mut *self.ctx, &selection_inst, board_mvp);
+        }
+
         // Selection handles
         let mut handle_inst = Vec::new();
-        for e in &self.board.elements {
-            if e.selected {
-                handle_inst.extend(crate::input::handles_to_instances(e));
+        if self.board.selected_count() > 1 {
+            if let Some(bounds) = self
+                .input
+                .drag_selection_bounds
+                .or_else(|| self.board.selected_bounds())
+            {
+                handle_inst.extend(crate::input::selection_bounds_handles_to_instances(bounds));
+            }
+        } else {
+            for e in &self.board.elements {
+                if e.selected {
+                    let mut instances = crate::input::handles_to_instances(e);
+                    if let Some(offset) = move_drag_offset {
+                        for instance in &mut instances {
+                            *instance = offset_instance(*instance, offset);
+                        }
+                    }
+                    handle_inst.extend(instances);
+                }
             }
         }
         if !handle_inst.is_empty() {
@@ -541,7 +632,7 @@ impl EventHandler for App {
         self.renderer.draw_instances(&mut *self.ctx, &tb_inst, screen_mvp);
 
         // ── Stats overlay ─────────────────────────────────────────────────
-        let char_count = text_instances.mono_instances.len() + text_instances.color_instances.len();
+        let char_count = mono_instances.len() + color_instances.len();
 
         let stats_inst = stats::build_stats_instances(
             self.camera.zoom,
@@ -594,7 +685,8 @@ impl EventHandler for App {
     }
 
     fn mouse_button_up_event(&mut self, button: MouseButton, x: f32, y: f32) {
-        let had_drag = self.input.drag_mode != DragMode::None;
+        let drag_mode_before_up = self.input.drag_mode;
+        let had_drag = drag_mode_before_up != DragMode::None;
         let had_preview = self.input.preview.is_some();
         let active_before_up = self.input.active_text_id;
         input::on_mouse_up(
@@ -614,6 +706,10 @@ impl EventHandler for App {
 
         if had_drag || had_preview {
             self.spatial_dirty = true;
+        }
+        if matches!(drag_mode_before_up, DragMode::MoveSelected | DragMode::ResizingHandle(_) | DragMode::Rotating) {
+            self.mark_board_structure_dirty();
+            return;
         }
         if had_preview || self.board.elements.len() != self.board_render_cache.all_instances.len() {
             self.mark_board_structure_dirty();
@@ -647,6 +743,11 @@ impl EventHandler for App {
             return;
         }
 
+        if matches!(self.input.drag_mode, DragMode::MarqueeSelect | DragMode::MoveSelected) {
+            self.request_redraw();
+            return;
+        }
+
         if self.input.drag_mode != DragMode::None {
             self.mark_elements_dirty(self.selected_ids());
             return;
@@ -663,6 +764,9 @@ impl EventHandler for App {
     }
 
     fn key_down_event(&mut self, keycode: KeyCode, keymods: KeyMods, _repeat: bool) {
+        self.input.shift_held = keymods.shift;
+        self.input.ctrl_held = keymods.ctrl;
+
         if self.input.active_text_id.is_some() {
             match keycode {
                 KeyCode::Escape => {
@@ -772,6 +876,11 @@ impl EventHandler for App {
     fn key_up_event(&mut self, keycode: KeyCode, _keymods: KeyMods) {
         if keycode == KeyCode::Space {
             self.input.space_held = false;
+        }
+        match keycode {
+            KeyCode::LeftShift | KeyCode::RightShift => self.input.shift_held = false,
+            KeyCode::LeftControl | KeyCode::RightControl => self.input.ctrl_held = false,
+            _ => {}
         }
     }
 

@@ -29,11 +29,21 @@ pub struct ActiveTextEdit<'a> {
     pub selection_anchor_byte: Option<usize>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct TextElementRange {
+    pub element_id: u64,
+    pub mono_start: usize,
+    pub mono_end: usize,
+    pub color_start: usize,
+    pub color_end: usize,
+}
+
 #[derive(Default, Clone)]
 pub struct PreparedTextDraw {
     pub mono_instances: Vec<TextInstanceData>,
     pub color_instances: Vec<TextInstanceData>,
     pub caret_pos: Option<Vec2>,
+    pub element_ranges: Vec<TextElementRange>,
 }
 
 /// Cached layout for a single element, keyed by element id.
@@ -123,6 +133,8 @@ impl TextSystem {
         let mut prepared = PreparedTextDraw::default();
 
         for element in candidates {
+            let mono_start = prepared.mono_instances.len();
+            let color_start = prepared.color_instances.len();
             let is_active_edit = active_edit
                 .as_ref()
                 .map(|edit| edit.element_id == element.id)
@@ -206,6 +218,14 @@ impl TextSystem {
                         AtlasKind::Color => prepared.color_instances.push(instance),
                     }
                 }
+
+                prepared.element_ranges.push(TextElementRange {
+                    element_id: element.id,
+                    mono_start,
+                    mono_end: prepared.mono_instances.len(),
+                    color_start,
+                    color_end: prepared.color_instances.len(),
+                });
             }
         }
 
