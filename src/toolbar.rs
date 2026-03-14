@@ -215,18 +215,17 @@ pub fn selection_instance(
         return None;
     }
 
-    let st = match e.shape {
-        crate::board::ShapeType::Rect | crate::board::ShapeType::Text => 0.0,
-        crate::board::ShapeType::Ellipse => 1.0,
-        crate::board::ShapeType::Line => 2.0,
+    let (st, expand) = match e.shape {
+        crate::board::ShapeType::Rect | crate::board::ShapeType::Text => (3.0f32, 4.0f32),
+        crate::board::ShapeType::Ellipse => (4.0, 4.0),
+        crate::board::ShapeType::Line => (2.0, 3.0),
     };
-    let expand = 3.0f32;
 
     Some(InstanceData {
         pos: (e.pos - Vec2::splat(expand)).to_array(),
         size: (e.size + Vec2::splat(expand * 2.0)).to_array(),
         rotation: e.rotation,
-        color: [0.25, 0.55, 1.0, 0.45],
+        color: [0.35, 0.65, 1.0, 1.0],
         shape_type: st,
         alpha,
     })

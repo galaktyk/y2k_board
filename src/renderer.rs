@@ -56,10 +56,11 @@ varying float v_shape;
 varying float v_alpha;
 varying vec2 v_line_p;
 varying float v_line_len;
+varying vec2 v_size;
 
 void main() {
     vec2 world_pos;
-    if (i_shape > 1.5) {
+    if (i_shape > 1.5 && i_shape < 2.5) {
         // Line
         vec2 dir = i_size;
         float len = length(dir);
@@ -93,6 +94,7 @@ void main() {
     v_color = i_color;
     v_shape = i_shape;
     v_alpha = i_alpha;
+    v_size  = i_size;
 }
 "#;
 
@@ -105,6 +107,7 @@ varying float v_shape;
 varying float v_alpha;
 varying vec2 v_line_p;
 varying float v_line_len;
+varying vec2 v_size;
 
 void main() {
     float alpha = v_color.a * v_alpha;
@@ -124,11 +127,7 @@ void main() {
         float a = smoothstep(1.0, 0.98, d);
         gl_FragColor = vec4(v_color.rgb, alpha * a);
 
-    } else {
-        if (v_shape > 2.5) {
-            gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
-            return;
-        }
+    } else if (v_shape < 2.5) {
         // Line
         vec2 p = v_line_p;
         float dx = p.x - clamp(p.x, 0.0, v_line_len);
@@ -136,6 +135,27 @@ void main() {
         float thickness = 4.0; // visual half-thickness
         float a = 1.0 - smoothstep(thickness - 1.0, thickness + 1.0, d);
         gl_FragColor = vec4(v_color.rgb, alpha * a);
+
+    } else if (v_shape < 3.5) {
+        // Rect border outline
+        vec2 dist = min(uv, 1.0 - uv) * v_size;
+        float edge = min(dist.x, dist.y);
+        float border = 2.5;
+        float a = smoothstep(0.0, 1.0, edge) * (1.0 - smoothstep(border, border + 1.0, edge));
+        gl_FragColor = vec4(v_color.rgb, alpha * a);
+
+    } else if (v_shape < 4.5) {
+        // Ellipse border outline
+        vec2 c = uv * 2.0 - 1.0;
+        float d = length(c);
+        float r = min(v_size.x, v_size.y) * 0.5;
+        float br = 2.5 / r;
+        float outer = 1.0 - smoothstep(1.0, 1.0 + br * 0.5, d);
+        float inner = smoothstep(1.0 - br - 1.0 / r, 1.0 - br, d);
+        gl_FragColor = vec4(v_color.rgb, alpha * outer * inner);
+
+    } else {
+        gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
     }
 }
 "#;
