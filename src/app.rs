@@ -108,12 +108,8 @@ impl BoardRenderCache {
         }
     }
 
-    fn visible_instances(&self) -> &[InstanceData] {
-        &self.visible_instances
-    }
-
-    fn visible_board_indices(&self) -> &[usize] {
-        &self.visible_board_indices
+    fn all_instances(&self) -> &[InstanceData] {
+        &self.all_instances
     }
 
     fn push_visible(&mut self, board_index: usize, id: u64) {
@@ -284,6 +280,7 @@ pub struct App {
     board_render_cache: BoardRenderCache,
     screen_size: Vec2,
     board_cache_dirty: bool,
+    board_scene_dirty: bool,
     spatial_dirty: bool,
     visibility_dirty: bool,
     dirty_element_ids: HashSet<u64>,
@@ -317,6 +314,7 @@ impl App {
             board_render_cache: BoardRenderCache::default(),
             screen_size: Vec2::new(w, h),
             board_cache_dirty: true,
+            board_scene_dirty: true,
             spatial_dirty: true,
             visibility_dirty: true,
             dirty_element_ids: HashSet::new(),
@@ -350,6 +348,7 @@ impl App {
     fn rebuild_board_cache(&mut self) {
         self.board_render_cache.rebuild_all(&self.board);
         self.board_cache_dirty = false;
+        self.board_scene_dirty = true;
         self.visibility_dirty = true;
         // Evict stale layout cache entries for deleted elements
         let live_ids: HashSet<u64> = self.board.elements.iter().map(|e| e.id).collect();
@@ -358,14 +357,10 @@ impl App {
 
     fn mark_board_structure_dirty(&mut self) {
         self.board_cache_dirty = true;
+        self.board_scene_dirty = true;
         self.spatial_dirty = true;
         self.visibility_dirty = true;
         self.text_dirty = true;
-        self.request_redraw();
-    }
-
-    fn mark_visibility_dirty(&mut self) {
-        self.visibility_dirty = true;
         self.request_redraw();
     }
 
@@ -374,6 +369,7 @@ impl App {
         I: IntoIterator<Item = u64>,
     {
         self.dirty_element_ids.extend(ids);
+        self.board_scene_dirty = true;
         self.text_dirty = true;
         self.request_redraw();
     }
@@ -382,8 +378,7 @@ impl App {
         self.board.selected_ids()
     }
 
-    fn sync_board_render_cache(&mut self) -> bool {
-        let mut visible_set_changed = false;
+    fn sync_board_render_cache(&mut self) {
 
         if self.board_cache_dirty {
             self.rebuild_board_cache();
@@ -393,6 +388,7 @@ impl App {
             self.board_render_cache
                 .update_elements(&self.board, &self.dirty_element_ids);
             self.dirty_element_ids.clear();
+            self.board_scene_dirty = true;
         }
 
         if self.spatial_dirty {
@@ -401,7 +397,7 @@ impl App {
         }
 
         if self.visibility_dirty {
-            visible_set_changed = self.board_render_cache.rebuild_visible(
+            self.board_render_cache.rebuild_visible(
                 &self.board,
                 &self.spatial,
                 &self.camera,
@@ -409,8 +405,6 @@ impl App {
             );
             self.visibility_dirty = false;
         }
-
-        visible_set_changed
     }
 
     fn save_snapshot(&self) {
@@ -482,7 +476,13 @@ impl EventHandler for App {
         }
 
         // Capture visibility state BEFORE sync clears it
-        let visible_set_changed = self.sync_board_render_cache();
+        self.sync_board_render_cache();
+
+        if self.board_scene_dirty {
+            self.renderer
+                .upload_scene_instances(&mut *self.ctx, self.board_render_cache.all_instances());
+            self.board_scene_dirty = false;
+        }
 
         self.ctx.begin_default_pass(PassAction::clear_color(0.09, 0.10, 0.13, 1.0));
 
@@ -506,10 +506,10 @@ impl EventHandler for App {
         let shape_instances = if let Some((angle, center)) = rotate_drag_preview {
             rotated_shape_instances = self
                 .board_render_cache
-                .visible_board_indices()
+                .all_instances()
                 .iter()
-                .zip(self.board_render_cache.visible_instances().iter())
-                .map(|(&board_index, &instance)| {
+                .enumerate()
+                .map(|(board_index, &instance)| {
                     if self.board.elements[board_index].selected {
                         rotate_instance(instance, center, angle)
                     } else {
@@ -521,10 +521,10 @@ impl EventHandler for App {
         } else if let Some(offset) = move_drag_offset {
             moved_shape_instances = self
                 .board_render_cache
-                .visible_board_indices()
+                .all_instances()
                 .iter()
-                .zip(self.board_render_cache.visible_instances().iter())
-                .map(|(&board_index, &instance)| {
+                .enumerate()
+                .map(|(board_index, &instance)| {
                     if self.board.elements[board_index].selected {
                         offset_instance(instance, offset)
                     } else {
@@ -534,10 +534,15 @@ impl EventHandler for App {
                 .collect::<Vec<_>>();
             moved_shape_instances.as_slice()
         } else {
-            self.board_render_cache.visible_instances()
+            &[]
         };
+        if rotate_drag_preview.is_some() || move_drag_offset.is_some() {
             self.renderer
                 .draw_instances(&mut *self.ctx, shape_instances, board_mvp, self.screen_size);
+        } else {
+            self.renderer
+                .draw_scene_instances(&mut *self.ctx, board_mvp, self.screen_size);
+        }
 
         // Build current edit snapshot for cache comparison
         let current_edit_snapshot = self.text_edit.as_ref().map(|edit| TextEditSnapshot {
@@ -549,13 +554,11 @@ impl EventHandler for App {
 
         // Check if we can reuse cached text draw
         let text_cache_valid = !self.text_dirty
-            && !visible_set_changed
             && self.cached_text_draw.is_some()
             && self.cached_text_edit_snapshot == current_edit_snapshot;
 
-        let text_instances = if text_cache_valid {
+        if text_cache_valid {
             // FAST PATH: reuse cached PreparedTextDraw
-            self.cached_text_draw.as_ref().unwrap()
         } else {
             // SLOW PATH: rebuild
             let active_text_edit = current_edit_snapshot.as_ref().map(|snap| ActiveTextEdit {
@@ -565,21 +568,25 @@ impl EventHandler for App {
                 selection_anchor_byte: snap.selection_anchor_byte,
             });
 
-            let prepared = self.text_system.build_visible_text_instances(
+            let prepared = self.text_system.build_text_instances(
                 &mut *self.ctx,
                 self.renderer.text_atlas(),
                 self.renderer.emoji_atlas(),
                 &self.board,
-                self.board_render_cache.visible_board_indices(),
-                &self.camera,
                 active_text_edit,
             );
 
+            self.renderer.upload_scene_text_instances(
+                &mut *self.ctx,
+                &prepared.mono_instances,
+                &prepared.color_instances,
+            );
             self.cached_text_draw = Some(prepared);
-            self.cached_text_edit_snapshot = current_edit_snapshot;
+            self.cached_text_edit_snapshot = current_edit_snapshot.clone();
             self.text_dirty = false;
-            self.cached_text_draw.as_ref().unwrap()
-        };
+        }
+
+        let text_instances = self.cached_text_draw.as_ref().unwrap();
 
         let moved_mono_instances;
         let moved_color_instances;
@@ -644,10 +651,17 @@ impl EventHandler for App {
         } else {
             text_instances.color_instances.as_slice()
         };
-        self.renderer
-            .draw_text_instances(&mut *self.ctx, mono_instances, board_mvp);
-        self.renderer
-            .draw_color_text_instances(&mut *self.ctx, color_instances, board_mvp);
+        if rotate_drag_preview.is_some() || move_drag_offset.is_some() {
+            self.renderer
+                .draw_text_instances(&mut *self.ctx, mono_instances, board_mvp);
+            self.renderer
+                .draw_color_text_instances(&mut *self.ctx, color_instances, board_mvp);
+        } else {
+            self.renderer
+                .draw_scene_text_instances(&mut *self.ctx, board_mvp);
+            self.renderer
+                .draw_scene_color_text_instances(&mut *self.ctx, board_mvp);
+        }
 
         moved_caret_pos = if let Some((angle, center)) = rotate_drag_preview {
             text_instances.caret_pos.map(|pos| {
@@ -759,7 +773,7 @@ impl EventHandler for App {
 
         let stats_inst = stats::build_stats_instances(
             self.camera.zoom,
-            self.board_render_cache.visible_instances().len(),
+            self.board_render_cache.all_instances().len(),
             char_count,
             self.fps,
             self.frame_ms,
@@ -862,7 +876,7 @@ impl EventHandler for App {
         );
 
         if self.input.panning || was_panning {
-            self.mark_visibility_dirty();
+            self.request_redraw();
             return;
         }
 
@@ -885,7 +899,7 @@ impl EventHandler for App {
 
     fn mouse_wheel_event(&mut self, dx: f32, dy: f32) {
         input::on_scroll(&mut self.input, &mut self.camera, self.screen_size, dx, dy);
-        self.mark_visibility_dirty();
+        self.request_redraw();
     }
 
     fn key_down_event(&mut self, keycode: KeyCode, keymods: KeyMods, _repeat: bool) {

@@ -312,17 +312,31 @@ void main() {
 // ── Renderer ─────────────────────────────────────────────────────────────────
 
 pub struct Renderer {
-    // shape pipeline
+    // dynamic shape pipeline
     shape_pipeline: Pipeline,
     shape_bindings: Bindings,
     instance_buffer: BufferId,
 
-    // text pipelines
+    // persistent full-scene shape draw
+    scene_shape_bindings: Bindings,
+    scene_instance_buffer: BufferId,
+    scene_shape_count: usize,
+
+    // dynamic text pipelines
     text_pipeline: Pipeline,
     text_bindings: Bindings,
     color_text_pipeline: Pipeline,
     color_text_bindings: Bindings,
     text_instance_buffer: BufferId,
+
+    // persistent full-scene text draw
+    scene_text_bindings: Bindings,
+    scene_color_text_bindings: Bindings,
+    scene_mono_text_buffer: BufferId,
+    scene_color_text_buffer: BufferId,
+    scene_mono_text_count: usize,
+    scene_color_text_count: usize,
+
     text_atlas: TextureId,
     emoji_atlas: TextureId,
 
@@ -368,7 +382,22 @@ impl Renderer {
             BufferUsage::Stream,
             BufferSource::empty::<InstanceData>(MAX_SHAPE_INSTANCES),
         );
+        let scene_instance_buffer = ctx.new_buffer(
+            BufferType::VertexBuffer,
+            BufferUsage::Stream,
+            BufferSource::empty::<InstanceData>(MAX_SHAPE_INSTANCES),
+        );
         let text_instance_buffer = ctx.new_buffer(
+            BufferType::VertexBuffer,
+            BufferUsage::Stream,
+            BufferSource::empty::<TextInstanceData>(MAX_TEXT_INSTANCES),
+        );
+        let scene_mono_text_buffer = ctx.new_buffer(
+            BufferType::VertexBuffer,
+            BufferUsage::Stream,
+            BufferSource::empty::<TextInstanceData>(MAX_TEXT_INSTANCES),
+        );
+        let scene_color_text_buffer = ctx.new_buffer(
             BufferType::VertexBuffer,
             BufferUsage::Stream,
             BufferSource::empty::<TextInstanceData>(MAX_TEXT_INSTANCES),
@@ -465,6 +494,11 @@ impl Renderer {
             index_buffer: index_buf,
             images: vec![],
         };
+        let scene_shape_bindings = Bindings {
+            vertex_buffers: vec![vertex_buf, scene_instance_buffer],
+            index_buffer: index_buf,
+            images: vec![],
+        };
 
         let text_shader = ctx
             .new_shader(
@@ -520,6 +554,11 @@ impl Renderer {
             index_buffer: index_buf,
             images: vec![text_atlas],
         };
+        let scene_text_bindings = Bindings {
+            vertex_buffers: vec![vertex_buf, scene_mono_text_buffer],
+            index_buffer: index_buf,
+            images: vec![text_atlas],
+        };
 
         let color_text_shader = ctx
             .new_shader(
@@ -572,6 +611,11 @@ impl Renderer {
 
         let color_text_bindings = Bindings {
             vertex_buffers: vec![vertex_buf, text_instance_buffer],
+            index_buffer: index_buf,
+            images: vec![emoji_atlas],
+        };
+        let scene_color_text_bindings = Bindings {
+            vertex_buffers: vec![vertex_buf, scene_color_text_buffer],
             index_buffer: index_buf,
             images: vec![emoji_atlas],
         };
@@ -649,11 +693,20 @@ impl Renderer {
             shape_pipeline,
             shape_bindings,
             instance_buffer,
+            scene_shape_bindings,
+            scene_instance_buffer,
+            scene_shape_count: 0,
             text_pipeline,
             text_bindings,
             color_text_pipeline,
             color_text_bindings,
             text_instance_buffer,
+            scene_text_bindings,
+            scene_color_text_bindings,
+            scene_mono_text_buffer,
+            scene_color_text_buffer,
+            scene_mono_text_count: 0,
+            scene_color_text_count: 0,
             text_atlas,
             emoji_atlas,
             grid_pipeline,
@@ -732,6 +785,40 @@ impl Renderer {
         ctx.draw(0, 6, instances.len() as i32);
     }
 
+    pub fn upload_scene_instances(
+        &mut self,
+        ctx: &mut dyn RenderingBackend,
+        instances: &[InstanceData],
+    ) {
+        self.scene_shape_count = instances.len();
+        if instances.is_empty() {
+            return;
+        }
+
+        ctx.buffer_update(self.scene_instance_buffer, BufferSource::slice(instances));
+    }
+
+    pub fn draw_scene_instances(
+        &mut self,
+        ctx: &mut dyn RenderingBackend,
+        mvp: glam::Mat4,
+        screen_size: Vec2,
+    ) {
+        if self.scene_shape_count == 0 {
+            return;
+        }
+
+        let world_per_px = Self::world_per_px(mvp, screen_size);
+
+        ctx.apply_pipeline(&self.shape_pipeline);
+        ctx.apply_bindings(&self.scene_shape_bindings);
+        ctx.apply_uniforms(UniformsSource::table(&ShapeUniforms {
+            u_mvp: mvp.to_cols_array_2d(),
+            u_world_per_px: world_per_px,
+        }));
+        ctx.draw(0, 6, self.scene_shape_count as i32);
+    }
+
     pub fn draw_text_instances(
         &mut self,
         ctx: &mut dyn RenderingBackend,
@@ -751,6 +838,40 @@ impl Renderer {
         ctx.draw(0, 6, instances.len() as i32);
     }
 
+    pub fn upload_scene_text_instances(
+        &mut self,
+        ctx: &mut dyn RenderingBackend,
+        mono_instances: &[TextInstanceData],
+        color_instances: &[TextInstanceData],
+    ) {
+        self.scene_mono_text_count = mono_instances.len();
+        self.scene_color_text_count = color_instances.len();
+
+        if !mono_instances.is_empty() {
+            ctx.buffer_update(self.scene_mono_text_buffer, BufferSource::slice(mono_instances));
+        }
+        if !color_instances.is_empty() {
+            ctx.buffer_update(self.scene_color_text_buffer, BufferSource::slice(color_instances));
+        }
+    }
+
+    pub fn draw_scene_text_instances(
+        &mut self,
+        ctx: &mut dyn RenderingBackend,
+        mvp: glam::Mat4,
+    ) {
+        if self.scene_mono_text_count == 0 {
+            return;
+        }
+
+        ctx.apply_pipeline(&self.text_pipeline);
+        ctx.apply_bindings(&self.scene_text_bindings);
+        ctx.apply_uniforms(UniformsSource::table(&TextUniforms {
+            u_mvp: mvp.to_cols_array_2d(),
+        }));
+        ctx.draw(0, 6, self.scene_mono_text_count as i32);
+    }
+
     pub fn draw_color_text_instances(
         &mut self,
         ctx: &mut dyn RenderingBackend,
@@ -768,6 +889,23 @@ impl Renderer {
             u_mvp: mvp.to_cols_array_2d(),
         }));
         ctx.draw(0, 6, instances.len() as i32);
+    }
+
+    pub fn draw_scene_color_text_instances(
+        &mut self,
+        ctx: &mut dyn RenderingBackend,
+        mvp: glam::Mat4,
+    ) {
+        if self.scene_color_text_count == 0 {
+            return;
+        }
+
+        ctx.apply_pipeline(&self.color_text_pipeline);
+        ctx.apply_bindings(&self.scene_color_text_bindings);
+        ctx.apply_uniforms(UniformsSource::table(&TextUniforms {
+            u_mvp: mvp.to_cols_array_2d(),
+        }));
+        ctx.draw(0, 6, self.scene_color_text_count as i32);
     }
 
     fn world_per_px(mvp: glam::Mat4, screen_size: Vec2) -> f32 {

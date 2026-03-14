@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -10,7 +9,6 @@ use glam::Vec2;
 use miniquad::{RenderingBackend, TextureId};
 
 use crate::board::{Board, Element, TextData};
-use crate::camera::Camera;
 use crate::renderer::TextInstanceData;
 
 const TEXT_ATLAS_SIZE: usize = 1024;
@@ -96,21 +94,19 @@ impl TextSystem {
         self.layout_cache.retain(|id, _| live_ids.contains(id));
     }
 
-    pub fn build_visible_text_instances(
+    pub fn build_text_instances(
         &mut self,
         ctx: &mut dyn RenderingBackend,
         text_atlas: TextureId,
         emoji_atlas: TextureId,
         board: &Board,
-        visible_indices: &[usize],
-        camera: &Camera,
         active_edit: Option<ActiveTextEdit<'_>>,
     ) -> PreparedTextDraw {
         self.ensure_overlay_pixel(ctx, text_atlas);
 
-        let mut candidates: Vec<&Element> = visible_indices
+        let candidates: Vec<&Element> = board
+            .elements
             .iter()
-            .filter_map(|&index| board.elements.get(index))
             .filter(|element| {
                 let active_content = active_edit
                     .filter(|edit| edit.element_id == element.id)
@@ -121,14 +117,6 @@ impl TextSystem {
                     .unwrap_or(false)
             })
             .collect();
-
-        candidates.sort_by(|left, right| {
-            let left_dist = text_host_distance(left, camera.pan);
-            let right_dist = text_host_distance(right, camera.pan);
-            left_dist
-                .partial_cmp(&right_dist)
-                .unwrap_or(Ordering::Equal)
-        });
 
         let mut prepared = PreparedTextDraw::default();
 
@@ -656,11 +644,6 @@ fn atlas_bytes(image: &SwashImage) -> Option<Vec<u8>> {
             Some(bytes)
         }
     }
-}
-
-fn text_host_distance(element: &Element, screen_center: Vec2) -> f32 {
-    let center = element.pos + element.size * 0.5;
-    center.distance_squared(screen_center)
 }
 
 fn inverse_rotate_point(element: &Element, point: Vec2) -> Vec2 {
