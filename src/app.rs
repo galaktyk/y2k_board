@@ -1172,6 +1172,11 @@ impl App {
             })
             .collect();
 
+        for (image, _, _, _) in &pending {
+            self.image_manager
+                .preload_thumb(&mut *self.ctx, &image.asset_path);
+        }
+
         pending
             .into_iter()
             .map(|(image, pos, size, rotation)| {

@@ -3,8 +3,13 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use image::imageops::FilterType;
-use image::{DynamicImage, GenericImageView, RgbaImage};
-use miniquad::{FilterMode, RenderingBackend, TextureAccess, TextureFormat, TextureId, TextureParams, TextureSource, TextureWrap};
+use image::{DynamicImage, GenericImageView};
+use miniquad::{
+    Bindings, BufferLayout, BufferSource, BufferType, BufferUsage, FilterMode,
+    MipmapFilterMode, PassAction, Pipeline, PipelineParams, RenderPass, RenderingBackend,
+    ShaderMeta, ShaderSource, TextureAccess, TextureFormat, TextureId, TextureParams,
+    TextureSource, TextureWrap, UniformBlockLayout, VertexAttribute, VertexFormat,
+};
 
 use crate::board::ImageData;
 use crate::renderer::{ImageInstanceData, PreparedImageDraw};
@@ -12,7 +17,7 @@ use crate::renderer::{ImageInstanceData, PreparedImageDraw};
 pub const BASE_IMAGE_MAX_DIMENSION: u32 = 512;
 pub const HIRES_IMAGE_MAX_DIMENSION: u32 = 2048;
 pub const HIRES_SCREEN_FRACTION: f32 = 0.8;
-pub const THUMB_ZOOM_THRESHOLD: f32 = 0.1;
+pub const THUMB_ZOOM_THRESHOLD: f32 = 0.2;
 
 const MAX_RAM_BYTES: usize = 128 * 1024 * 1024;
 const MAX_GPU_BYTES: usize = 64 * 1024 * 1024;
@@ -94,6 +99,13 @@ struct AtlasEntry {
     uv_max: [f32; 2],
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct AtlasBlitVertex {
+    pos: [f32; 2],
+    uv: [f32; 2],
+}
+
 pub struct ImageManager {
     asset_root: PathBuf,
     ram_cache: HashMap<String, RamEntry>,
@@ -103,14 +115,26 @@ pub struct ImageManager {
     gpu_lru: Vec<String>,
     gpu_used_bytes: usize,
     atlas_texture: TextureId,
+    atlas_pass: RenderPass,
+    atlas_blit_pipeline: Pipeline,
+    atlas_blit_bindings: Bindings,
     atlas_entries: HashMap<String, AtlasEntry>,
     atlas_slot_owner: Vec<Option<String>>,
     atlas_next_slot: usize,
+    thumb_placeholder_texture: TextureId,
     missing_texture: TextureId,
 }
 
 impl ImageManager {
     pub fn new(ctx: &mut dyn RenderingBackend, asset_root: PathBuf) -> Self {
+        let missing_texture = create_missing_texture(ctx);
+        let thumb_placeholder_texture = create_thumb_placeholder_texture(ctx);
+        let atlas_texture = create_thumb_atlas(ctx);
+        let atlas_pass = ctx.new_render_pass(atlas_texture, None);
+        clear_atlas_texture(ctx, atlas_pass);
+        let (atlas_blit_pipeline, atlas_blit_bindings) =
+            create_atlas_blit_resources(ctx, missing_texture);
+
         Self {
             asset_root,
             ram_cache: HashMap::new(),
@@ -119,11 +143,15 @@ impl ImageManager {
             gpu_cache: HashMap::new(),
             gpu_lru: Vec::new(),
             gpu_used_bytes: 0,
-            atlas_texture: create_thumb_atlas(ctx),
+            atlas_texture,
+            atlas_pass,
+            atlas_blit_pipeline,
+            atlas_blit_bindings,
             atlas_entries: HashMap::new(),
             atlas_slot_owner: vec![None; THUMB_SLOT_COUNT],
             atlas_next_slot: 0,
-            missing_texture: create_missing_texture(ctx),
+            thumb_placeholder_texture,
+            missing_texture,
         }
     }
 
@@ -218,6 +246,19 @@ impl ImageManager {
                     ),
                 };
             }
+
+            return PreparedImageDraw {
+                texture: self.thumb_placeholder_texture,
+                instance: ImageInstanceData::new(
+                    pos,
+                    size,
+                    [pos[0] + size[0] * 0.5, pos[1] + size[1] * 0.5],
+                    rotation,
+                    [0.0, 0.0],
+                    [1.0, 1.0],
+                    [1.0, 1.0, 1.0, 1.0],
+                ),
+            };
         }
 
         let prefer_hires = image
@@ -231,9 +272,9 @@ impl ImageManager {
                 if !self.gpu_cache.contains_key(path) {
                     println!("[image] HIRES trigger {} screen=({:.0},{:.0}) viewport=({:.0},{:.0})", path, screen_extent[0], screen_extent[1], viewport_size[0], viewport_size[1]);
                 }
-                self.load_gpu_texture(ctx, path)
+                self.load_gpu_texture(ctx, path, true)
             })
-            .or_else(|| self.load_gpu_texture(ctx, &image.asset_path))
+            .or_else(|| self.load_gpu_texture(ctx, &image.asset_path, false))
             .unwrap_or(self.missing_texture);
 
         PreparedImageDraw {
@@ -248,6 +289,10 @@ impl ImageManager {
                 [1.0, 1.0, 1.0, 1.0],
             ),
         }
+    }
+
+    pub fn preload_thumb(&mut self, ctx: &mut dyn RenderingBackend, relative_path: &str) {
+        let _ = self.ensure_thumb_entry(ctx, relative_path);
     }
 
     pub fn atlas_count(&self) -> usize {
@@ -290,9 +335,10 @@ impl ImageManager {
         self.atlas_entries.clear();
         self.atlas_slot_owner.fill(None);
         self.atlas_next_slot = 0;
+        clear_atlas_texture(ctx, self.atlas_pass);
     }
 
-    fn load_gpu_texture(&mut self, ctx: &mut dyn RenderingBackend, relative_path: &str) -> Option<TextureId> {
+    fn load_gpu_texture(&mut self, ctx: &mut dyn RenderingBackend, relative_path: &str, is_hires: bool) -> Option<TextureId> {
         if let Some(entry) = self.gpu_cache.get(relative_path).copied() {
             touch_lru(&mut self.gpu_lru, relative_path);
             return Some(entry.texture);
@@ -311,9 +357,24 @@ impl ImageManager {
                 wrap: TextureWrap::Clamp,
                 min_filter: FilterMode::Linear,
                 mag_filter: FilterMode::Linear,
+                mipmap_filter: if is_hires {
+                    MipmapFilterMode::None
+                } else {
+                    MipmapFilterMode::Linear
+                },
+                allocate_mipmaps: !is_hires,
                 ..Default::default()
             },
         );
+        if is_hires {
+            ctx.texture_set_filter(texture, FilterMode::Linear, MipmapFilterMode::None);
+        } else {
+            ctx.texture_generate_mipmaps(texture);
+            ctx.texture_set_filter(texture, FilterMode::Linear, MipmapFilterMode::Linear);
+        }
+        if is_hires {
+            println!("[image] HIRES resident {} {}x{} no-mipmap", relative_path, decoded.width, decoded.height);
+        }
         self.gpu_cache
             .insert(relative_path.to_string(), GpuEntry { texture, bytes });
         touch_lru(&mut self.gpu_lru, relative_path);
@@ -368,8 +429,15 @@ impl ImageManager {
             return Some(entry);
         }
 
-        let decoded = self.load_ram_image(relative_path)?;
-        let thumb = build_thumbnail_rgba(&decoded)?;
+        let source_texture = self.load_gpu_texture(ctx, relative_path, false)?;
+        let source_size = self
+            .ram_cache
+            .get(relative_path)
+            .map(|entry| (entry.image.width, entry.image.height))
+            .or_else(|| {
+                let (width, height) = ctx.texture_size(source_texture);
+                (width > 0 && height > 0).then_some((width, height))
+            })?;
 
         let slot = self.atlas_next_slot;
         self.atlas_next_slot = (self.atlas_next_slot + 1) % THUMB_SLOT_COUNT;
@@ -381,19 +449,27 @@ impl ImageManager {
         let row = (slot / THUMB_SLOTS_PER_ROW) as u32;
         let x = col * THUMB_SIZE;
         let y = row * THUMB_SIZE;
-        ctx.texture_update_part(
-            self.atlas_texture,
-            x as i32,
-            y as i32,
-            THUMB_SIZE as i32,
-            THUMB_SIZE as i32,
-            &thumb,
+        let (content_offset, content_size) = fit_thumbnail_rect(source_size.0, source_size.1)?;
+        blit_texture_into_atlas(
+            ctx,
+            self.atlas_pass,
+            &self.atlas_blit_pipeline,
+            &mut self.atlas_blit_bindings,
+            source_texture,
+            [x, y],
+            content_offset,
+            content_size,
         );
 
         let atlas_size = THUMB_ATLAS_SIZE as f32;
+        let uv_x = x + content_offset[0];
+        let uv_y = y + content_offset[1];
         let entry = AtlasEntry {
-            uv_min: [x as f32 / atlas_size, y as f32 / atlas_size],
-            uv_max: [(x + THUMB_SIZE) as f32 / atlas_size, (y + THUMB_SIZE) as f32 / atlas_size],
+            uv_min: [uv_x as f32 / atlas_size, uv_y as f32 / atlas_size],
+            uv_max: [
+                (uv_x + content_size[0]) as f32 / atlas_size,
+                (uv_y + content_size[1]) as f32 / atlas_size,
+            ],
         };
         self.atlas_entries.insert(relative_path.to_string(), entry);
         Some(entry)
@@ -426,30 +502,17 @@ fn decoded_from_image(image: &DynamicImage) -> DecodedImage {
     }
 }
 
-fn build_thumbnail_rgba(decoded: &DecodedImage) -> Option<Vec<u8>> {
-    let source = RgbaImage::from_raw(decoded.width, decoded.height, decoded.rgba.clone())?;
-    let scaled = DynamicImage::ImageRgba8(source)
-        .resize(THUMB_SIZE, THUMB_SIZE, FilterType::Triangle)
-        .to_rgba8();
-    let mut canvas = vec![0u8; (THUMB_SIZE * THUMB_SIZE * 4) as usize];
-    let offset_x = ((THUMB_SIZE - scaled.width()) / 2) as usize;
-    let offset_y = ((THUMB_SIZE - scaled.height()) / 2) as usize;
-    let scaled_width = scaled.width() as usize;
-    let scaled_height = scaled.height() as usize;
-    let scaled_raw = scaled.into_raw();
-
-    for row in 0..scaled_height {
-        let dst_row = offset_y + row;
-        let src_start = row * scaled_width * 4;
-        let src_end = src_start + scaled_width * 4;
-        let dst_start = (dst_row * THUMB_SIZE as usize + offset_x) * 4;
-        let dst_end = dst_start + scaled_width * 4;
-        if dst_end <= canvas.len() && src_end <= scaled_raw.len() {
-            canvas[dst_start..dst_end].copy_from_slice(&scaled_raw[src_start..src_end]);
-        }
+fn fit_thumbnail_rect(width: u32, height: u32) -> Option<([u32; 2], [u32; 2])> {
+    if width == 0 || height == 0 {
+        return None;
     }
 
-    Some(canvas)
+    let scale = (THUMB_SIZE as f32 / width as f32).min(THUMB_SIZE as f32 / height as f32);
+    let draw_width = (width as f32 * scale).round().clamp(1.0, THUMB_SIZE as f32) as u32;
+    let draw_height = (height as f32 * scale).round().clamp(1.0, THUMB_SIZE as f32) as u32;
+    let offset_x = (THUMB_SIZE - draw_width) / 2;
+    let offset_y = (THUMB_SIZE - draw_height) / 2;
+    Some(([offset_x, offset_y], [draw_width, draw_height]))
 }
 
 fn touch_lru(order: &mut Vec<String>, key: &str) {
@@ -481,23 +544,165 @@ fn create_missing_texture(ctx: &mut dyn RenderingBackend) -> TextureId {
             wrap: TextureWrap::Clamp,
             min_filter: FilterMode::Nearest,
             mag_filter: FilterMode::Nearest,
+            mipmap_filter: MipmapFilterMode::None,
+            allocate_mipmaps: false,
+            ..Default::default()
+        },
+    )
+}
+
+fn create_thumb_placeholder_texture(ctx: &mut dyn RenderingBackend) -> TextureId {
+    let pixels: [u8; 16] = [92, 98, 108, 255, 92, 98, 108, 255, 92, 98, 108, 255, 92, 98, 108, 255];
+
+    ctx.new_texture(
+        TextureAccess::Static,
+        TextureSource::Bytes(&pixels),
+        TextureParams {
+            width: 2,
+            height: 2,
+            format: TextureFormat::RGBA8,
+            wrap: TextureWrap::Clamp,
+            min_filter: FilterMode::Nearest,
+            mag_filter: FilterMode::Nearest,
+            mipmap_filter: MipmapFilterMode::None,
+            allocate_mipmaps: false,
             ..Default::default()
         },
     )
 }
 
 fn create_thumb_atlas(ctx: &mut dyn RenderingBackend) -> TextureId {
-    ctx.new_texture(
-        TextureAccess::Static,
-        TextureSource::Bytes(&vec![0u8; (THUMB_ATLAS_SIZE * THUMB_ATLAS_SIZE * 4) as usize]),
-        TextureParams {
-            width: THUMB_ATLAS_SIZE,
-            height: THUMB_ATLAS_SIZE,
-            format: TextureFormat::RGBA8,
-            wrap: TextureWrap::Clamp,
-            min_filter: FilterMode::Linear,
-            mag_filter: FilterMode::Linear,
-            ..Default::default()
-        },
-    )
+    let texture = ctx.new_render_texture(TextureParams {
+        width: THUMB_ATLAS_SIZE,
+        height: THUMB_ATLAS_SIZE,
+        format: TextureFormat::RGBA8,
+        wrap: TextureWrap::Clamp,
+        min_filter: FilterMode::Linear,
+        mag_filter: FilterMode::Linear,
+        mipmap_filter: MipmapFilterMode::None,
+        allocate_mipmaps: false,
+        ..Default::default()
+    });
+    ctx.texture_set_filter(texture, FilterMode::Linear, MipmapFilterMode::None);
+    texture
 }
+
+fn clear_atlas_texture(ctx: &mut dyn RenderingBackend, atlas_pass: RenderPass) {
+    ctx.begin_pass(Some(atlas_pass), PassAction::clear_color(0.0, 0.0, 0.0, 0.0));
+    ctx.end_render_pass();
+}
+
+fn create_atlas_blit_resources(
+    ctx: &mut dyn RenderingBackend,
+    placeholder_texture: TextureId,
+) -> (Pipeline, Bindings) {
+    let vertices: [AtlasBlitVertex; 4] = [
+        AtlasBlitVertex {
+            pos: [-1.0, -1.0],
+            uv: [0.0, 0.0],
+        },
+        AtlasBlitVertex {
+            pos: [1.0, -1.0],
+            uv: [1.0, 0.0],
+        },
+        AtlasBlitVertex {
+            pos: [1.0, 1.0],
+            uv: [1.0, 1.0],
+        },
+        AtlasBlitVertex {
+            pos: [-1.0, 1.0],
+            uv: [0.0, 1.0],
+        },
+    ];
+    let indices: [u16; 6] = [0, 1, 2, 0, 2, 3];
+
+    let vertex_buffer = ctx.new_buffer(
+        BufferType::VertexBuffer,
+        BufferUsage::Immutable,
+        BufferSource::slice(&vertices),
+    );
+    let index_buffer = ctx.new_buffer(
+        BufferType::IndexBuffer,
+        BufferUsage::Immutable,
+        BufferSource::slice(&indices),
+    );
+    let shader = ctx
+        .new_shader(
+            ShaderSource::Glsl {
+                vertex: ATLAS_BLIT_VERTEX_SRC,
+                fragment: ATLAS_BLIT_FRAGMENT_SRC,
+            },
+            ShaderMeta {
+                images: vec!["u_source".to_string()],
+                uniforms: UniformBlockLayout { uniforms: vec![] },
+            },
+        )
+        .expect("atlas blit shader compile failed");
+    let pipeline = ctx.new_pipeline(
+        &[BufferLayout::default()],
+        &[
+            VertexAttribute::new("a_pos", VertexFormat::Float2),
+            VertexAttribute::new("a_uv", VertexFormat::Float2),
+        ],
+        shader,
+        PipelineParams::default(),
+    );
+    let bindings = Bindings {
+        vertex_buffers: vec![vertex_buffer],
+        index_buffer,
+        images: vec![placeholder_texture],
+    };
+    (pipeline, bindings)
+}
+
+fn blit_texture_into_atlas(
+    ctx: &mut dyn RenderingBackend,
+    atlas_pass: RenderPass,
+    atlas_blit_pipeline: &Pipeline,
+    atlas_blit_bindings: &mut Bindings,
+    source_texture: TextureId,
+    slot_origin: [u32; 2],
+    content_offset: [u32; 2],
+    content_size: [u32; 2],
+) {
+    atlas_blit_bindings.images[0] = source_texture;
+
+    let slot_x = slot_origin[0] as i32;
+    let slot_y = slot_origin[1] as i32;
+    let content_x = (slot_origin[0] + content_offset[0]) as i32;
+    let content_y = (slot_origin[1] + content_offset[1]) as i32;
+
+    ctx.begin_pass(Some(atlas_pass), PassAction::Nothing);
+    ctx.apply_scissor_rect(slot_x, slot_y, THUMB_SIZE as i32, THUMB_SIZE as i32);
+    ctx.clear(Some((0.0, 0.0, 0.0, 0.0)), None, None);
+    ctx.apply_pipeline(atlas_blit_pipeline);
+    ctx.apply_bindings(atlas_blit_bindings);
+    ctx.apply_viewport(content_x, content_y, content_size[0] as i32, content_size[1] as i32);
+    ctx.apply_scissor_rect(content_x, content_y, content_size[0] as i32, content_size[1] as i32);
+    ctx.draw(0, 6, 1);
+    ctx.end_render_pass();
+}
+
+const ATLAS_BLIT_VERTEX_SRC: &str = r#"#version 100
+attribute vec2 a_pos;
+attribute vec2 a_uv;
+
+varying vec2 v_uv;
+
+void main() {
+    gl_Position = vec4(a_pos, 0.0, 1.0);
+    v_uv = a_uv;
+}
+"#;
+
+const ATLAS_BLIT_FRAGMENT_SRC: &str = r#"#version 100
+precision highp float;
+
+varying vec2 v_uv;
+
+uniform sampler2D u_source;
+
+void main() {
+    gl_FragColor = texture2D(u_source, v_uv);
+}
+"#;

@@ -55,7 +55,10 @@ normally it follow step 3 but if it hires and we are looking at it whith width o
 
 ## Special case for thumbnail 
 we steal mipmap in GPU -> atlas GPU copy from image 512 to our pre alloc atlas 
-when Zoom < 0.1 render all iamge as thumbnail atlas
+when Zoom < 0.2 render all iamge as thumbnail atlas
+
+if atlas not exist in GPU show placeholder thumbnail (gray box)
+
 
 
 Lifecycle example:
