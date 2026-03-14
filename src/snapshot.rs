@@ -7,6 +7,12 @@ use crate::board::{Board, Element};
 
 const SNAPSHOT_FILENAME: &str = "snapshot.bin";
 
+#[derive(Clone, Debug)]
+pub struct LoadedSnapshot {
+    pub data: SnapshotData,
+    pub path: PathBuf,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SnapshotData {
     pub elements: Vec<Element>,
@@ -48,14 +54,16 @@ impl From<bincode::Error> for SnapshotError {
     }
 }
 
-pub fn save_to_default_path(board: &Board) -> Result<PathBuf, SnapshotError> {
-    let path = PathBuf::from(SNAPSHOT_FILENAME);
-    save_to_path(board, &path)?;
-    Ok(path)
+pub fn default_snapshot_path() -> PathBuf {
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join(SNAPSHOT_FILENAME)
 }
 
-pub fn load_from_default_path() -> Result<SnapshotData, SnapshotError> {
-    load_from_path(Path::new(SNAPSHOT_FILENAME))
+pub fn snapshot_root(path: &Path) -> PathBuf {
+    path.parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
 pub fn snapshot_from_board(board: &Board) -> SnapshotData {
@@ -74,24 +82,32 @@ pub fn snapshot_from_board(board: &Board) -> SnapshotData {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn save_to_path(board: &Board, path: &Path) -> Result<(), SnapshotError> {
+pub fn save_to_path(board: &Board, path: &Path) -> Result<PathBuf, SnapshotError> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
     let bytes = bincode::serialize(&snapshot_from_board(board))?;
     std::fs::write(path, bytes)?;
-    Ok(())
+    Ok(path.to_path_buf())
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn save_to_path(_board: &Board, _path: &Path) -> Result<(), SnapshotError> {
+pub fn save_to_path(_board: &Board, _path: &Path) -> Result<PathBuf, SnapshotError> {
     Err(SnapshotError::UnsupportedPlatform)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn load_from_path(path: &Path) -> Result<SnapshotData, SnapshotError> {
+pub fn load_from_path(path: &Path) -> Result<LoadedSnapshot, SnapshotError> {
     let bytes = std::fs::read(path)?;
-    Ok(bincode::deserialize(&bytes)?)
+    Ok(LoadedSnapshot {
+        data: bincode::deserialize(&bytes)?,
+        path: path.to_path_buf(),
+    })
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn load_from_path(_path: &Path) -> Result<SnapshotData, SnapshotError> {
+pub fn load_from_path(_path: &Path) -> Result<LoadedSnapshot, SnapshotError> {
     Err(SnapshotError::UnsupportedPlatform)
 }

@@ -109,6 +109,12 @@ pub fn build_stats_instances(
     zoom:      f32,
     shapes_count: usize,
     char_count: usize,
+    atlas_count: usize,
+    atlas_total: usize,
+    image_ram_used_bytes: usize,
+    image_ram_total_bytes: usize,
+    image_vram_used_bytes: usize,
+    image_vram_total_bytes: usize,
     fps:       f32,
     frame_ms:  f32,
     screen:    Vec2,
@@ -134,13 +140,20 @@ pub fn build_stats_instances(
     let total_mb: f64 = (shape_bytes + text_bytes) as f64 / (1024.0 * 1024.0);
 
     let mb_usage: f64 = ((shapes_count * std::mem::size_of::<InstanceData>()) as f64 + (char_count * std::mem::size_of::<TextInstanceData>()) as f64) / (1024.0 * 1024.0);
+    let image_ram_mb = image_ram_used_bytes as f64 / (1024.0 * 1024.0);
+    let image_ram_total_mb = image_ram_total_bytes as f64 / (1024.0 * 1024.0);
+    let image_vram_mb = image_vram_used_bytes as f64 / (1024.0 * 1024.0);
+    let image_vram_total_mb = image_vram_total_bytes as f64 / (1024.0 * 1024.0);
 
     // Lines listed top → bottom inside the panel
-    let lines: [String; 6] = [
+    let lines: Vec<String> = vec![
         format!("ZOOM  {:.3}X", zoom),
         format!("SHAPE {}/{}", shapes_count, MAX_SHAPE_INSTANCES),
         format!("TEXT  {}/{}", char_count, MAX_TEXT_INSTANCES),
         format!("VRAM  {:.1}MB/{:.0}MB", mb_usage, total_mb),
+        format!("ATLAS {}/{}", atlas_count, atlas_total),
+        format!("IRAM  {:.1}MB/{:.0}MB", image_ram_mb, image_ram_total_mb),
+        format!("IVRAM {:.1}MB/{:.0}MB", image_vram_mb, image_vram_total_mb),
         format!("FPS   {:.0}", fps),
         frame_label,
     ];

@@ -296,6 +296,7 @@ pub struct App {
     ctx: Box<dyn RenderingBackend>,
     renderer: Renderer,
     board: Board,
+    snapshot_path: PathBuf,
     camera: Camera,
     toolbar: Toolbar,
     input: InputState,
@@ -326,13 +327,15 @@ impl App {
     pub fn new() -> Self {
         let mut ctx = window::new_rendering_backend();
         let renderer = Renderer::new(&mut *ctx);
-        let asset_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let snapshot_path = snapshot::default_snapshot_path();
+        let asset_root = snapshot::snapshot_root(&snapshot_path);
         let image_manager = ImageManager::new(&mut *ctx, asset_root);
         let (w, h) = window::screen_size();
         let app = Self {
             ctx,
             renderer,
             board: Board::new(),
+            snapshot_path,
             camera: Camera::new(),
             toolbar: Toolbar::new(),
             input: InputState::new(),
@@ -434,18 +437,23 @@ impl App {
         }
     }
 
-    fn save_snapshot(&self) {
-        match snapshot::save_to_default_path(&self.board) {
+    fn save_snapshot(&mut self) {
+        let asset_root = snapshot::snapshot_root(&self.snapshot_path);
+        self.image_manager.set_asset_root(&mut *self.ctx, asset_root);
+        match snapshot::save_to_path(&self.board, &self.snapshot_path) {
             Ok(path) => println!("Saved snapshot to {}", path.display()),
             Err(err) => eprintln!("Failed to save snapshot: {err}"),
         }
     }
 
     fn load_snapshot(&mut self) {
-        match snapshot::load_from_default_path() {
-            Ok(snapshot_data) => {
+        match snapshot::load_from_path(&self.snapshot_path) {
+            Ok(loaded) => {
+                self.snapshot_path = loaded.path.clone();
+                let asset_root = snapshot::snapshot_root(&self.snapshot_path);
+                self.image_manager.set_asset_root(&mut *self.ctx, asset_root);
                 self.board
-                    .restore_snapshot(snapshot_data.elements, snapshot_data.next_id);
+                    .restore_snapshot(loaded.data.elements, loaded.data.next_id);
                 self.camera = Camera::new();
                 self.input = InputState::new();
                 self.toolbar = Toolbar::new();
@@ -458,7 +466,7 @@ impl App {
                 self.cached_text_draw = None;
                 self.cached_text_edit_snapshot = None;
                 self.request_redraw();
-                println!("Loaded snapshot from snapshot.bin");
+                println!("Loaded snapshot from {}", self.snapshot_path.display());
             }
             Err(err) => eprintln!("Failed to load snapshot: {err}"),
         }
@@ -803,6 +811,12 @@ impl EventHandler for App {
             self.camera.zoom,
             self.board_render_cache.all_instances().len(),
             char_count,
+            self.image_manager.atlas_count(),
+            self.image_manager.atlas_capacity(),
+            self.image_manager.ram_used_bytes(),
+            self.image_manager.ram_capacity_bytes(),
+            self.image_manager.gpu_used_bytes(),
+            self.image_manager.gpu_capacity_bytes(),
             self.fps,
             self.frame_ms,
             self.screen_size,
@@ -1167,6 +1181,7 @@ impl App {
                     pos.to_array(),
                     size.to_array(),
                     rotation,
+                    self.camera.zoom,
                     [size.x * self.camera.zoom, size.y * self.camera.zoom],
                     self.screen_size.to_array(),
                 )
