@@ -2,23 +2,45 @@ use glam::Vec2;
 use crate::board::{Board, Element, ShapeType, TextData};
 use crate::camera::Camera;
 
-const LOREM_IPSUM: &str = "Lorem नमस्ते ipsum مرحبا dolor สวัสดี sit amet, consectetur 你好 adipiscing elit, sed do eiusmod こんにちは tempor incididunt ut 劳动 et dolore magna aliqua. Ut enim ad მინიმ veniam, उपयोग consequat จาก laboris nisi ut អត្ថបទ aliquip ex ea commodo consequat. Duis aute irure dolor في reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. 非常好 しかし例えれば deserunt mollit anim id est laborum, 在這裡 そしてまた 生活 ดีมาก និងសន្តិភាព مرحباً بالعالم.";
+const LOREM_IPSUM: &str = "Lorem नमस्ते ipsum مرحبا dolor स्वास्थ sit amet, consectetur 你好 adipiscing elit, sed do eiusmod こんにちは tempor incididunt ut 労动 et dolore magna aliqua. Ut enim ad მინიმ veniam, उपयोग consequat จาก laboris nisi ut អត្ថបទ aliquip ex ea commodo consequat. Duis aute irure dolor في reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. 非常好 しかし例えれば deserunt mollit anim id est laborum, 在這裡 そしてまた 生活 ดีมาก និងសន្តិភាព مرحباً بالعالم.";
+const LOREM_EMOJI: &str = "😀😃😄😁😆😅😂🤣😊😇🙂🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯 🦁 🐮 🐷 🐽 🐸 🐵 🐔 🐧 🐦 🐤 🐣 🐥 🦆 🦅 🦉 🦇 🐺 🐗 🐴 🦄 🐝 🐛 🦋 🐌 🐞 🐜 🦗 🕷️ 🕸️ 🦂 🦟 🦠 🐢 🐍 🦎 🐙 🦑😎🥳";
+const LOREM_ZWJ: &str = "👩‍💻 👨‍🚀 👩‍⚕️ 👨‍🍳 👩‍🏫 👨‍🔬 👩‍🚒 👨‍🎨 👩‍✈️ 👨‍💼 👩‍🔧 👨‍🏭 👩‍🌾 👨‍⚖️ 👩‍🚀 👨‍💻 👩‍🎤 👨‍🚒 👩‍🍳 👨‍✈️ 👩‍❤️‍👨 👨‍❤️‍👨 👩‍❤️‍👩 👩‍❤️‍💋‍👨 👨‍❤️‍💋‍👨 👩‍❤️‍💋‍👩 👨‍👩‍👧 👨‍👩‍👧‍👦 👩‍👩‍👧‍👦 👨‍👨‍👦 🏳️‍🌈 🏳️‍⚧️ 🧙‍♂️ 🧙‍♀️ 🧛‍♂️ 🧛‍♀️ 🧝‍♂️ 🧝‍♀️ 🧟‍♂️ 🧟‍♀️";
+
 
 fn generate_lorem_text(size: Vec2, randomness: f32) -> String {
-    // Length based on element size - larger elements get more text
     let area = size.x * size.y;
-    let max_chars = (area / 100.0).min(LOREM_IPSUM.len() as f32) as usize;
-    let max_chars = max_chars.max(10).min(LOREM_IPSUM.len());
+    let word_count = (area / 1000.0).max(2.0).min(30.0) as usize;
 
-    // Ensure we don't overflow when slicing
-    let max_start = LOREM_IPSUM.len().saturating_sub(max_chars);
-    let start = (randomness.clamp(0.0, 0.999_999_9) * (max_start as f32 + 1.0)) as usize;
+    let base_words: Vec<&str> = LOREM_IPSUM.split_whitespace().collect();
+    let emoji_words: Vec<&str> = LOREM_EMOJI.split_whitespace().collect();
+    let zwj_words: Vec<&str> = LOREM_ZWJ.split_whitespace().collect();
 
-    LOREM_IPSUM
-        .chars()
-        .skip(start)
-        .take(max_chars)
-        .collect()
+    let mut result = String::new();
+    let mut current_random = randomness;
+
+    for i in 0..word_count {
+        // Pseudorandom progression
+        current_random = (current_random * 13.0 + 17.0).fract();
+        
+        // 15% emoji, 15% ZWJ sequence, 70% base text
+        let word = if current_random < 0.15 {
+            let idx = (current_random * 100.0) as usize % emoji_words.len();
+            emoji_words[idx]
+        } else if current_random < 0.3 {
+            let idx = (current_random * 100.0) as usize % zwj_words.len();
+            zwj_words[idx]
+        } else {
+            let idx = (current_random * 100.0) as usize % base_words.len();
+            base_words[idx]
+        };
+
+        result.push_str(word);
+        if i < word_count - 1 {
+            result.push(' ');
+        }
+    }
+
+    result
 }
 
 pub fn spawn_debug_shapes(board: &mut Board, camera: &Camera, screen_size: Vec2) {

@@ -1,5 +1,5 @@
 use glam::Vec2;
-use crate::renderer::InstanceData;
+use crate::renderer::{InstanceData, TextInstanceData, MAX_SHAPE_INSTANCES, MAX_TEXT_INSTANCES};
 
 // ── 3×5 bitmap font ───────────────────────────────────────────────────────────
 //
@@ -43,6 +43,7 @@ fn char_rows(c: char) -> [u8; 5] {
         'Z' | 'z'        => [7, 1, 2, 4, 7],
         'U' | 'u'        => [5, 5, 5, 5, 7],
         ':'              => [0, 2, 0, 2, 0],
+        '/'              => [1, 1, 2, 4, 4],
         '.'              => [0, 0, 0, 0, 2],
         ' '              => [0, 0, 0, 0, 0],
         _                => [5, 0, 2, 0, 5], // unknown → "?"
@@ -61,14 +62,14 @@ fn emit_char(
     for (row, &bits) in rows.iter().enumerate() {
         for col in 0u8..3 {
             if bits & (4 >> col) != 0 {
-                out.push(InstanceData {
-                    pos:        [ox + col as f32 * scale, oy + row as f32 * scale],
-                    size:       [scale, scale],
-                    rotation:   0.0,
+                out.push(InstanceData::new(
+                    [ox + col as f32 * scale, oy + row as f32 * scale],
+                    [scale, scale],
+                    0.0,
                     color,
-                    shape_type: 0.0,
-                    alpha:      1.0,
-                });
+                    0.0,
+                    1.0,
+                ));
             }
         }
     }
@@ -106,7 +107,8 @@ pub fn emit_text(
 /// Build screen-space InstanceData for the stats overlay (bottom-right corner).
 pub fn build_stats_instances(
     zoom:      f32,
-    obj_count: usize,
+    shapes_count: usize,
+    char_count: usize,
     fps:       f32,
     frame_ms:  f32,
     screen:    Vec2,
@@ -126,11 +128,20 @@ pub fn build_stats_instances(
         format!("FT   {:.3}MS", frame_ms)
     };
 
+    // calculate sizes
+    let shape_bytes = MAX_SHAPE_INSTANCES * std::mem::size_of::<InstanceData>();
+    let text_bytes = MAX_TEXT_INSTANCES * std::mem::size_of::<TextInstanceData>();
+    let total_mb: f64 = (shape_bytes + text_bytes) as f64 / (1024.0 * 1024.0);
+
+    let mb_usage: f64 = ((shapes_count * std::mem::size_of::<InstanceData>()) as f64 + (char_count * std::mem::size_of::<TextInstanceData>()) as f64) / (1024.0 * 1024.0);
+
     // Lines listed top → bottom inside the panel
-    let lines: [String; 4] = [
-        format!("ZOOM {:.3}X",  zoom),
-        format!("OBJ  {}",      obj_count),
-        format!("FPS  {:.0}",   fps),
+    let lines: [String; 6] = [
+        format!("ZOOM  {:.3}X", zoom),
+        format!("SHAPE {}/{}", shapes_count, MAX_SHAPE_INSTANCES),
+        format!("TEXT  {}/{}", char_count, MAX_TEXT_INSTANCES),
+        format!("VRAM  {:.1}MB/{:.0}MB", mb_usage, total_mb),
+        format!("FPS   {:.0}", fps),
         frame_label,
     ];
 
@@ -146,14 +157,14 @@ pub fn build_stats_instances(
     let mut out = Vec::new();
 
     // Semi-transparent background panel
-    out.push(InstanceData {
-        pos:        [bg_x, bg_y],
-        size:       [bg_w, bg_h],
-        rotation:   0.0,
-        color:      [0.04, 0.05, 0.07, 0.80],
-        shape_type: 0.0,
-        alpha:      1.0,
-    });
+    out.push(InstanceData::new(
+        [bg_x, bg_y],
+        [bg_w, bg_h],
+        0.0,
+        [0.04, 0.05, 0.07, 0.80],
+        0.0,
+        1.0,
+    ));
 
     for (i, line) in lines.iter().enumerate() {
         let tx = bg_x + pad;

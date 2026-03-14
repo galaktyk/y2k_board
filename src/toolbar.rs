@@ -101,24 +101,24 @@ impl Toolbar {
         let mut out: Vec<InstanceData> = Vec::new();
 
         // Full toolbar background
-        out.push(InstanceData {
-            pos: [0.0, 0.0],
-            size: [screen_w, TOOLBAR_HEIGHT],
-            rotation: 0.0,
-            color: [0.13, 0.14, 0.18, 1.0],
-            shape_type: 0.0,
-            alpha: 1.0,
-        });
+        out.push(InstanceData::new(
+            [0.0, 0.0],
+            [screen_w, TOOLBAR_HEIGHT],
+            0.0,
+            [0.13, 0.14, 0.18, 1.0],
+            0.0,
+            1.0,
+        ));
 
         // Separator line at bottom
-        out.push(InstanceData {
-            pos: [0.0, TOOLBAR_HEIGHT - 1.0],
-            size: [screen_w, 1.0],
-            rotation: 0.0,
-            color: [0.25, 0.26, 0.30, 1.0],
-            shape_type: 0.0,
-            alpha: 1.0,
-        });
+        out.push(InstanceData::new(
+            [0.0, TOOLBAR_HEIGHT - 1.0],
+            [screen_w, 1.0],
+            0.0,
+            [0.25, 0.26, 0.30, 1.0],
+            0.0,
+            1.0,
+        ));
 
         for btn in &self.buttons {
             let is_active = matches!(
@@ -140,14 +140,14 @@ impl Toolbar {
 
             // Button background (highlight if active)
             if is_active {
-                out.push(InstanceData {
-                    pos: [btn.x + 2.0, 4.0],
-                    size: [BTN_W - 4.0, BTN_H - 8.0],
-                    rotation: 0.0,
-                    color: [0.25, 0.48, 0.82, 0.35],
-                    shape_type: 0.0,
-                    alpha: 1.0,
-                });
+                out.push(InstanceData::new(
+                    [btn.x + 2.0, 4.0],
+                    [BTN_W - 4.0, BTN_H - 8.0],
+                    0.0,
+                    [0.25, 0.48, 0.82, 0.35],
+                    0.0,
+                    1.0,
+                ));
             }
 
             let icon_alpha = if dimmed { 0.3 } else { 0.9 };
@@ -197,14 +197,14 @@ pub fn element_instance(
         crate::board::ShapeType::Text => 3.0,
     };
 
-    InstanceData {
-        pos: e.pos.to_array(),
-        size: e.size.to_array(),
-        rotation: e.rotation,
-        color: e.color,
-        shape_type: st,
+    InstanceData::new(
+        e.pos.to_array(),
+        e.size.to_array(),
+        e.rotation,
+        e.color,
+        st,
         alpha,
-    }
+    )
 }
 
 pub fn selection_instance(
@@ -221,14 +221,14 @@ pub fn selection_instance(
         crate::board::ShapeType::Line => (2.0, 3.0),
     };
 
-    Some(InstanceData {
-        pos: (e.pos - Vec2::splat(expand)).to_array(),
-        size: (e.size + Vec2::splat(expand * 2.0)).to_array(),
-        rotation: e.rotation,
-        color: [0.35, 0.65, 1.0, 1.0],
-        shape_type: st,
+    Some(InstanceData::new(
+        (e.pos - Vec2::splat(expand)).to_array(),
+        (e.size + Vec2::splat(expand * 2.0)).to_array(),
+        e.rotation,
+        [0.35, 0.65, 1.0, 1.0],
+        st,
         alpha,
-    })
+    ))
 }
 
 pub fn element_to_instances(

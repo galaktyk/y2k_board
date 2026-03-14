@@ -31,14 +31,14 @@ pub fn handles_to_instances(e: &Element) -> Vec<InstanceData> {
     let handle_size = 10.0;
     if e.shape == ShapeType::Line {
         for pt in handles {
-            out.push(InstanceData {
-                pos: [pt.x - handle_size * 0.5, pt.y - handle_size * 0.5],
-                size: [handle_size, handle_size],
-                rotation: 0.0,
-                color: [1.0, 1.0, 1.0, 1.0],
-                shape_type: 0.0,
-                alpha: 1.0,
-            });
+            out.push(InstanceData::new(
+                [pt.x - handle_size * 0.5, pt.y - handle_size * 0.5],
+                [handle_size, handle_size],
+                0.0,
+                [1.0, 1.0, 1.0, 1.0],
+                0.0,
+                1.0,
+            ));
         }
         return out;
     }
@@ -51,24 +51,24 @@ pub fn handles_to_instances(e: &Element) -> Vec<InstanceData> {
     };
     let stick_center = rot(0.0, -e.size.y * 0.5 - 15.0);
 
-    out.push(InstanceData {
-        pos: [stick_center.x - 1.0, stick_center.y],
-        size: [2.0, 15.0],
-        rotation: e.rotation,
-        color: [1.0, 1.0, 1.0, 0.9],
-        shape_type: 0.0,
-        alpha: 1.0,
-    });
+    out.push(InstanceData::new(
+        [stick_center.x - 1.0, stick_center.y],
+        [2.0, 15.0],
+        e.rotation,
+        [1.0, 1.0, 1.0, 0.9],
+        0.0,
+        1.0,
+    ));
 
     for pt in handles {
-        out.push(InstanceData {
-            pos: [pt.x - handle_size * 0.5, pt.y - handle_size * 0.5],
-            size: [handle_size, handle_size],
-            rotation: 0.0,
-            color: [1.0, 1.0, 1.0, 1.0],
-            shape_type: 0.0,
-            alpha: 1.0,
-        });
+        out.push(InstanceData::new(
+            [pt.x - handle_size * 0.5, pt.y - handle_size * 0.5],
+            [handle_size, handle_size],
+            0.0,
+            [1.0, 1.0, 1.0, 1.0],
+            0.0,
+            1.0,
+        ));
     }
 
     out

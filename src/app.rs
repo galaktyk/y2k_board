@@ -535,9 +535,12 @@ impl EventHandler for App {
         self.renderer.draw_instances(&mut *self.ctx, &tb_inst, screen_mvp);
 
         // ── Stats overlay ─────────────────────────────────────────────────
+        let char_count = text_instances.mono_instances.len() + text_instances.color_instances.len();
+
         let stats_inst = stats::build_stats_instances(
             self.camera.zoom,
-            self.board.elements.len(),
+            self.board_render_cache.visible_instances().len(),
+            char_count,
             self.fps,
             self.frame_ms,
             self.screen_size,

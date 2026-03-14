@@ -191,15 +191,15 @@ impl TextSystem {
                         AtlasKind::Color => EMOJI_ATLAS_SIZE,
                     };
 
-                    let instance = TextInstanceData {
-                        pos: pos.to_array(),
-                        size: [resolved.entry.width as f32, resolved.entry.height as f32],
+                    let instance = TextInstanceData::new(
+                        pos.to_array(),
+                        [resolved.entry.width as f32, resolved.entry.height as f32],
                         origin,
-                        rotation: element.rotation,
-                        uv_min: resolved.entry.uv_min(atlas_size as f32),
-                        uv_max: resolved.entry.uv_max(atlas_size as f32),
-                        color: instance_color,
-                    };
+                        element.rotation,
+                        resolved.entry.uv_min(atlas_size as f32),
+                        resolved.entry.uv_max(atlas_size as f32),
+                        instance_color,
+                    );
 
                     match resolved.kind {
                         AtlasKind::Mono => prepared.mono_instances.push(instance),
@@ -290,15 +290,15 @@ impl TextSystem {
                     if width <= 0.0 {
                         continue;
                     }
-                    instances.push(TextInstanceData {
-                        pos: (cached.world_min + Vec2::new(x, run.line_top)).to_array(),
-                        size: [width, run.line_height],
+                    instances.push(TextInstanceData::new(
+                        (cached.world_min + Vec2::new(x, run.line_top)).to_array(),
+                        [width, run.line_height],
                         origin,
-                        rotation: element.rotation,
+                        element.rotation,
                         uv_min,
                         uv_max,
-                        color: SELECTION_COLOR,
-                    });
+                        SELECTION_COLOR,
+                    ));
                 }
             }
         }
@@ -306,15 +306,15 @@ impl TextSystem {
         let cursor = global_byte_to_cursor(content, cursor_byte);
         if let Some((x, line_top, line_height)) = caret_geometry(&cached.buffer, cursor) {
             let world_pos = cached.world_min + Vec2::new((x - 1.0).max(0.0), line_top);
-            instances.push(TextInstanceData {
-                pos: world_pos.to_array(),
-                size: [2.0, line_height.max(1.0)],
+            instances.push(TextInstanceData::new(
+                world_pos.to_array(),
+                [2.0, line_height.max(1.0)],
                 origin,
-                rotation: element.rotation,
+                element.rotation,
                 uv_min,
                 uv_max,
-                color: CARET_COLOR,
-            });
+                CARET_COLOR,
+            ));
             caret_pos = Some(world_pos);
         }
 

@@ -2,6 +2,9 @@ use crate::camera::Camera;
 use glam::Vec2;
 use miniquad::*;
 
+pub const MAX_SHAPE_INSTANCES: usize = 100_000;
+pub const MAX_TEXT_INSTANCES: usize = 200_000;
+
 // ── Instance data ─────────────────────────────────────────────────────────────
 
 /// One instance in the GPU buffer.
@@ -9,30 +12,63 @@ use miniquad::*;
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct InstanceData {
-    /// Top-left position in whichever space the pass uses.
-    pub pos: [f32; 2],
-    /// Width/height (or dx/dy for lines).
-    pub size: [f32; 2],
-    /// Rotation in radians
-    pub rotation: f32,
-    /// RGBA colour.
-    pub color: [f32; 4],
-    /// 0 = rect, 1 = ellipse, 2 = line.
-    pub shape_type: f32,
-    /// Packed alpha multiplier (for previews), and a spare float.
-    pub alpha: f32,
+    pub pos:        [f32; 2],  // 8
+    pub size:       [f32; 2],  // 8
+    pub color:      [u8; 4],   // 4
+    pub rotation:   f32,       // 4
+    pub alpha:      u8,        // 1
+    pub shape_type: u8,        // 1
+    pub _pad:       [u8; 2],   // 2
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct TextInstanceData {
-    pub pos: [f32; 2],
-    pub size: [f32; 2],
-    pub origin: [f32; 2],
-    pub rotation: f32,
-    pub uv_min: [f32; 2],
-    pub uv_max: [f32; 2],
-    pub color: [f32; 4],
+    pub pos:      [f32; 2],  // 8
+    pub size:     [f32; 2],  // 8
+    pub uv_min:   [u16; 2],  // 4
+    pub uv_max:   [u16; 2],  // 4
+    pub origin:   [i16; 2],  // 4
+    pub color:    [u8; 4],   // 4
+    pub rotation: f32,       // 4
+}
+
+impl InstanceData {
+    pub fn new(pos: [f32; 2], size: [f32; 2], rotation: f32, color_f32: [f32; 4], shape_type: f32, alpha_f32: f32) -> Self {
+        Self {
+            pos,
+            size,
+            color: [
+                (color_f32[0] * 255.0) as u8,
+                (color_f32[1] * 255.0) as u8,
+                (color_f32[2] * 255.0) as u8,
+                (color_f32[3] * 255.0) as u8,
+            ],
+            rotation,
+            alpha: (alpha_f32 * 255.0) as u8,
+            shape_type: shape_type as u8,
+            _pad: [0, 0],
+        }
+    }
+}
+
+impl TextInstanceData {
+    pub fn new(pos: [f32; 2], size: [f32; 2], origin: [f32; 2], rotation: f32, uv_min: [f32; 2], uv_max: [f32; 2], color_f32: [f32; 4]) -> Self {
+        Self {
+            pos,
+            size,
+            uv_min: [(uv_min[0] * 65535.0) as u16, (uv_min[1] * 65535.0) as u16],
+            uv_max: [(uv_max[0] * 65535.0) as u16, (uv_max[1] * 65535.0) as u16],
+            origin: [origin[0] as i16, origin[1] as i16],
+            color: [
+                (color_f32[0] * 255.0) as u8,
+                (color_f32[1] * 255.0) as u8,
+                (color_f32[2] * 255.0) as u8,
+                (color_f32[3] * 255.0) as u8,
+            ],
+            rotation,
+        }
+    }
 }
 
 // ── Shaders ───────────────────────────────────────────────────────────────────
@@ -43,10 +79,9 @@ attribute vec2 a_pos;      // 0..1 range
 // per-instance
 attribute vec2 i_pos;
 attribute vec2 i_size;
-attribute float i_rotation;
 attribute vec4 i_color;
-attribute float i_shape;
-attribute float i_alpha;
+attribute float i_rotation;
+attribute vec4 i_pack;
 
 uniform mat4 u_mvp;
 
@@ -59,6 +94,10 @@ varying float v_line_len;
 varying vec2 v_size;
 
 void main() {
+    float i_alpha = i_pack.x / 255.0;
+    float i_shape = i_pack.y;
+    vec4 actual_color = i_color / 255.0;
+
     vec2 world_pos;
     if (i_shape > 1.5 && i_shape < 2.5) {
         // Line
@@ -91,7 +130,7 @@ void main() {
     world_pos = center + rot * (world_pos - center);
 
     gl_Position   = u_mvp * vec4(world_pos, 0.0, 1.0);
-    v_color = i_color;
+    v_color = actual_color;
     v_shape = i_shape;
     v_alpha = i_alpha;
     v_size  = i_size;
@@ -176,14 +215,22 @@ varying vec2 v_uv;
 varying vec4 v_color;
 
 void main() {
+    vec4 actual_color = i_color / 255.0;
+    vec2 actual_uv_min = i_uv_min / 65535.0;
+    vec2 actual_uv_max = i_uv_max / 65535.0;
+
+    vec2 actual_origin = i_origin;
+    if (actual_origin.x > 32767.0) { actual_origin.x -= 65536.0; }
+    if (actual_origin.y > 32767.0) { actual_origin.y -= 65536.0; }
+
     vec2 world_pos = i_pos + a_pos * i_size;
     float c = cos(i_rotation);
     float s = sin(i_rotation);
     mat2 rot = mat2(c, s, -s, c);
-    world_pos = i_origin + rot * (world_pos - i_origin);
+    world_pos = actual_origin + rot * (world_pos - actual_origin);
 
-    v_uv = mix(i_uv_min, i_uv_max, a_pos);
-    v_color = i_color;
+    v_uv = mix(actual_uv_min, actual_uv_max, a_pos);
+    v_color = actual_color;
     gl_Position = u_mvp * vec4(world_pos, 0.0, 1.0);
 }
 "#;
@@ -309,21 +356,21 @@ impl Renderer {
         );
 
         // ── Instance buffer ───────────────────────────────────────────────
-        let max_instances = 100_000usize;
         let instance_buffer = ctx.new_buffer(
             BufferType::VertexBuffer,
             BufferUsage::Stream,
-            BufferSource::empty::<InstanceData>(max_instances),
+            BufferSource::empty::<InstanceData>(MAX_SHAPE_INSTANCES),
         );
         let text_instance_buffer = ctx.new_buffer(
             BufferType::VertexBuffer,
             BufferUsage::Stream,
-            BufferSource::empty::<TextInstanceData>(max_instances),
+            BufferSource::empty::<TextInstanceData>(MAX_TEXT_INSTANCES),
         );
         eprintln!(
-            "[Renderer] Instance buffer created: {} MB (max {} instances)",
-            (max_instances * std::mem::size_of::<InstanceData>()) / (1024 * 1024),
-            max_instances
+            "[Renderer] Instance buffers created: {} MB (max {} shape instances, max {} text instances)",
+            ((MAX_SHAPE_INSTANCES * std::mem::size_of::<InstanceData>()) + (MAX_TEXT_INSTANCES * std::mem::size_of::<TextInstanceData>())) / (1024 * 1024),
+            MAX_SHAPE_INSTANCES,
+            MAX_TEXT_INSTANCES
         );
 
         let text_atlas = ctx.new_texture(
@@ -383,10 +430,9 @@ impl Renderer {
                 // buffer 1: per-instance
                 VertexAttribute::with_buffer("i_pos", VertexFormat::Float2, 1),
                 VertexAttribute::with_buffer("i_size", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_color", VertexFormat::Byte4, 1),
                 VertexAttribute::with_buffer("i_rotation", VertexFormat::Float1, 1),
-                VertexAttribute::with_buffer("i_color", VertexFormat::Float4, 1),
-                VertexAttribute::with_buffer("i_shape", VertexFormat::Float1, 1),
-                VertexAttribute::with_buffer("i_alpha", VertexFormat::Float1, 1),
+                VertexAttribute::with_buffer("i_pack", VertexFormat::Byte4, 1),
             ],
             shape_shader,
             PipelineParams {
@@ -437,11 +483,11 @@ impl Renderer {
                 VertexAttribute::with_buffer("a_pos", VertexFormat::Float2, 0),
                 VertexAttribute::with_buffer("i_pos", VertexFormat::Float2, 1),
                 VertexAttribute::with_buffer("i_size", VertexFormat::Float2, 1),
-                VertexAttribute::with_buffer("i_origin", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_uv_min", VertexFormat::Short2, 1),
+                VertexAttribute::with_buffer("i_uv_max", VertexFormat::Short2, 1),
+                VertexAttribute::with_buffer("i_origin", VertexFormat::Short2, 1),
+                VertexAttribute::with_buffer("i_color", VertexFormat::Byte4, 1),
                 VertexAttribute::with_buffer("i_rotation", VertexFormat::Float1, 1),
-                VertexAttribute::with_buffer("i_uv_min", VertexFormat::Float2, 1),
-                VertexAttribute::with_buffer("i_uv_max", VertexFormat::Float2, 1),
-                VertexAttribute::with_buffer("i_color", VertexFormat::Float4, 1),
             ],
             text_shader,
             PipelineParams {
@@ -492,11 +538,11 @@ impl Renderer {
                 VertexAttribute::with_buffer("a_pos", VertexFormat::Float2, 0),
                 VertexAttribute::with_buffer("i_pos", VertexFormat::Float2, 1),
                 VertexAttribute::with_buffer("i_size", VertexFormat::Float2, 1),
-                VertexAttribute::with_buffer("i_origin", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_uv_min", VertexFormat::Short2, 1),
+                VertexAttribute::with_buffer("i_uv_max", VertexFormat::Short2, 1),
+                VertexAttribute::with_buffer("i_origin", VertexFormat::Short2, 1),
+                VertexAttribute::with_buffer("i_color", VertexFormat::Byte4, 1),
                 VertexAttribute::with_buffer("i_rotation", VertexFormat::Float1, 1),
-                VertexAttribute::with_buffer("i_uv_min", VertexFormat::Float2, 1),
-                VertexAttribute::with_buffer("i_uv_max", VertexFormat::Float2, 1),
-                VertexAttribute::with_buffer("i_color", VertexFormat::Float4, 1),
             ],
             color_text_shader,
             PipelineParams {
