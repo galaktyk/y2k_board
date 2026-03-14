@@ -16,6 +16,10 @@ use crate::renderer::TextInstanceData;
 const TEXT_ATLAS_SIZE: usize = 1024;
 const EMOJI_ATLAS_SIZE: usize = 1024;
 const ATLAS_GAP: usize = 2;
+const FALLBACK_GLYPH_SIZE: usize = 8;
+
+const SELECTION_COLOR: [f32; 4] = [0.18, 0.45, 1.0, 0.22];
+const CARET_COLOR: [f32; 4] = [0.06, 0.09, 0.14, 0.95];
 
 #[derive(Clone, Copy)]
 pub struct ActiveTextEdit<'a> {
@@ -44,42 +48,7 @@ impl TextSystem {
     pub fn new() -> Self {
         let mut font_system = FontSystem::new();
         font_system.db_mut().load_fonts_dir(Path::new("fonts"));
-
-        // Support emojis by loading system emoji fonts
-        #[cfg(target_os = "windows")]
-        {
-            let windir = std::env::var("WINDIR").unwrap_or("C:\\Windows".to_string());
-            let fonts_dir = format!("{windir}\\Fonts");
-            for entry in std::fs::read_dir(&fonts_dir).unwrap().flatten() {
-                let name = entry.file_name().to_string_lossy().to_lowercase();
-                if name.contains("emoji")|| name.contains("emj"){
-                    let _ = font_system.db_mut().load_font_file(&entry.path());
-                    println!("Loaded emoji font: {}", entry.path().display());
-                }
-            }
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            let _ = font_system
-                .db_mut()
-                .load_font_file(Path::new("/System/Library/Fonts/Apple Color Emoji.ttc"));
-        }
-
-        #[cfg(target_os = "linux")]
-        {
-            // Common paths, try both
-            let paths = [
-                "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
-                "/usr/share/fonts/noto/NotoColorEmoji.ttf",
-            ];
-            for p in paths {
-                if Path::new(p).exists() {
-                    let _ = font_system.db_mut().load_font_file(Path::new(p));
-                    break;
-                }
-            }
-        }
+        load_emoji_fonts(&mut font_system);
         // Note: emoji font loading on WASM is not yet implemented.
 
         Self {
@@ -228,7 +197,7 @@ impl TextSystem {
                         rotation: element.rotation,
                         uv_min,
                         uv_max,
-                        color: [0.18, 0.45, 1.0, 0.22],
+                        color: SELECTION_COLOR,
                     });
                 }
             }
@@ -244,7 +213,7 @@ impl TextSystem {
                 rotation: element.rotation,
                 uv_min,
                 uv_max,
-                color: [0.06, 0.09, 0.14, 0.95],
+                color: CARET_COLOR,
             });
             caret_pos = Some(world_pos);
         }
@@ -366,7 +335,22 @@ impl TextSystem {
             return;
         }
 
+        // 1×1 solid pixel at (0, 0) — used for selection highlights and the caret.
         ctx.texture_update_part(text_atlas, 0, 0, 1, 1, &[255]);
+
+        // Solid FALLBACK_GLYPH_SIZE×FALLBACK_GLYPH_SIZE block — the ■ shown when
+        // the atlas overflows and a glyph cannot be cached.
+        let fb = FALLBACK_GLYPH_SIZE;
+        let fb_data = vec![255u8; fb * fb];
+        ctx.texture_update_part(
+            text_atlas,
+            (1 + ATLAS_GAP) as i32,
+            0,
+            fb as i32,
+            fb as i32,
+            &fb_data,
+        );
+
         self.overlay_ready = true;
     }
 
@@ -457,22 +441,36 @@ struct Atlas {
     next_y: usize,
     row_h: usize,
     entries: HashMap<CacheKey, AtlasEntry>,
+    /// Pre-reserved ■ glyph for use when the atlas overflows.
+    fallback: Option<AtlasEntry>,
 }
 
 impl Atlas {
     fn new(size: usize, reserve_overlay_pixel: bool) -> Self {
-        let next_x = if reserve_overlay_pixel {
-            1 + ATLAS_GAP
+        let (next_x, row_h, fallback) = if reserve_overlay_pixel {
+            // x=0: 1×1 overlay pixel (selection/caret), then ATLAS_GAP, then
+            // FALLBACK_GLYPH_SIZE×FALLBACK_GLYPH_SIZE filled square (■ for overflow).
+            let fb_x = 1 + ATLAS_GAP;
+            let fb_size = FALLBACK_GLYPH_SIZE;
+            let entry = AtlasEntry {
+                x: fb_x,
+                y: 0,
+                width: fb_size,
+                height: fb_size,
+                left: 0,
+                top: fb_size as i32,
+            };
+            (fb_x + fb_size + ATLAS_GAP, fb_size, Some(entry))
         } else {
-            0
+            (0, 0, None)
         };
-        let row_h = if reserve_overlay_pixel { 1 } else { 0 };
         Self {
             size,
             next_x,
             next_y: 0,
             row_h,
             entries: HashMap::new(),
+            fallback,
         }
     }
 
@@ -490,10 +488,13 @@ impl Atlas {
         let width = image.placement.width as usize;
         let height = image.placement.height as usize;
         if width == 0 || height == 0 {
-            return None;
+            return None; // whitespace / zero-size glyph — nothing to draw
         }
 
-        let (x, y) = self.pack(width, height)?;
+        let Some((x, y)) = self.pack(width, height) else {
+            // Atlas is full — show ■ so the overflow is visually apparent.
+            return self.fallback;
+        };
         let bytes = atlas_bytes(image)?;
         ctx.texture_update_part(
             texture,
@@ -626,29 +627,91 @@ fn rgba_to_cosmic_color(color: [f32; 4]) -> Color {
     )
 }
 
-fn global_byte_to_cursor(text: &str, global_byte: usize) -> Cursor {
-    let target = global_byte.min(text.len());
-    let mut line_start = 0usize;
-    for (line, segment) in text.split('\n').enumerate() {
-        let line_end = line_start + segment.len();
-        if target <= line_end {
-            return Cursor::new(line, target - line_start);
+/// Loads system emoji fonts into `font_system` for the current platform.
+/// No-op on WASM.
+fn load_emoji_fonts(font_system: &mut FontSystem) {
+    #[cfg(target_os = "windows")]
+    {
+        let windir = std::env::var("WINDIR").unwrap_or("C:\\Windows".to_string());
+        let fonts_dir = format!("{windir}\\Fonts");
+        for entry in std::fs::read_dir(&fonts_dir).unwrap().flatten() {
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            if name.contains("emoji") || name.contains("emj") {
+                let _ = font_system.db_mut().load_font_file(&entry.path());
+                println!("Loaded emoji font: {}", entry.path().display());
+            }
         }
-        line_start = line_end + 1;
     }
 
-    let last_line = text.split('\n').count().saturating_sub(1);
-    let last_len = text.split('\n').last().map(str::len).unwrap_or(0);
-    Cursor::new(last_line, last_len)
+    #[cfg(target_os = "macos")]
+    {
+        let _ = font_system
+            .db_mut()
+            .load_font_file(Path::new("/System/Library/Fonts/Apple Color Emoji.ttc"));
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let paths = [
+            "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+            "/usr/share/fonts/noto/NotoColorEmoji.ttf",
+        ];
+        for p in paths {
+            if Path::new(p).exists() {
+                let _ = font_system.db_mut().load_font_file(Path::new(p));
+                break;
+            }
+        }
+    }
+}
+
+/// Cached line byte-offset table for a string, used to convert between a
+/// flat byte index and a (line, column) `Cursor` without repeated scanning.
+struct LineOffsets {
+    /// Byte offset of the first character on each line.
+    starts: Vec<usize>,
+    /// Byte offset one past the last character on each line (excluding `\n`).
+    ends: Vec<usize>,
+}
+
+impl LineOffsets {
+    fn build(text: &str) -> Self {
+        let mut starts = Vec::new();
+        let mut ends = Vec::new();
+        let mut offset = 0usize;
+        for segment in text.split('\n') {
+            starts.push(offset);
+            ends.push(offset + segment.len());
+            offset += segment.len() + 1;
+        }
+        if starts.is_empty() {
+            starts.push(0);
+            ends.push(0);
+        }
+        Self { starts, ends }
+    }
+
+    fn byte_to_cursor(&self, text: &str, global_byte: usize) -> Cursor {
+        let target = global_byte.min(text.len());
+        let line = self.starts.partition_point(|&s| s <= target).saturating_sub(1);
+        Cursor::new(line, target - self.starts[line])
+    }
+
+    fn cursor_to_byte(&self, text: &str, cursor: Cursor) -> usize {
+        match self.starts.get(cursor.line) {
+            Some(&line_start) => {
+                let segment_len = self.ends[cursor.line] - line_start;
+                (line_start + cursor.index.min(segment_len)).min(text.len())
+            }
+            None => text.len(),
+        }
+    }
+}
+
+fn global_byte_to_cursor(text: &str, global_byte: usize) -> Cursor {
+    LineOffsets::build(text).byte_to_cursor(text, global_byte)
 }
 
 fn cursor_to_global_byte(text: &str, cursor: Cursor) -> usize {
-    let mut line_start = 0usize;
-    for (line, segment) in text.split('\n').enumerate() {
-        if line == cursor.line {
-            return (line_start + cursor.index.min(segment.len())).min(text.len());
-        }
-        line_start += segment.len() + 1;
-    }
-    text.len()
+    LineOffsets::build(text).cursor_to_byte(text, cursor)
 }

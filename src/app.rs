@@ -400,7 +400,7 @@ impl EventHandler for App {
 
 
 
-        // Selection outlines (semi-transparent)    
+        // Selection overlay (semi-transparent)    
         let mut selection_inst = Vec::new();
         for element in &self.board.elements {
             if let Some(instance) = toolbar::selection_instance(element, 1.0) {

@@ -1,4 +1,12 @@
 
+
+
+
+
+
+
+---
+
 change boder to be real border (not blob big shadow)
 ---
 
