@@ -297,6 +297,7 @@ pub fn on_mouse_move(
                     match state.drag_mode {
                         DragMode::MoveSelected => {
                             element.pos = orig_pos + state.move_delta;
+                            element.bump_text_generation();
                         }
                         DragMode::Rotating => {
                             let center = orig_pos + orig_size * 0.5;
@@ -305,6 +306,7 @@ pub fn on_mouse_move(
                             let angle_diff =
                                 current_vec.y.atan2(current_vec.x) - start_vec.y.atan2(start_vec.x);
                             element.rotation = orig_rot + angle_diff;
+                            element.bump_text_generation();
                         }
                         DragMode::ResizingHandle(dir) => {
                             if element.shape == ShapeType::Line {
@@ -363,6 +365,7 @@ pub fn on_mouse_move(
                                 element.size = new_size;
                                 element.pos = w_center - new_size * 0.5;
                             }
+                            element.bump_text_generation();
                         }
                         DragMode::None => {}
                     }

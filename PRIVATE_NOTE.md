@@ -1,36 +1,4 @@
 
-File: src/input/handlers/mouse.rs
-Confidence: 92%
-Problem: During live drag (move, resize, rotate), element.pos, element.size, and element.rotation are mutated directly, but bump_text_generation() is never called. The L2 cache (cached_text_draw) is correctly invalidated via mark_elements_dirty(), which sets text_dirty = true. However, when build_visible_text_instances() runs, ensure_layout_cached() finds a generation match and returns the stale CachedLayout with the old world_min (from text_bounds() which depends on element.pos).
-
-Impact:
-
-Move: Text renders at the original position instead of following the element during drag.
-Resize: Text wrapping uses the old element width, and world_min is wrong — text appears mispositioned and incorrectly wrapped.
-Rotate: The cached world_min is stale (rotation affects text bounds indirectly through the origin calculation).
-Note: The generation IS bumped correctly in the undo/redo path (board.rs:299 and board.rs:309), so the bug only manifests during the live drag, not after committing the operation.
-
-Suggestion: Call element.bump_text_generation() after mutating pos/size/rotation in the drag handler:
-
-// src/input/handlers/mouse.rs, inside the drag loop after each match arm
-match state.drag_mode {
-    DragMode::MoveSelected => {
-        element.pos = orig_pos + state.move_delta;
-        element.bump_text_generation();
-    }
-    DragMode::Rotating => {
-        // ... existing rotation code ...
-        element.rotation = orig_rot + angle_diff;
-        element.bump_text_generation();
-    }
-    DragMode::ResizingHandle(dir) => {
-        // ... existing resize code ...
-        element.bump_text_generation();
-    }
-    DragMode::None => {}
-}
-Alternatively, for move-only operations where the buffer content doesn't change (only world_min shifts), you could store world_min separately and update it without re-shaping. But bumping the generation is the simplest correct fix.
-
 
 ---
 File: src/text.rs
