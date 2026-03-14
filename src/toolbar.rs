@@ -21,6 +21,7 @@ pub enum Tool {
 #[derive(Clone, Copy, Debug)]
 pub enum ToolbarAction {
     SetTool(Tool),
+    ImportImage,
     Save,
     Load,
     Undo,
@@ -34,6 +35,7 @@ enum BtnKind {
     Ellipse,
     Line,
     Text,
+    Image,
     Save,
     Load,
     Undo,
@@ -47,7 +49,7 @@ struct Button {
 
 pub struct Toolbar {
     pub active_tool: Tool,
-    buttons: [Button; 9],
+    buttons: [Button; 10],
 }
 
 impl Toolbar {
@@ -58,6 +60,7 @@ impl Toolbar {
             BtnKind::Ellipse,
             BtnKind::Line,
             BtnKind::Text,
+            BtnKind::Image,
             BtnKind::Save,
             BtnKind::Load,
             BtnKind::Undo,
@@ -82,6 +85,7 @@ impl Toolbar {
                     BtnKind::Ellipse => ToolbarAction::SetTool(Tool::Ellipse),
                     BtnKind::Line    => ToolbarAction::SetTool(Tool::Line),
                     BtnKind::Text    => ToolbarAction::SetTool(Tool::Text),
+                    BtnKind::Image   => ToolbarAction::ImportImage,
                     BtnKind::Save    => ToolbarAction::Save,
                     BtnKind::Load    => ToolbarAction::Load,
                     BtnKind::Undo    => ToolbarAction::Undo,
@@ -171,6 +175,7 @@ impl Toolbar {
                 BtnKind::Ellipse => "ELPS",
                 BtnKind::Line    => "LINE",
                 BtnKind::Text    => "TEXT",
+                BtnKind::Image   => "IMG",
                 BtnKind::Undo    => "UNDO",
                 BtnKind::Redo    => "REDO",
                 BtnKind::Save    => "SAVE",
@@ -197,6 +202,7 @@ pub fn element_instance(
         crate::board::ShapeType::Ellipse => 1.0,
         crate::board::ShapeType::Line => 2.0,
         crate::board::ShapeType::Text => 3.0,
+        crate::board::ShapeType::Image => 255.0,
     };
 
     InstanceData::new(
@@ -225,7 +231,7 @@ fn outline_instance(
     alpha: f32,
 ) -> InstanceData {
     let (st, expand) = match e.shape {
-        crate::board::ShapeType::Rect | crate::board::ShapeType::Text => (3.0f32, 4.0f32),
+        crate::board::ShapeType::Rect | crate::board::ShapeType::Text | crate::board::ShapeType::Image => (3.0f32, 4.0f32),
         crate::board::ShapeType::Ellipse => (4.0, 4.0),
         crate::board::ShapeType::Line => (2.0, 3.0),
     };

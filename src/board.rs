@@ -11,6 +11,18 @@ pub enum ShapeType {
     Ellipse,
     Line,
     Text,
+    Image,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ImageData {
+    pub asset_path: String,
+    #[serde(default)]
+    pub hires_asset_path: Option<String>,
+    pub original_width: u32,
+    pub original_height: u32,
+    pub base_width: u32,
+    pub base_height: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -41,7 +53,10 @@ pub struct Element {
     pub rotation: f32,
     pub color: [f32; 4],
     pub selected: bool,
+    #[serde(default)]
     pub text: Option<TextData>,
+    #[serde(default)]
+    pub image: Option<ImageData>,
     /// Bumped when any text-layout-affecting property changes.
     /// Not serialized — starts at 0 on load.
     #[serde(skip, default)]
@@ -548,7 +563,7 @@ fn element_hit(e: &Element, mut p: Vec2) -> bool {
     p.y = center.y - dx * sin_r + dy * cos_r;
 
     match e.shape {
-        ShapeType::Rect | ShapeType::Text => {
+        ShapeType::Rect | ShapeType::Text | ShapeType::Image => {
             let min_x = e.pos.x.min(e.pos.x + e.size.x);
             let max_x = e.pos.x.max(e.pos.x + e.size.x);
             let min_y = e.pos.y.min(e.pos.y + e.size.y);

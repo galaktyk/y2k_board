@@ -2,6 +2,7 @@ mod app;
 mod board;
 mod camera;
 mod debug;
+mod images;
 mod input;
 mod renderer;
 mod snapshot;

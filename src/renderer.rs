@@ -4,6 +4,7 @@ use miniquad::*;
 
 pub const MAX_SHAPE_INSTANCES: usize = 100_000;
 pub const MAX_TEXT_INSTANCES: usize = 200_000;
+pub const MAX_IMAGE_INSTANCES: usize = 8_192;
 
 // ── Instance data ─────────────────────────────────────────────────────────────
 
@@ -33,6 +34,24 @@ pub struct TextInstanceData {
     pub rotation: f32,       // 4
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct ImageInstanceData {
+    pub pos:      [f32; 2],
+    pub size:     [f32; 2],
+    pub uv_min:   [u16; 2],
+    pub uv_max:   [u16; 2],
+    pub origin:   [i16; 2],
+    pub color:    [u8; 4],
+    pub rotation: f32,
+}
+
+#[derive(Clone, Copy)]
+pub struct PreparedImageDraw {
+    pub texture: TextureId,
+    pub instance: ImageInstanceData,
+}
+
 impl InstanceData {
     pub fn new(pos: [f32; 2], size: [f32; 2], rotation: f32, color_f32: [f32; 4], shape_type: f32, alpha_f32: f32) -> Self {
         Self {
@@ -53,6 +72,25 @@ impl InstanceData {
 }
 
 impl TextInstanceData {
+    pub fn new(pos: [f32; 2], size: [f32; 2], origin: [f32; 2], rotation: f32, uv_min: [f32; 2], uv_max: [f32; 2], color_f32: [f32; 4]) -> Self {
+        Self {
+            pos,
+            size,
+            uv_min: [(uv_min[0] * 65535.0) as u16, (uv_min[1] * 65535.0) as u16],
+            uv_max: [(uv_max[0] * 65535.0) as u16, (uv_max[1] * 65535.0) as u16],
+            origin: [origin[0] as i16, origin[1] as i16],
+            color: [
+                (color_f32[0] * 255.0) as u8,
+                (color_f32[1] * 255.0) as u8,
+                (color_f32[2] * 255.0) as u8,
+                (color_f32[3] * 255.0) as u8,
+            ],
+            rotation,
+        }
+    }
+}
+
+impl ImageInstanceData {
     pub fn new(pos: [f32; 2], size: [f32; 2], origin: [f32; 2], rotation: f32, uv_min: [f32; 2], uv_max: [f32; 2], color_f32: [f32; 4]) -> Self {
         Self {
             pos,
@@ -276,6 +314,23 @@ void main() {
 }
 "#;
 
+const IMAGE_FRAGMENT_SRC: &str = r#"#version 100
+precision highp float;
+
+varying vec2 v_uv;
+varying vec4 v_color;
+
+uniform sampler2D u_image_texture;
+
+void main() {
+    vec4 sample_color = texture2D(u_image_texture, v_uv);
+    if (sample_color.a <= 0.0) {
+        discard;
+    }
+    gl_FragColor = sample_color * v_color;
+}
+"#;
+
 // ── Grid shaders ─────────────────────────────────────────────────────────────
 //
 // The grid is a fullscreen quad; we draw the grid pattern in the fragment
@@ -328,6 +383,11 @@ pub struct Renderer {
     color_text_pipeline: Pipeline,
     color_text_bindings: Bindings,
     text_instance_buffer: BufferId,
+
+    // dynamic image pipeline
+    image_pipeline: Pipeline,
+    image_bindings: Bindings,
+    image_instance_buffer: BufferId,
 
     // persistent full-scene text draw
     scene_text_bindings: Bindings,
@@ -391,6 +451,11 @@ impl Renderer {
             BufferType::VertexBuffer,
             BufferUsage::Stream,
             BufferSource::empty::<TextInstanceData>(MAX_TEXT_INSTANCES),
+        );
+        let image_instance_buffer = ctx.new_buffer(
+            BufferType::VertexBuffer,
+            BufferUsage::Stream,
+            BufferSource::empty::<ImageInstanceData>(MAX_IMAGE_INSTANCES),
         );
         let scene_mono_text_buffer = ctx.new_buffer(
             BufferType::VertexBuffer,
@@ -620,6 +685,61 @@ impl Renderer {
             images: vec![emoji_atlas],
         };
 
+        let image_shader = ctx
+            .new_shader(
+                ShaderSource::Glsl {
+                    vertex: TEXT_VERTEX_SRC,
+                    fragment: IMAGE_FRAGMENT_SRC,
+                },
+                ShaderMeta {
+                    uniforms: UniformBlockLayout {
+                        uniforms: vec![UniformDesc::new("u_mvp", UniformType::Mat4)],
+                    },
+                    images: vec!["u_image_texture".to_string()],
+                },
+            )
+            .expect("image shader compile failed");
+
+        let image_pipeline = ctx.new_pipeline(
+            &[
+                BufferLayout::default(),
+                BufferLayout {
+                    step_func: VertexStep::PerInstance,
+                    ..Default::default()
+                },
+            ],
+            &[
+                VertexAttribute::with_buffer("a_pos", VertexFormat::Float2, 0),
+                VertexAttribute::with_buffer("i_pos", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_size", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_uv_min", VertexFormat::Short2, 1),
+                VertexAttribute::with_buffer("i_uv_max", VertexFormat::Short2, 1),
+                VertexAttribute::with_buffer("i_origin", VertexFormat::Short2, 1),
+                VertexAttribute::with_buffer("i_color", VertexFormat::Byte4, 1),
+                VertexAttribute::with_buffer("i_rotation", VertexFormat::Float1, 1),
+            ],
+            image_shader,
+            PipelineParams {
+                color_blend: Some(BlendState::new(
+                    Equation::Add,
+                    BlendFactor::Value(BlendValue::SourceAlpha),
+                    BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
+                )),
+                alpha_blend: Some(BlendState::new(
+                    Equation::Add,
+                    BlendFactor::One,
+                    BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
+                )),
+                ..Default::default()
+            },
+        );
+
+        let image_bindings = Bindings {
+            vertex_buffers: vec![vertex_buf, image_instance_buffer],
+            index_buffer: index_buf,
+            images: vec![emoji_atlas],
+        };
+
         // ── Grid pipeline ─────────────────────────────────────────────────
         #[rustfmt::skip]
         let fsq_verts: [f32; 8] = [
@@ -701,6 +821,9 @@ impl Renderer {
             color_text_pipeline,
             color_text_bindings,
             text_instance_buffer,
+            image_pipeline,
+            image_bindings,
+            image_instance_buffer,
             scene_text_bindings,
             scene_color_text_bindings,
             scene_mono_text_buffer,
@@ -906,6 +1029,41 @@ impl Renderer {
             u_mvp: mvp.to_cols_array_2d(),
         }));
         ctx.draw(0, 6, self.scene_color_text_count as i32);
+    }
+
+    pub fn draw_image_draws(
+        &mut self,
+        ctx: &mut dyn RenderingBackend,
+        draws: &[PreparedImageDraw],
+        mvp: glam::Mat4,
+    ) {
+        if draws.is_empty() {
+            return;
+        }
+
+        let mut start = 0usize;
+        let mut batch = Vec::new();
+
+        while start < draws.len() {
+            let texture = draws[start].texture;
+            let mut end = start;
+            batch.clear();
+            while end < draws.len() && draws[end].texture == texture {
+                batch.push(draws[end].instance);
+                end += 1;
+            }
+
+            ctx.buffer_update(self.image_instance_buffer, BufferSource::slice(&batch));
+            self.image_bindings.images[0] = texture;
+            ctx.apply_pipeline(&self.image_pipeline);
+            ctx.apply_bindings(&self.image_bindings);
+            ctx.apply_uniforms(UniformsSource::table(&TextUniforms {
+                u_mvp: mvp.to_cols_array_2d(),
+            }));
+            ctx.draw(0, 6, batch.len() as i32);
+
+            start = end;
+        }
     }
 
     fn world_per_px(mvp: glam::Mat4, screen_size: Vec2) -> f32 {

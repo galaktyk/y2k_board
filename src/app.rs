@@ -1,13 +1,15 @@
 use miniquad::*;
 use glam::Vec2;
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 
 use cosmic_text::Motion;
 
-use crate::board::{Board, BoardOperation, ElementPropertyChange, ElementPropertyPatch, TextData};
+use crate::board::{Board, BoardOperation, Element, ElementPropertyChange, ElementPropertyPatch, ShapeType, TextData};
 use crate::camera::Camera;
+use crate::images::ImageManager;
 use crate::input::{self, DragMode, InputState};
-use crate::renderer::{InstanceData, Renderer};
+use crate::renderer::{InstanceData, PreparedImageDraw, Renderer};
 use crate::snapshot;
 use crate::spatial::SpatialGrid;
 use crate::text::{ActiveTextEdit, PreparedTextDraw, TextSystem};
@@ -224,6 +226,26 @@ fn rotate_text_instance(
     instance
 }
 
+fn preview_rect_transform(
+    element: &crate::board::Element,
+    move_drag_offset: Option<Vec2>,
+    rotate_drag_preview: Option<(f32, Vec2)>,
+) -> (Vec2, Vec2, f32) {
+    if let Some((angle, center)) = rotate_drag_preview.filter(|_| element.selected) {
+        let original_center = element.pos + element.size * 0.5;
+        let rotated_center = rotate_point(original_center, center, angle);
+        (
+            rotated_center - element.size * 0.5,
+            element.size,
+            element.rotation + angle,
+        )
+    } else if let Some(offset) = move_drag_offset.filter(|_| element.selected) {
+        (element.pos + offset, element.size, element.rotation)
+    } else {
+        (element.pos, element.size, element.rotation)
+    }
+}
+
 struct TextEditSession {
     element_id: u64,
     original_text: Option<TextData>,
@@ -286,6 +308,7 @@ pub struct App {
     visibility_dirty: bool,
     dirty_element_ids: HashSet<u64>,
     text_system: TextSystem,
+    image_manager: ImageManager,
     text_edit: Option<TextEditSession>,
     // ── text cache ────────────────────────────────────────────────────────
     cached_text_draw: Option<PreparedTextDraw>,
@@ -303,6 +326,8 @@ impl App {
     pub fn new() -> Self {
         let mut ctx = window::new_rendering_backend();
         let renderer = Renderer::new(&mut *ctx);
+        let asset_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let image_manager = ImageManager::new(&mut *ctx, asset_root);
         let (w, h) = window::screen_size();
         let app = Self {
             ctx,
@@ -320,6 +345,7 @@ impl App {
             visibility_dirty: true,
             dirty_element_ids: HashSet::new(),
             text_system: TextSystem::new(),
+            image_manager,
             text_edit: None,
             cached_text_draw: None,
             text_dirty: true,
@@ -444,6 +470,7 @@ impl App {
                 self.toolbar.active_tool = tool;
                 self.request_redraw();
             }
+            ToolbarAction::ImportImage => self.import_image_via_dialog(),
             ToolbarAction::Save => self.save_snapshot(),
             ToolbarAction::Load => self.load_snapshot(),
             ToolbarAction::Undo => {
@@ -544,6 +571,10 @@ impl EventHandler for App {
             self.renderer
                 .draw_scene_instances(&mut *self.ctx, board_mvp, self.screen_size);
         }
+
+        let image_draws = self.build_image_draws(move_drag_offset, rotate_drag_preview);
+        self.renderer
+            .draw_image_draws(&mut *self.ctx, &image_draws, board_mvp);
 
         // Build current edit snapshot for cache comparison
         let current_edit_snapshot = self.text_edit.as_ref().map(|edit| TextEditSnapshot {
@@ -1042,6 +1073,107 @@ impl EventHandler for App {
 }
 
 impl App {
+    fn import_image_via_dialog(&mut self) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            eprintln!("Image import is only implemented for native desktop builds");
+            return;
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let Some(path) = rfd::FileDialog::new()
+                .add_filter("Images", &["png", "jpg", "jpeg", "webp", "bmp", "gif"])
+                .pick_file()
+            else {
+                return;
+            };
+
+            let element_id = self.board.next_available_id();
+            match self.image_manager.import_from_source(element_id, &path) {
+                Ok(imported) => {
+                    let new_id = self.board.next_id();
+                    let mut size = Vec2::from_array(imported.display_size);
+                    let viewport_world = Vec2::new(
+                        self.screen_size.x / self.camera.zoom.max(0.0001),
+                        self.screen_size.y / self.camera.zoom.max(0.0001),
+                    ) * 0.6;
+                    let scale = (viewport_world.x / size.x)
+                        .min(viewport_world.y / size.y)
+                        .min(1.0);
+                    size *= scale.max(0.01);
+
+                    let element = Element {
+                        id: new_id,
+                        shape: ShapeType::Image,
+                        pos: self.camera.pan - size * 0.5,
+                        size,
+                        rotation: 0.0,
+                        color: [1.0, 1.0, 1.0, 1.0],
+                        selected: false,
+                        text: None,
+                        image: Some(imported.data),
+                        text_layout_generation: 0,
+                    };
+                    self.board.apply_operation(BoardOperation::AddElement(element));
+                    self.board.deselect_all();
+                    self.board.select_only(new_id);
+                    self.mark_board_structure_dirty();
+                }
+                Err(err) => {
+                    eprintln!("Failed to import image: {err}");
+                    self.request_redraw();
+                }
+            }
+        }
+    }
+
+    fn build_image_draws(
+        &mut self,
+        move_drag_offset: Option<Vec2>,
+        rotate_drag_preview: Option<(f32, Vec2)>,
+    ) -> Vec<PreparedImageDraw> {
+        let (vis_min, vis_max) = self.camera.visible_rect(self.screen_size);
+        let range = VisibleRange {
+            min: vis_min - Vec2::splat(BOARD_VISIBILITY_MARGIN),
+            max: vis_max + Vec2::splat(BOARD_VISIBILITY_MARGIN),
+        };
+
+        let pending: Vec<(crate::board::ImageData, Vec2, Vec2, f32)> = self
+            .board
+            .elements
+            .iter()
+            .filter_map(|element| {
+                if element.shape != ShapeType::Image {
+                    return None;
+                }
+
+                let image = element.image.clone()?;
+                let (pos, size, rotation) = preview_rect_transform(element, move_drag_offset, rotate_drag_preview);
+                let mut preview_element = element.clone();
+                preview_element.pos = pos;
+                preview_element.size = size;
+                preview_element.rotation = rotation;
+                element_in_range(&preview_element, range).then_some((image, pos, size, rotation))
+            })
+            .collect();
+
+        pending
+            .into_iter()
+            .map(|(image, pos, size, rotation)| {
+                self.image_manager.prepare_draw(
+                    &mut *self.ctx,
+                    &image,
+                    pos.to_array(),
+                    size.to_array(),
+                    rotation,
+                    [size.x * self.camera.zoom, size.y * self.camera.zoom],
+                    self.screen_size.to_array(),
+                )
+            })
+            .collect()
+    }
+
     fn begin_text_edit(&mut self, id: u64) {
         let Some(element) = self.board.element(id) else {
             return;

@@ -133,6 +133,7 @@ pub fn spawn_debug_shapes(board: &mut Board, camera: &Camera, screen_size: Vec2)
             color,
             selected: false,
             text,
+            image: None,
             text_layout_generation: 0,
         });
     };

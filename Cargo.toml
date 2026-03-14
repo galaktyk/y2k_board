@@ -9,9 +9,14 @@ glam = { version = "0.29", default-features = false, features = ["std", "serde"]
 serde = { version = "1", default-features = false, features = ["derive"] }
 bincode = "1"
 cosmic-text = { version = "0.18.2", default-features = false, features = ["std", "swash"] }
+image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
+webp = "0.3"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3", features = ["winuser", "imm"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rfd = "0.15"
 
 
 [profile.fast]

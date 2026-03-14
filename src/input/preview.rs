@@ -6,5 +6,6 @@ pub fn default_color(shape: ShapeType) -> [f32; 4] {
         ShapeType::Ellipse => [0.73, 0.80, 0.39, 0.85], // rgb(187, 203, 100)
         ShapeType::Line => [0.85, 0.28, 0.28, 1.00], // rgb(218, 72, 72)
         ShapeType::Text => [0.0, 0.0, 0.0, 0.0],
+        ShapeType::Image => [1.0, 1.0, 1.0, 1.0],
     }
 }
