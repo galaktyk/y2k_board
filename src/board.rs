@@ -107,6 +107,43 @@ impl ElementTransform {
     }
 }
 
+fn rotate_point(point: Vec2, center: Vec2, angle: f32) -> Vec2 {
+    let offset = point - center;
+    let cos_a = angle.cos();
+    let sin_a = angle.sin();
+    center + Vec2::new(
+        offset.x * cos_a - offset.y * sin_a,
+        offset.x * sin_a + offset.y * cos_a,
+    )
+}
+
+fn apply_transform(element: &mut Element, transform: ElementTransform) {
+    element.pos = transform.pos;
+    element.size = transform.size;
+    element.rotation = transform.rotation;
+    element.bump_text_generation();
+}
+
+fn move_element(element: &mut Element, delta: Vec2) {
+    element.pos += delta;
+    element.bump_text_generation();
+}
+
+fn rotate_element(element: &mut Element, center: Vec2, angle: f32) {
+    if element.shape == ShapeType::Line {
+        let start = rotate_point(element.pos, center, angle);
+        let end = rotate_point(element.pos + element.size, center, angle);
+        element.pos = start;
+        element.size = end - start;
+    } else {
+        let element_center = element.pos + element.size * 0.5;
+        let rotated_center = rotate_point(element_center, center, angle);
+        element.pos = rotated_center - element.size * 0.5;
+        element.rotation += angle;
+    }
+    element.bump_text_generation();
+}
+
 #[derive(Clone, Debug)]
 pub enum ElementPropertyPatch {
     Transform {
@@ -129,6 +166,8 @@ pub struct ElementPropertyChange {
 pub enum BoardOperation {
     AddElement(Element),
     DeleteElement(Element),
+    MoveElements { ids: Vec<u64>, delta: Vec2 },
+    RotateElements { ids: Vec<u64>, center: Vec2, angle: f32 },
     SetProperty { changes: Vec<ElementPropertyChange> },
 }
 
@@ -142,6 +181,15 @@ fn inverse(op: &BoardOperation) -> BoardOperation {
     match op {
         BoardOperation::AddElement(element) => BoardOperation::DeleteElement(element.clone()),
         BoardOperation::DeleteElement(element) => BoardOperation::AddElement(element.clone()),
+        BoardOperation::MoveElements { ids, delta } => BoardOperation::MoveElements {
+            ids: ids.clone(),
+            delta: -*delta,
+        },
+        BoardOperation::RotateElements { ids, center, angle } => BoardOperation::RotateElements {
+            ids: ids.clone(),
+            center: *center,
+            angle: -*angle,
+        },
         BoardOperation::SetProperty { changes } => BoardOperation::SetProperty {
             changes: changes
                 .iter()
@@ -180,6 +228,23 @@ fn log_operation(op: &BoardOperation) {
         }
         BoardOperation::DeleteElement(element) => {
             println!("[ops] DELETE_ELEMENT id={} shape={:?}", element.id, element.shape);
+        }
+        BoardOperation::MoveElements { ids, delta } => {
+            println!(
+                "[ops] MOVE_ELEMENTS count={} delta=({:.1}, {:.1})",
+                ids.len(),
+                delta.x,
+                delta.y,
+            );
+        }
+        BoardOperation::RotateElements { ids, center, angle } => {
+            println!(
+                "[ops] ROTATE_ELEMENTS count={} center=({:.1}, {:.1}) angle={:.3}",
+                ids.len(),
+                center.x,
+                center.y,
+                angle,
+            );
         }
         BoardOperation::SetProperty { changes } => {
             println!("[ops] SET_PROPERTY count={}", changes.len());
@@ -288,6 +353,20 @@ impl Board {
             BoardOperation::DeleteElement(element) => {
                 self.elements.retain(|existing| existing.id != element.id);
             }
+            BoardOperation::MoveElements { ids, delta } => {
+                for id in ids {
+                    if let Some(element) = self.elements.iter_mut().find(|element| &element.id == id) {
+                        move_element(element, *delta);
+                    }
+                }
+            }
+            BoardOperation::RotateElements { ids, center, angle } => {
+                for id in ids {
+                    if let Some(element) = self.elements.iter_mut().find(|element| &element.id == id) {
+                        rotate_element(element, *center, *angle);
+                    }
+                }
+            }
             BoardOperation::SetProperty { changes } => {
                 for change in changes {
                     let after = match &change.patch {
@@ -295,10 +374,7 @@ impl Board {
                         ElementPropertyPatch::Text { .. } => continue,
                     };
                     if let Some(element) = self.elements.iter_mut().find(|e| e.id == change.id) {
-                        element.pos = after.pos;
-                        element.size = after.size;
-                        element.rotation = after.rotation;
-                        element.bump_text_generation();
+                        apply_transform(element, *after);
                     }
                 }
                 for change in changes {
@@ -346,24 +422,9 @@ impl Board {
 
     #[allow(dead_code)]
     pub fn move_selected(&mut self, delta: Vec2) {
-        let changes: Vec<ElementPropertyChange> = self
-            .elements
-            .iter()
-            .filter(|e| e.selected)
-            .map(|element| ElementPropertyChange {
-                id: element.id,
-                patch: ElementPropertyPatch::Transform {
-                    before: ElementTransform::new(element.pos, element.size, element.rotation),
-                    after: ElementTransform::new(
-                        element.pos + delta,
-                        element.size,
-                        element.rotation,
-                    ),
-                },
-            })
-            .collect();
-        if !changes.is_empty() {
-            self.apply_operation(BoardOperation::SetProperty { changes });
+        let ids = self.selected_ids();
+        if !ids.is_empty() && delta != Vec2::ZERO {
+            self.apply_operation(BoardOperation::MoveElements { ids, delta });
         }
     }
 

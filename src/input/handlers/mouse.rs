@@ -61,46 +61,18 @@ fn move_changes_from_delta(state: &InputState) -> Vec<ElementPropertyChange> {
         .collect()
 }
 
+fn transform_ids(state: &InputState) -> Vec<u64> {
+    state
+        .move_origin
+        .iter()
+        .map(|&(id, _, _, _)| id)
+        .collect()
+}
+
 fn rotation_angle_delta(start_world: Vec2, current_world: Vec2, center: Vec2) -> f32 {
     let start_vec = start_world - center;
     let current_vec = current_world - center;
     current_vec.y.atan2(current_vec.x) - start_vec.y.atan2(start_vec.x)
-}
-
-fn rotate_changes_from_delta(state: &InputState, board: &Board) -> Vec<ElementPropertyChange> {
-    let Some(bounds) = state.transform_bounds_origin else {
-        return Vec::new();
-    };
-
-    let center = bounds.center();
-    let angle_diff = state.rotate_delta;
-
-    state
-        .move_origin
-        .iter()
-        .filter_map(|&(id, orig_pos, orig_size, orig_rot)| {
-            let element = board.element(id)?;
-            let before = ElementTransform::new(orig_pos, orig_size, orig_rot);
-            let after = if element.shape == ShapeType::Line {
-                let start = rotate_point(orig_pos, center, angle_diff);
-                let end = rotate_point(orig_pos + orig_size, center, angle_diff);
-                ElementTransform::new(start, end - start, orig_rot)
-            } else {
-                let original_center = orig_pos + orig_size * 0.5;
-                let rotated_center = rotate_point(original_center, center, angle_diff);
-                ElementTransform::new(
-                    rotated_center - orig_size * 0.5,
-                    orig_size,
-                    orig_rot + angle_diff,
-                )
-            };
-
-            (before != after).then_some(ElementPropertyChange {
-                id,
-                patch: ElementPropertyPatch::Transform { before, after },
-            })
-        })
-        .collect()
 }
 
 fn selection_handle_hit(state: &InputState, board: &Board, world: Vec2, zoom: f32) -> Option<DragMode> {
@@ -424,18 +396,34 @@ pub fn on_mouse_up(
                 }
             }
             DragMode::MoveSelected => {
-                let changes = move_changes_from_delta(state);
-                if !changes.is_empty() {
-                    board.apply_operation(BoardOperation::SetProperty { changes });
+                if state.move_origin.len() > 1 {
+                    let ids = transform_ids(state);
+                    if !ids.is_empty() && state.move_delta != Vec2::ZERO {
+                        board.apply_operation(BoardOperation::MoveElements {
+                            ids,
+                            delta: state.move_delta,
+                        });
+                    }
+                } else {
+                    let changes = move_changes_from_delta(state);
+                    if !changes.is_empty() {
+                        board.apply_operation(BoardOperation::SetProperty { changes });
+                    }
                 }
                 if state.move_origin.len() > 1 {
                     state.selection_bounds = state.drag_selection_bounds;
                 }
             }
             DragMode::Rotating if state.move_origin.len() > 1 => {
-                let changes = rotate_changes_from_delta(state, board);
-                if !changes.is_empty() {
-                    board.apply_operation(BoardOperation::SetProperty { changes });
+                if let Some(bounds) = state.transform_bounds_origin {
+                    let ids = transform_ids(state);
+                    if !ids.is_empty() && state.rotate_delta != 0.0 {
+                        board.apply_operation(BoardOperation::RotateElements {
+                            ids,
+                            center: bounds.center(),
+                            angle: state.rotate_delta,
+                        });
+                    }
                 }
                 state.selection_bounds = state.drag_selection_bounds;
             }
