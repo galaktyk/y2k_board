@@ -409,6 +409,7 @@ pub fn on_mouse_move(
             } else {
                 None
             },
+            text_layout_generation: 0,
         });
     }
 }

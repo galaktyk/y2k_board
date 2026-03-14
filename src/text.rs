@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use cosmic_text::{
@@ -29,11 +29,20 @@ pub struct ActiveTextEdit<'a> {
     pub selection_anchor_byte: Option<usize>,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct PreparedTextDraw {
     pub mono_instances: Vec<TextInstanceData>,
     pub color_instances: Vec<TextInstanceData>,
     pub caret_pos: Option<Vec2>,
+}
+
+/// Cached layout for a single element, keyed by element id.
+struct CachedLayout {
+    buffer: Buffer,
+    world_min: Vec2,
+    text: TextData,
+    /// Generation at which this layout was created.
+    generation: u64,
 }
 
 pub struct TextSystem {
@@ -42,6 +51,10 @@ pub struct TextSystem {
     mono_atlas: Atlas,
     emoji_atlas: Atlas,
     overlay_ready: bool,
+    /// Per-element layout cache, keyed by element id.
+    layout_cache: HashMap<u64, CachedLayout>,
+    /// Monotonic counter for active-edit layout invalidation.
+    edit_generation: u64,
 }
 
 impl TextSystem {
@@ -57,7 +70,20 @@ impl TextSystem {
             mono_atlas: Atlas::new(TEXT_ATLAS_SIZE, true),
             emoji_atlas: Atlas::new(EMOJI_ATLAS_SIZE, false),
             overlay_ready: false,
+            layout_cache: HashMap::new(),
+            edit_generation: 0,
         }
+    }
+
+    /// Increment the edit generation counter, invalidating cached layouts
+    /// for the actively-edited element.
+    pub fn bump_edit_generation(&mut self) {
+        self.edit_generation = self.edit_generation.wrapping_add(1);
+    }
+
+    /// Remove layout cache entries for elements that no longer exist.
+    pub fn evict_stale_layouts(&mut self, live_ids: &HashSet<u64>) {
+        self.layout_cache.retain(|id, _| live_ids.contains(id));
     }
 
     pub fn build_visible_text_instances(
@@ -97,27 +123,90 @@ impl TextSystem {
         let mut prepared = PreparedTextDraw::default();
 
         for element in candidates {
-            let content = active_edit
-                .filter(|edit| edit.element_id == element.id)
-                .map(|edit| edit.content)
-                .or_else(|| element.text.as_ref().map(|text| text.content.as_str()))
-                .unwrap_or_default();
+            let is_active_edit = active_edit
+                .as_ref()
+                .map(|edit| edit.element_id == element.id)
+                .unwrap_or(false);
+
+            let content = if is_active_edit {
+                active_edit.unwrap().content
+            } else {
+                element.text.as_ref().map(|text| text.content.as_str()).unwrap_or_default()
+            };
 
             if content.is_empty() {
                 continue;
             }
 
-            let Some(layout) = self.layout_text(element, content) else {
-                continue;
+            let generation = if is_active_edit {
+                self.edit_generation
+            } else {
+                element.text_layout_generation
             };
-            self.append_layout_instances(
-                ctx,
-                text_atlas,
-                emoji_atlas,
-                element,
-                &layout,
-                &mut prepared,
-            );
+
+            if self.ensure_layout_cached(element, content, generation) {
+                // Collect glyph physical data from the cached buffer first,
+                // so we can drop the immutable borrow before calling resolve_glyph.
+                let cached = self.layout_cache.get(&element.id).unwrap();
+                let world_min = cached.world_min;
+                let default_color = cached.text.color;
+                let origin = (element.pos + element.size * 0.5).to_array();
+
+                let glyph_data: Vec<(CacheKey, i32, i32, [f32; 4])> = cached
+                    .buffer
+                    .layout_runs()
+                    .flat_map(|run| {
+                        run.glyphs.iter().map(move |glyph| {
+                            let physical = glyph.physical((0.0, run.line_y), 1.0);
+                            let glyph_color = glyph
+                                .color_opt
+                                .map(cosmic_color_to_rgba)
+                                .unwrap_or(default_color);
+                            (physical.cache_key, physical.x, physical.y, glyph_color)
+                        })
+                    })
+                    .collect();
+                // Drop the immutable borrow on self.layout_cache
+
+                for (cache_key, phys_x, phys_y, glyph_color) in glyph_data {
+                    let resolved =
+                        self.resolve_glyph(ctx, text_atlas, emoji_atlas, cache_key);
+                    let Some(resolved) = resolved else {
+                        continue;
+                    };
+
+                    let instance_color = match resolved.kind {
+                        AtlasKind::Mono => glyph_color,
+                        AtlasKind::Color => [1.0, 1.0, 1.0, glyph_color[3]],
+                    };
+
+                    let pos = world_min
+                        + Vec2::new(
+                            (phys_x + resolved.entry.left) as f32,
+                            (phys_y - resolved.entry.top) as f32,
+                        );
+
+                    let atlas_size = match resolved.kind {
+                        AtlasKind::Mono => TEXT_ATLAS_SIZE,
+                        AtlasKind::Color => EMOJI_ATLAS_SIZE,
+                    };
+
+                    let instance = TextInstanceData {
+                        pos: pos.to_array(),
+                        size: [resolved.entry.width as f32, resolved.entry.height as f32],
+                        origin,
+                        rotation: element.rotation,
+                        uv_min: resolved.entry.uv_min(atlas_size as f32),
+                        uv_max: resolved.entry.uv_max(atlas_size as f32),
+                        color: instance_color,
+                    };
+
+                    match resolved.kind {
+                        AtlasKind::Mono => prepared.mono_instances.push(instance),
+                        AtlasKind::Color => prepared.color_instances.push(instance),
+                    }
+                }
+            }
         }
 
         if let Some(edit) = active_edit {
@@ -142,9 +231,13 @@ impl TextSystem {
         content: &str,
         world_pos: Vec2,
     ) -> Option<usize> {
-        let layout = self.layout_text(element, content)?;
-        let local = inverse_rotate_point(element, world_pos) - layout.world_min;
-        let cursor = layout.buffer.hit(local.x, local.y)?;
+        let generation = element.text_layout_generation;
+        if !self.ensure_layout_cached(element, content, generation) {
+            return None;
+        }
+        let cached = self.layout_cache.get(&element.id)?;
+        let local = inverse_rotate_point(element, world_pos) - cached.world_min;
+        let cursor = cached.buffer.hit(local.x, local.y)?;
         Some(cursor_to_global_byte(content, cursor))
     }
 
@@ -156,10 +249,14 @@ impl TextSystem {
         preferred_x: Option<i32>,
         motion: Motion,
     ) -> Option<(usize, Option<i32>)> {
-        let mut layout = self.layout_text(element, content)?;
+        let generation = element.text_layout_generation;
+        if !self.ensure_layout_cached(element, content, generation) {
+            return None;
+        }
+        let cached = self.layout_cache.get_mut(&element.id)?;
         let cursor = global_byte_to_cursor(content, cursor_byte);
         let (next, next_preferred_x) =
-            layout
+            cached
                 .buffer
                 .cursor_motion(&mut self.font_system, cursor, preferred_x, motion)?;
         Some((cursor_to_global_byte(content, next), next_preferred_x))
@@ -172,9 +269,10 @@ impl TextSystem {
         cursor_byte: usize,
         selection_anchor_byte: Option<usize>,
     ) -> (Vec<TextInstanceData>, Option<Vec2>) {
-        let Some(layout) = self.layout_text(element, content) else {
+        let generation = self.edit_generation;
+        if !self.ensure_layout_cached(element, content, generation) {
             return (Vec::new(), None);
-        };
+        }
 
         let uv_min = [0.0, 0.0];
         let uv_max = [1.0 / TEXT_ATLAS_SIZE as f32, 1.0 / TEXT_ATLAS_SIZE as f32];
@@ -182,16 +280,18 @@ impl TextSystem {
         let mut instances = Vec::new();
         let mut caret_pos = None;
 
+        let cached = self.layout_cache.get(&element.id).unwrap();
+
         if let Some((start_byte, end_byte)) = selection_range(cursor_byte, selection_anchor_byte) {
             let start = global_byte_to_cursor(content, start_byte);
             let end = global_byte_to_cursor(content, end_byte);
-            for run in layout.buffer.layout_runs() {
+            for run in cached.buffer.layout_runs() {
                 if let Some((x, width)) = run.highlight(start, end) {
                     if width <= 0.0 {
                         continue;
                     }
                     instances.push(TextInstanceData {
-                        pos: (layout.world_min + Vec2::new(x, run.line_top)).to_array(),
+                        pos: (cached.world_min + Vec2::new(x, run.line_top)).to_array(),
                         size: [width, run.line_height],
                         origin,
                         rotation: element.rotation,
@@ -204,8 +304,8 @@ impl TextSystem {
         }
 
         let cursor = global_byte_to_cursor(content, cursor_byte);
-        if let Some((x, line_top, line_height)) = caret_geometry(&layout.buffer, cursor) {
-            let world_pos = layout.world_min + Vec2::new((x - 1.0).max(0.0), line_top);
+        if let Some((x, line_top, line_height)) = caret_geometry(&cached.buffer, cursor) {
+            let world_pos = cached.world_min + Vec2::new((x - 1.0).max(0.0), line_top);
             instances.push(TextInstanceData {
                 pos: world_pos.to_array(),
                 size: [2.0, line_height.max(1.0)],
@@ -221,65 +321,56 @@ impl TextSystem {
         (instances, caret_pos)
     }
 
-    fn append_layout_instances(
+    /// Ensure a layout is cached for the given element. Returns true if the
+    /// cache entry exists (hit or freshly inserted), false if layout failed.
+    fn ensure_layout_cached(
         &mut self,
-        ctx: &mut dyn RenderingBackend,
-        mono_texture: TextureId,
-        emoji_texture: TextureId,
         element: &Element,
-        layout: &LaidOutText,
-        prepared: &mut PreparedTextDraw,
-    ) {
-        let origin = (element.pos + element.size * 0.5).to_array();
-        let default_color = layout.text.color;
-
-        for run in layout.buffer.layout_runs() {
-            for glyph in run.glyphs {
-                let physical = glyph.physical((0.0, run.line_y), 1.0);
-
-                let resolved =
-                    self.resolve_glyph(ctx, mono_texture, emoji_texture, physical.cache_key);
-                // Skip fallback for missing glyphs - prevents space characters from showing as tofu
-                // Missing glyphs will simply not be rendered (invisible)
-                let Some(resolved) = resolved else {
-                    continue;
-                };
-
-                let glyph_color = glyph
-                    .color_opt
-                    .map(cosmic_color_to_rgba)
-                    .unwrap_or(default_color);
-                let instance_color = match resolved.kind {
-                    AtlasKind::Mono => glyph_color,
-                    AtlasKind::Color => [1.0, 1.0, 1.0, glyph_color[3]],
-                };
-
-                let pos = layout.world_min
-                    + Vec2::new(
-                        (physical.x + resolved.entry.left) as f32,
-                        (physical.y - resolved.entry.top) as f32,
-                    );
-
-                let instance = TextInstanceData {
-                    pos: pos.to_array(),
-                    size: [resolved.entry.width as f32, resolved.entry.height as f32],
-                    origin,
-                    rotation: element.rotation,
-                    uv_min: resolved
-                        .entry
-                        .uv_min(layout.atlas_size(resolved.kind) as f32),
-                    uv_max: resolved
-                        .entry
-                        .uv_max(layout.atlas_size(resolved.kind) as f32),
-                    color: instance_color,
-                };
-
-                match resolved.kind {
-                    AtlasKind::Mono => prepared.mono_instances.push(instance),
-                    AtlasKind::Color => prepared.color_instances.push(instance),
-                }
+        content: &str,
+        generation: u64,
+    ) -> bool {
+        // Check cache hit
+        if let Some(cached) = self.layout_cache.get(&element.id) {
+            if cached.generation == generation {
+                return true;
             }
         }
+
+        // Cache miss — do full shaping
+        let Some((world_min, world_max)) = element.text_bounds() else {
+            return false;
+        };
+        let text = element.text.clone().unwrap_or_default();
+        let width = (world_max.x - world_min.x).max(1.0);
+        let height = (world_max.y - world_min.y).max(1.0);
+
+        let metrics = Metrics::new(
+            text.font_size.max(8.0),
+            (text.font_size * 1.35).max(text.font_size + 4.0),
+        );
+        let attrs = Attrs::new().color(rgba_to_cosmic_color(text.color));
+        let mut buffer = Buffer::new(&mut self.font_system, metrics);
+        buffer.set_size(&mut self.font_system, Some(width), Some(height));
+        buffer.set_wrap(&mut self.font_system, Wrap::WordOrGlyph);
+
+        buffer.set_text(
+            &mut self.font_system,
+            content,
+            &attrs,
+            Shaping::Advanced,
+            None,
+        );
+        buffer.shape_until_scroll(&mut self.font_system, true);
+
+        // Store in cache
+        self.layout_cache.insert(element.id, CachedLayout {
+            buffer,
+            world_min,
+            text,
+            generation,
+        });
+
+        true
     }
 
     fn resolve_glyph(
@@ -352,54 +443,6 @@ impl TextSystem {
         );
 
         self.overlay_ready = true;
-    }
-
-    fn layout_text(&mut self, element: &Element, content: &str) -> Option<LaidOutText> {
-        let Some((world_min, world_max)) = element.text_bounds() else {
-            return None;
-        };
-        let text = element.text.clone().unwrap_or_default();
-        let width = (world_max.x - world_min.x).max(1.0);
-        let height = (world_max.y - world_min.y).max(1.0);
-
-        let metrics = Metrics::new(
-            text.font_size.max(8.0),
-            (text.font_size * 1.35).max(text.font_size + 4.0),
-        );
-        let attrs = Attrs::new().color(rgba_to_cosmic_color(text.color));
-        let mut buffer = Buffer::new(&mut self.font_system, metrics);
-        buffer.set_size(&mut self.font_system, Some(width), Some(height));
-        buffer.set_wrap(&mut self.font_system, Wrap::WordOrGlyph);
-
-        buffer.set_text(
-            &mut self.font_system,
-            content,
-            &attrs,
-            Shaping::Advanced,
-            None,
-        );
-        buffer.shape_until_scroll(&mut self.font_system, true);
-
-        Some(LaidOutText {
-            buffer,
-            world_min,
-            text,
-        })
-    }
-}
-
-struct LaidOutText {
-    buffer: Buffer,
-    world_min: Vec2,
-    text: TextData,
-}
-
-impl LaidOutText {
-    fn atlas_size(&self, kind: AtlasKind) -> usize {
-        match kind {
-            AtlasKind::Mono => TEXT_ATLAS_SIZE,
-            AtlasKind::Color => EMOJI_ATLAS_SIZE,
-        }
     }
 }
 

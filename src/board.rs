@@ -40,6 +40,10 @@ pub struct Element {
     pub color: [f32; 4],
     pub selected: bool,
     pub text: Option<TextData>,
+    /// Bumped when any text-layout-affecting property changes.
+    /// Not serialized — starts at 0 on load.
+    #[serde(skip, default)]
+    pub text_layout_generation: u64,
 }
 
 impl Element {
@@ -67,6 +71,11 @@ impl Element {
 
     pub fn can_host_text(&self) -> bool {
         matches!(self.shape, ShapeType::Rect | ShapeType::Ellipse | ShapeType::Text)
+    }
+
+    /// Bump the text layout generation counter, invalidating cached layouts.
+    pub fn bump_text_generation(&mut self) {
+        self.text_layout_generation = self.text_layout_generation.wrapping_add(1);
     }
 
     pub fn text_bounds(&self) -> Option<(Vec2, Vec2)> {
@@ -287,6 +296,7 @@ impl Board {
                         element.pos = after.pos;
                         element.size = after.size;
                         element.rotation = after.rotation;
+                        element.bump_text_generation();
                     }
                 }
                 for change in changes {
@@ -296,6 +306,7 @@ impl Board {
                     };
                     if let Some(element) = self.elements.iter_mut().find(|e| e.id == change.id) {
                         element.text = after.clone();
+                        element.bump_text_generation();
                     }
                 }
             }

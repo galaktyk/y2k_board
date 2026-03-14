@@ -10,7 +10,7 @@ use crate::input::{self, DragMode, InputState};
 use crate::renderer::{InstanceData, Renderer};
 use crate::snapshot;
 use crate::spatial::SpatialGrid;
-use crate::text::{ActiveTextEdit, TextSystem};
+use crate::text::{ActiveTextEdit, PreparedTextDraw, TextSystem};
 use crate::toolbar::{self, Toolbar, ToolbarAction};
 use crate::stats;
 
@@ -195,6 +195,15 @@ impl TextEditSession {
     }
 }
 
+/// Lightweight snapshot of the active text edit state for cache comparison.
+#[derive(Clone, PartialEq)]
+struct TextEditSnapshot {
+    element_id: u64,
+    content: String,
+    cursor_byte: usize,
+    selection_anchor_byte: Option<usize>,
+}
+
 pub struct App {
     ctx: Box<dyn RenderingBackend>,
     renderer: Renderer,
@@ -211,6 +220,10 @@ pub struct App {
     dirty_element_ids: HashSet<u64>,
     text_system: TextSystem,
     text_edit: Option<TextEditSession>,
+    // ── text cache ────────────────────────────────────────────────────────
+    cached_text_draw: Option<PreparedTextDraw>,
+    text_dirty: bool,
+    cached_text_edit_snapshot: Option<TextEditSnapshot>,
     // ── stats ─────────────────────────────────────────────────────────────
     last_frame:   f64,
     frame_ms:     f32,
@@ -240,6 +253,9 @@ impl App {
             dirty_element_ids: HashSet::new(),
             text_system: TextSystem::new(),
             text_edit: None,
+            cached_text_draw: None,
+            text_dirty: true,
+            cached_text_edit_snapshot: None,
             last_frame:  miniquad::date::now(),
             frame_ms:    0.0,
             fps:         0.0,
@@ -266,12 +282,16 @@ impl App {
         self.board_render_cache.rebuild_all(&self.board);
         self.board_cache_dirty = false;
         self.visibility_dirty = true;
+        // Evict stale layout cache entries for deleted elements
+        let live_ids: HashSet<u64> = self.board.elements.iter().map(|e| e.id).collect();
+        self.text_system.evict_stale_layouts(&live_ids);
     }
 
     fn mark_board_structure_dirty(&mut self) {
         self.board_cache_dirty = true;
         self.spatial_dirty = true;
         self.visibility_dirty = true;
+        self.text_dirty = true;
         self.request_redraw();
     }
 
@@ -285,6 +305,7 @@ impl App {
         I: IntoIterator<Item = u64>,
     {
         self.dirty_element_ids.extend(ids);
+        self.text_dirty = true;
         self.request_redraw();
     }
 
@@ -344,6 +365,9 @@ impl App {
                 self.visibility_dirty = true;
                 self.dirty_element_ids.clear();
                 self.text_edit = None;
+                self.text_dirty = true;
+                self.cached_text_draw = None;
+                self.cached_text_edit_snapshot = None;
                 self.request_redraw();
                 println!("Loaded snapshot from snapshot.bin");
             }
@@ -389,6 +413,9 @@ impl EventHandler for App {
             self.fps_frames = 0;
         }
 
+        // Capture visibility state BEFORE sync clears it
+        let visibility_changed = self.visibility_dirty;
+
         self.sync_board_render_cache();
 
         self.ctx.begin_default_pass(PassAction::clear_color(0.09, 0.10, 0.13, 1.0));
@@ -426,30 +453,48 @@ impl EventHandler for App {
             board_mvp,
         );
 
-        let active_text_edit = self.text_edit.as_ref().map(|edit| {
-            (
-                edit.element_id,
-                edit.buffer.clone(),
-                edit.cursor_byte,
-                edit.selection_anchor_byte,
-            )
-        });
-        let active_text_edit = active_text_edit.as_ref().map(|edit| ActiveTextEdit {
-            element_id: edit.0,
-            content: &edit.1,
-            cursor_byte: edit.2,
-            selection_anchor_byte: edit.3,
+        // Build current edit snapshot for cache comparison
+        let current_edit_snapshot = self.text_edit.as_ref().map(|edit| TextEditSnapshot {
+            element_id: edit.element_id,
+            content: edit.buffer.clone(),
+            cursor_byte: edit.cursor_byte,
+            selection_anchor_byte: edit.selection_anchor_byte,
         });
 
-        let text_instances = self.text_system.build_visible_text_instances(
-            &mut *self.ctx,
-            self.renderer.text_atlas(),
-            self.renderer.emoji_atlas(),
-            &self.board,
-            self.board_render_cache.visible_board_indices(),
-            &self.camera,
-            active_text_edit,
-        );
+        // Check if we can reuse cached text draw
+        let text_cache_valid = !self.text_dirty
+            && !visibility_changed
+            && self.cached_text_draw.is_some()
+            && self.cached_text_edit_snapshot == current_edit_snapshot;
+
+        let text_instances = if text_cache_valid {
+            // FAST PATH: reuse cached PreparedTextDraw
+            self.cached_text_draw.as_ref().unwrap()
+        } else {
+            // SLOW PATH: rebuild
+            let active_text_edit = current_edit_snapshot.as_ref().map(|snap| ActiveTextEdit {
+                element_id: snap.element_id,
+                content: &snap.content,
+                cursor_byte: snap.cursor_byte,
+                selection_anchor_byte: snap.selection_anchor_byte,
+            });
+
+            let prepared = self.text_system.build_visible_text_instances(
+                &mut *self.ctx,
+                self.renderer.text_atlas(),
+                self.renderer.emoji_atlas(),
+                &self.board,
+                self.board_render_cache.visible_board_indices(),
+                &self.camera,
+                active_text_edit,
+            );
+
+            self.cached_text_draw = Some(prepared);
+            self.cached_text_edit_snapshot = current_edit_snapshot;
+            self.text_dirty = false;
+            self.cached_text_draw.as_ref().unwrap()
+        };
+
         self.renderer
             .draw_text_instances(&mut *self.ctx, &text_instances.mono_instances, board_mvp);
         self.renderer
@@ -764,6 +809,8 @@ impl App {
             selection_anchor_byte: None,
             preferred_x: None,
         });
+        self.text_dirty = true;
+        self.text_system.bump_edit_generation();
     }
 
     fn finish_text_edit(&mut self, commit: bool) {
@@ -775,6 +822,7 @@ impl App {
 
         self.input.active_text_id = None;
         self.input.text_selecting = false;
+        self.text_dirty = true;
 
         if commit {
             let before = edit.original_text.clone();
@@ -894,6 +942,8 @@ impl App {
         edit.cursor_byte = start;
         edit.clear_selection();
         edit.preferred_x = None;
+        self.text_dirty = true;
+        self.text_system.bump_edit_generation();
         true
     }
 
@@ -907,6 +957,8 @@ impl App {
         edit.cursor_byte = cursor + inserted.len();
         edit.clear_selection();
         edit.preferred_x = None;
+        self.text_dirty = true;
+        self.text_system.bump_edit_generation();
         true
     }
 
@@ -924,6 +976,8 @@ impl App {
         edit.buffer.replace_range(previous..edit.cursor_byte, "");
         edit.cursor_byte = previous;
         edit.preferred_x = None;
+        self.text_dirty = true;
+        self.text_system.bump_edit_generation();
         true
     }
 
@@ -940,6 +994,8 @@ impl App {
         let next = next_char_boundary(&edit.buffer, edit.cursor_byte);
         edit.buffer.replace_range(edit.cursor_byte..next, "");
         edit.preferred_x = None;
+        self.text_dirty = true;
+        self.text_system.bump_edit_generation();
         true
     }
 }
