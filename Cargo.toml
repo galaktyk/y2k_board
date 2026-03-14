@@ -25,12 +25,10 @@ strip = false
 
 
 [profile.release]
-opt-level = "z"
-lto = true
-codegen-units = 1
-panic = "abort"
-strip = true
-debug = 0
+opt-level = 3          # Max speed optimizations
+lto = "fat"            # Full LTO (slower compile, faster runtime)
+codegen-units = 1      # Better whole-program optimization
+panic = "abort"        # Skip unwinding overhead
+strip = true          # Keep symbols (optional, won't affect runtime speed)
+debug = false
 incremental = false
-
-
