@@ -624,17 +624,7 @@ fn caret_geometry(buffer: &Buffer, cursor: Cursor) -> Option<(f32, f32, f32)> {
 fn atlas_bytes(image: &SwashImage) -> Option<Vec<u8>> {
     match image.content {
         SwashContent::Mask => Some(image.data.clone()),
-        SwashContent::Color => {
-            let mut rgba = Vec::with_capacity(image.data.len());
-            for chunk in image.data.chunks_exact(4) {
-                // BGRA -> RGBA conversion
-                rgba.push(chunk[2]);
-                rgba.push(chunk[1]);
-                rgba.push(chunk[0]);
-                rgba.push(chunk[3]);
-            }
-            Some(rgba)
-        }
+        SwashContent::Color => Some(image.data.clone()),
         SwashContent::SubpixelMask => {
             let mut bytes =
                 Vec::with_capacity((image.placement.width * image.placement.height) as usize);
