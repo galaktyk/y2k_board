@@ -1,13 +1,7 @@
 
-add drag preview  (show area rectangle while dragging)
-add multiple selection 
 
-### multiple selection
-handles for resizing/rotating apply to whole selection in correct scale
-drag start anywhere inside that big rectangle will drag whole selection (easy hit test so you dont need to hit exactly on small element) 
-
-
-
+similar to move_drag_offset,
+add rotate offset too so we dont apply rotate on every element when doing multi slection rotate
 ---
 
 

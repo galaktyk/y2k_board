@@ -3,12 +3,11 @@ use glam::Vec2;
 
 use crate::board::{Board, BoardOperation, Element, ElementPropertyChange, ElementPropertyPatch, ElementTransform, ShapeType};
 use crate::camera::Camera;
-use crate::input::handles::{get_element_handles, get_selection_bounds_handles};
+use crate::input::handles::{get_element_handles, get_selection_bounds_handles, handle_hit_radius};
 use crate::input::preview::default_color;
 use crate::input::state::{DragMode, HandleDir, InputState, SelectionBounds};
 use crate::toolbar::{Tool, Toolbar, ToolbarAction, TOOLBAR_HEIGHT};
 
-const HANDLE_HIT_RADIUS: f32 = 15.0;
 const MARQUEE_MIN_SIZE: f32 = 4.0;
 
 fn begin_transform_drag(
@@ -61,12 +60,13 @@ fn move_changes_from_delta(state: &InputState) -> Vec<ElementPropertyChange> {
         .collect()
 }
 
-fn selection_handle_hit(state: &InputState, board: &Board, world: Vec2) -> Option<DragMode> {
+fn selection_handle_hit(state: &InputState, board: &Board, world: Vec2, zoom: f32) -> Option<DragMode> {
+    let hit_radius = handle_hit_radius(zoom);
     if board.selected_count() > 1 {
         let bounds = current_multi_selection_bounds(state, board)?;
-        for (index, point) in get_selection_bounds_handles(bounds).iter().enumerate() {
+        for (index, point) in get_selection_bounds_handles(bounds, zoom).iter().enumerate() {
             let delta = world - *point;
-            if delta.length_squared() < HANDLE_HIT_RADIUS * HANDLE_HIT_RADIUS {
+            if delta.length_squared() < hit_radius * hit_radius {
                 return Some(match index {
                     0 => DragMode::ResizingHandle(HandleDir::TL),
                     1 => DragMode::ResizingHandle(HandleDir::TR),
@@ -81,10 +81,10 @@ fn selection_handle_hit(state: &InputState, board: &Board, world: Vec2) -> Optio
     }
 
     for element in board.elements.iter().filter(|element| element.selected).rev() {
-        if let Some(handles) = get_element_handles(element) {
+        if let Some(handles) = get_element_handles(element, zoom) {
             for (index, point) in handles.iter().enumerate() {
                 let delta = world - *point;
-                if delta.length_squared() < HANDLE_HIT_RADIUS * HANDLE_HIT_RADIUS {
+                if delta.length_squared() < hit_radius * hit_radius {
                     return Some(if element.shape == ShapeType::Line {
                         match index {
                             0 => DragMode::ResizingHandle(HandleDir::LineStart),
@@ -236,7 +236,7 @@ pub fn on_mouse_down(
     match toolbar.active_tool {
         Tool::Select => {
             let now = miniquad::date::now();
-            if let Some(drag_mode) = selection_handle_hit(state, board, world) {
+            if let Some(drag_mode) = selection_handle_hit(state, board, world, camera.zoom) {
                 state.active_text_id = None;
                 state.text_selecting = false;
                 begin_transform_drag(state, board, drag_mode, world);

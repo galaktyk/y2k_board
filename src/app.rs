@@ -604,12 +604,12 @@ impl EventHandler for App {
                 .or(self.input.selection_bounds)
                 .or_else(|| self.board.selected_bounds())
             {
-                handle_inst.extend(crate::input::selection_bounds_handles_to_instances(bounds));
+                handle_inst.extend(crate::input::selection_bounds_handles_to_instances(bounds, self.camera.zoom));
             }
         } else {
             for e in &self.board.elements {
                 if e.selected {
-                    let mut instances = crate::input::handles_to_instances(e);
+                    let mut instances = crate::input::handles_to_instances(e, self.camera.zoom);
                     if let Some(offset) = move_drag_offset {
                         for instance in &mut instances {
                             *instance = offset_instance(*instance, offset);
