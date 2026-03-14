@@ -168,11 +168,62 @@ fn offset_instance(mut instance: InstanceData, delta: Vec2) -> InstanceData {
     instance
 }
 
+fn rotate_point(point: Vec2, center: Vec2, angle: f32) -> Vec2 {
+    let offset = point - center;
+    let cos_a = angle.cos();
+    let sin_a = angle.sin();
+    center + Vec2::new(
+        offset.x * cos_a - offset.y * sin_a,
+        offset.x * sin_a + offset.y * cos_a,
+    )
+}
+
+fn rotate_instance(mut instance: InstanceData, center: Vec2, angle: f32) -> InstanceData {
+    if instance.shape_type == 2 {
+        let start = Vec2::new(instance.pos[0], instance.pos[1]);
+        let end = start + Vec2::new(instance.size[0], instance.size[1]);
+        let rotated_start = rotate_point(start, center, angle);
+        let rotated_end = rotate_point(end, center, angle);
+        instance.pos = rotated_start.to_array();
+        instance.size = (rotated_end - rotated_start).to_array();
+        return instance;
+    }
+
+    let original_center = Vec2::new(instance.pos[0], instance.pos[1])
+        + Vec2::new(instance.size[0], instance.size[1]) * 0.5;
+    let rotated_center = rotate_point(original_center, center, angle);
+    let size = Vec2::new(instance.size[0], instance.size[1]);
+    instance.pos = (rotated_center - size * 0.5).to_array();
+    instance.rotation += angle;
+    instance
+}
+
 fn offset_text_instance(mut instance: crate::renderer::TextInstanceData, delta: Vec2) -> crate::renderer::TextInstanceData {
     instance.pos[0] += delta.x;
     instance.pos[1] += delta.y;
     instance.origin[0] = instance.origin[0].saturating_add(delta.x.round() as i16);
     instance.origin[1] = instance.origin[1].saturating_add(delta.y.round() as i16);
+    instance
+}
+
+fn rotate_text_instance(
+    mut instance: crate::renderer::TextInstanceData,
+    center: Vec2,
+    angle: f32,
+) -> crate::renderer::TextInstanceData {
+    let pos = rotate_point(Vec2::new(instance.pos[0], instance.pos[1]), center, angle);
+    let origin = rotate_point(
+        Vec2::new(instance.origin[0] as f32, instance.origin[1] as f32),
+        center,
+        angle,
+    );
+
+    instance.pos = pos.to_array();
+    instance.origin = [
+        origin.x.round().clamp(i16::MIN as f32, i16::MAX as f32) as i16,
+        origin.y.round().clamp(i16::MIN as f32, i16::MAX as f32) as i16,
+    ];
+    instance.rotation += angle;
     instance
 }
 
@@ -443,10 +494,31 @@ impl EventHandler for App {
         let move_drag_offset = (self.input.drag_mode == DragMode::MoveSelected)
             .then_some(self.input.move_delta)
             .filter(|delta| delta.length_squared() > 0.0);
+        let rotate_drag_preview = (self.input.drag_mode == DragMode::Rotating
+            && self.input.move_origin.len() > 1)
+            .then_some(self.input.rotate_delta)
+            .filter(|angle| angle.abs() > 0.0)
+            .zip(self.input.transform_bounds_origin.map(|bounds| bounds.center()));
 
         // Board elements
+        let rotated_shape_instances;
         let moved_shape_instances;
-        let shape_instances = if let Some(offset) = move_drag_offset {
+        let shape_instances = if let Some((angle, center)) = rotate_drag_preview {
+            rotated_shape_instances = self
+                .board_render_cache
+                .visible_board_indices()
+                .iter()
+                .zip(self.board_render_cache.visible_instances().iter())
+                .map(|(&board_index, &instance)| {
+                    if self.board.elements[board_index].selected {
+                        rotate_instance(instance, center, angle)
+                    } else {
+                        instance
+                    }
+                })
+                .collect::<Vec<_>>();
+            rotated_shape_instances.as_slice()
+        } else if let Some(offset) = move_drag_offset {
             moved_shape_instances = self
                 .board_render_cache
                 .visible_board_indices()
@@ -511,8 +583,23 @@ impl EventHandler for App {
 
         let moved_mono_instances;
         let moved_color_instances;
+        let rotated_mono_instances;
+        let rotated_color_instances;
         let moved_caret_pos;
-        let mono_instances = if let Some(offset) = move_drag_offset {
+        let mono_instances = if let Some((angle, center)) = rotate_drag_preview {
+            rotated_mono_instances = {
+                let mut instances = text_instances.mono_instances.clone();
+                for range in &text_instances.element_ranges {
+                    if self.board.is_selected(range.element_id) {
+                        for instance in &mut instances[range.mono_start..range.mono_end] {
+                            *instance = rotate_text_instance(*instance, center, angle);
+                        }
+                    }
+                }
+                instances
+            };
+            rotated_mono_instances.as_slice()
+        } else if let Some(offset) = move_drag_offset {
             moved_mono_instances = {
                 let mut instances = text_instances.mono_instances.clone();
                 for range in &text_instances.element_ranges {
@@ -528,7 +615,20 @@ impl EventHandler for App {
         } else {
             text_instances.mono_instances.as_slice()
         };
-        let color_instances = if let Some(offset) = move_drag_offset {
+        let color_instances = if let Some((angle, center)) = rotate_drag_preview {
+            rotated_color_instances = {
+                let mut instances = text_instances.color_instances.clone();
+                for range in &text_instances.element_ranges {
+                    if self.board.is_selected(range.element_id) {
+                        for instance in &mut instances[range.color_start..range.color_end] {
+                            *instance = rotate_text_instance(*instance, center, angle);
+                        }
+                    }
+                }
+                instances
+            };
+            rotated_color_instances.as_slice()
+        } else if let Some(offset) = move_drag_offset {
             moved_color_instances = {
                 let mut instances = text_instances.color_instances.clone();
                 for range in &text_instances.element_ranges {
@@ -549,7 +649,24 @@ impl EventHandler for App {
         self.renderer
             .draw_color_text_instances(&mut *self.ctx, color_instances, board_mvp);
 
-        moved_caret_pos = move_drag_offset.map(|offset| text_instances.caret_pos.map(|pos| pos + offset)).unwrap_or(text_instances.caret_pos);
+        moved_caret_pos = if let Some((angle, center)) = rotate_drag_preview {
+            text_instances.caret_pos.map(|pos| {
+                if self
+                    .input
+                    .active_text_id
+                    .map(|id| self.board.is_selected(id))
+                    .unwrap_or(false)
+                {
+                    rotate_point(pos, center, angle)
+                } else {
+                    pos
+                }
+            })
+        } else {
+            move_drag_offset
+                .map(|offset| text_instances.caret_pos.map(|pos| pos + offset))
+                .unwrap_or(text_instances.caret_pos)
+        };
         if let Some(world_caret) = moved_caret_pos {
             let screen_caret = self.camera.world_to_screen(world_caret, self.screen_size);
             set_ime_candidate_pos(screen_caret.x as i32, screen_caret.y as i32);
@@ -566,11 +683,15 @@ impl EventHandler for App {
         let mut selection_inst = Vec::new();
         for element in &self.board.elements {
             if let Some(instance) = toolbar::selection_instance(element, 1.0) {
-                selection_inst.push(if let Some(offset) = move_drag_offset.filter(|_| element.selected) {
-                    offset_instance(instance, offset)
-                } else {
-                    instance
-                });
+                selection_inst.push(
+                    if let Some((angle, center)) = rotate_drag_preview.filter(|_| element.selected) {
+                        rotate_instance(instance, center, angle)
+                    } else if let Some(offset) = move_drag_offset.filter(|_| element.selected) {
+                        offset_instance(instance, offset)
+                    } else {
+                        instance
+                    },
+                );
             }
         }
         if let Some(bounds) = self
@@ -745,7 +866,9 @@ impl EventHandler for App {
             return;
         }
 
-        if matches!(self.input.drag_mode, DragMode::MarqueeSelect | DragMode::MoveSelected) {
+        if matches!(self.input.drag_mode, DragMode::MarqueeSelect | DragMode::MoveSelected)
+            || (self.input.drag_mode == DragMode::Rotating && self.input.move_origin.len() > 1)
+        {
             self.request_redraw();
             return;
         }

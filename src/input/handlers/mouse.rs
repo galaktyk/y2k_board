@@ -25,6 +25,7 @@ fn begin_transform_drag(
         .collect();
     state.move_start_world = world;
     state.move_delta = Vec2::ZERO;
+    state.rotate_delta = 0.0;
     state.transform_bounds_origin = current_multi_selection_bounds(state, board).or_else(|| board.selected_bounds());
     state.drag_selection_bounds = state.transform_bounds_origin;
 }
@@ -52,6 +53,48 @@ fn move_changes_from_delta(state: &InputState) -> Vec<ElementPropertyChange> {
         .filter_map(|&(id, pos, size, rotation)| {
             let before = ElementTransform::new(pos, size, rotation);
             let after = ElementTransform::new(pos + state.move_delta, size, rotation);
+            (before != after).then_some(ElementPropertyChange {
+                id,
+                patch: ElementPropertyPatch::Transform { before, after },
+            })
+        })
+        .collect()
+}
+
+fn rotation_angle_delta(start_world: Vec2, current_world: Vec2, center: Vec2) -> f32 {
+    let start_vec = start_world - center;
+    let current_vec = current_world - center;
+    current_vec.y.atan2(current_vec.x) - start_vec.y.atan2(start_vec.x)
+}
+
+fn rotate_changes_from_delta(state: &InputState, board: &Board) -> Vec<ElementPropertyChange> {
+    let Some(bounds) = state.transform_bounds_origin else {
+        return Vec::new();
+    };
+
+    let center = bounds.center();
+    let angle_diff = state.rotate_delta;
+
+    state
+        .move_origin
+        .iter()
+        .filter_map(|&(id, orig_pos, orig_size, orig_rot)| {
+            let element = board.element(id)?;
+            let before = ElementTransform::new(orig_pos, orig_size, orig_rot);
+            let after = if element.shape == ShapeType::Line {
+                let start = rotate_point(orig_pos, center, angle_diff);
+                let end = rotate_point(orig_pos + orig_size, center, angle_diff);
+                ElementTransform::new(start, end - start, orig_rot)
+            } else {
+                let original_center = orig_pos + orig_size * 0.5;
+                let rotated_center = rotate_point(original_center, center, angle_diff);
+                ElementTransform::new(
+                    rotated_center - orig_size * 0.5,
+                    orig_size,
+                    orig_rot + angle_diff,
+                )
+            };
+
             (before != after).then_some(ElementPropertyChange {
                 id,
                 patch: ElementPropertyPatch::Transform { before, after },
@@ -389,6 +432,13 @@ pub fn on_mouse_up(
                     state.selection_bounds = state.drag_selection_bounds;
                 }
             }
+            DragMode::Rotating if state.move_origin.len() > 1 => {
+                let changes = rotate_changes_from_delta(state, board);
+                if !changes.is_empty() {
+                    board.apply_operation(BoardOperation::SetProperty { changes });
+                }
+                state.selection_bounds = state.drag_selection_bounds;
+            }
             _ => {
                 let changes = board.selected_transform_changes(&state.move_origin);
                 if !changes.is_empty() {
@@ -402,6 +452,7 @@ pub fn on_mouse_up(
     }
     state.drag_mode = DragMode::None;
     state.move_delta = Vec2::ZERO;
+    state.rotate_delta = 0.0;
     state.move_origin.clear();
     state.marquee_bounds = None;
     state.drag_selection_bounds = None;
@@ -478,6 +529,7 @@ pub fn on_mouse_move(
         }
 
         state.move_delta = world - state.move_start_world;
+        state.rotate_delta = 0.0;
         if state.drag_mode == DragMode::MoveSelected {
             state.drag_selection_bounds = state
                 .transform_bounds_origin
@@ -486,6 +538,15 @@ pub fn on_mouse_move(
         }
 
         let is_group_transform = state.move_origin.len() > 1;
+
+        if state.drag_mode == DragMode::Rotating && is_group_transform {
+            let Some(bounds) = state.transform_bounds_origin else {
+                return;
+            };
+            state.rotate_delta = rotation_angle_delta(state.move_start_world, world, bounds.center());
+            state.drag_selection_bounds = Some(bounds.with_rotation(bounds.rotation + state.rotate_delta));
+            return;
+        }
 
         for element in &mut board.elements {
             if element.selected {
@@ -496,35 +557,9 @@ pub fn on_mouse_move(
                 {
                     match state.drag_mode {
                         DragMode::Rotating => {
-                            if is_group_transform {
-                                let Some(bounds) = state.transform_bounds_origin else {
-                                    continue;
-                                };
-                                let center = bounds.center();
-                                let start_vec = state.move_start_world - center;
-                                let current_vec = world - center;
-                                let angle_diff = current_vec.y.atan2(current_vec.x)
-                                    - start_vec.y.atan2(start_vec.x);
-
-                                state.drag_selection_bounds = Some(bounds.with_rotation(bounds.rotation + angle_diff));
-
-                                if element.shape == ShapeType::Line {
-                                    let start = rotate_point(orig_pos, center, angle_diff);
-                                    let end = rotate_point(orig_pos + orig_size, center, angle_diff);
-                                    element.pos = start;
-                                    element.size = end - start;
-                                } else {
-                                    let original_center = orig_pos + orig_size * 0.5;
-                                    let rotated_center = rotate_point(original_center, center, angle_diff);
-                                    element.pos = rotated_center - orig_size * 0.5;
-                                    element.rotation = orig_rot + angle_diff;
-                                }
-                            } else {
+                            if !is_group_transform {
                                 let center = orig_pos + orig_size * 0.5;
-                                let start_vec = state.move_start_world - center;
-                                let current_vec = world - center;
-                                let angle_diff = current_vec.y.atan2(current_vec.x)
-                                    - start_vec.y.atan2(start_vec.x);
+                                let angle_diff = rotation_angle_delta(state.move_start_world, world, center);
                                 element.rotation = orig_rot + angle_diff;
                             }
                             element.bump_text_generation();
