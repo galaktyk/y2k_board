@@ -709,19 +709,15 @@ impl EventHandler for App {
                 );
             }
         }
-        if let Some(bounds) = self
-            .input
-            .drag_selection_bounds
-            .or(self.input.selection_bounds)
-            .or_else(|| {
-                if self.board.selected_count() > 1 {
-                    self.board.selected_bounds()
-                } else {
-                    None
-                }
-            })
-        {
-            selection_inst.push(toolbar::selection_bounds_instance(bounds, 1.0));
+        if self.board.selected_count() > 1 {
+            if let Some(bounds) = self
+                .input
+                .drag_selection_bounds
+                .or(self.input.selection_bounds)
+                .or_else(|| self.board.selected_bounds())
+            {
+                selection_inst.push(toolbar::selection_bounds_instance(bounds, 1.0));
+            }
         }
         if let Some(bounds) = self.input.marquee_bounds {
             selection_inst.push(toolbar::marquee_instance(bounds, 1.0));
