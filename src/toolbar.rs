@@ -215,20 +215,40 @@ pub fn selection_instance(
         return None;
     }
 
+    Some(outline_instance(e, alpha))
+}
+
+fn outline_instance(
+    e: &crate::board::Element,
+    alpha: f32,
+) -> InstanceData {
     let (st, expand) = match e.shape {
         crate::board::ShapeType::Rect | crate::board::ShapeType::Text => (3.0f32, 4.0f32),
         crate::board::ShapeType::Ellipse => (4.0, 4.0),
         crate::board::ShapeType::Line => (2.0, 3.0),
     };
 
-    Some(InstanceData::new(
+    InstanceData::new(
         (e.pos - Vec2::splat(expand)).to_array(),
         (e.size + Vec2::splat(expand * 2.0)).to_array(),
         e.rotation,
         [0.35, 0.65, 1.0, 1.0],
         st,
         alpha,
-    ))
+    )
+}
+
+pub fn preview_instances(
+    e: &crate::board::Element,
+    alpha: f32,
+) -> Vec<InstanceData> {
+    let mut instances = element_to_instances(e, alpha);
+
+    if e.shape != crate::board::ShapeType::Line {
+        instances.push(outline_instance(e, 1.0));
+    }
+
+    instances
 }
 
 pub fn element_to_instances(

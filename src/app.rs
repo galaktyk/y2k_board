@@ -508,7 +508,7 @@ impl EventHandler for App {
 
         
         if let Some(ref preview) = self.input.preview {
-            let preview_inst = toolbar::element_to_instances(preview, 0.5);
+            let preview_inst = toolbar::preview_instances(preview, 0.5);
             self.renderer
                 .draw_instances(&mut *self.ctx, &preview_inst, board_mvp);
         }
