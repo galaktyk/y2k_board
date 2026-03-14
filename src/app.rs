@@ -207,12 +207,13 @@ fn rotate_text_instance(
     center: Vec2,
     angle: f32,
 ) -> crate::renderer::TextInstanceData {
-    let pos = rotate_point(Vec2::new(instance.pos[0], instance.pos[1]), center, angle);
+    let original_origin = Vec2::new(instance.origin[0] as f32, instance.origin[1] as f32);
     let origin = rotate_point(
-        Vec2::new(instance.origin[0] as f32, instance.origin[1] as f32),
+        original_origin,
         center,
         angle,
     );
+    let pos = Vec2::new(instance.pos[0], instance.pos[1]) + (origin - original_origin);
 
     instance.pos = pos.to_array();
     instance.origin = [
