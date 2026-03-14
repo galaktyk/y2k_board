@@ -6,11 +6,16 @@ use crate::board::Element;
 pub struct SelectionBounds {
     pub pos: Vec2,
     pub size: Vec2,
+    pub rotation: f32,
 }
 
 impl SelectionBounds {
     pub fn new(pos: Vec2, size: Vec2) -> Self {
-        Self { pos, size }
+        Self {
+            pos,
+            size,
+            rotation: 0.0,
+        }
     }
 
     pub fn from_points(a: Vec2, b: Vec2) -> Self {
@@ -31,10 +36,44 @@ impl SelectionBounds {
         self.pos + self.size * 0.5
     }
 
-    pub fn contains(&self, point: Vec2) -> bool {
+    pub fn with_rotation(mut self, rotation: f32) -> Self {
+        self.rotation = rotation;
+        self
+    }
+
+    pub fn with_position(mut self, pos: Vec2) -> Self {
+        self.pos = pos;
+        self
+    }
+
+    pub fn rotate_point(&self, point: Vec2) -> Vec2 {
+        let center = self.center();
+        let offset = point - center;
+        let c = self.rotation.cos();
+        let s = self.rotation.sin();
+        center + Vec2::new(offset.x * c - offset.y * s, offset.x * s + offset.y * c)
+    }
+
+    pub fn corners(&self) -> [Vec2; 4] {
         let min = self.min();
         let max = self.max();
-        point.x >= min.x && point.x <= max.x && point.y >= min.y && point.y <= max.y
+        [
+            self.rotate_point(min),
+            self.rotate_point(Vec2::new(max.x, min.y)),
+            self.rotate_point(max),
+            self.rotate_point(Vec2::new(min.x, max.y)),
+        ]
+    }
+
+    pub fn contains(&self, point: Vec2) -> bool {
+        let center = self.center();
+        let offset = point - center;
+        let c = self.rotation.cos();
+        let s = self.rotation.sin();
+        let local = center + Vec2::new(offset.x * c + offset.y * s, -offset.x * s + offset.y * c);
+        let min = self.min();
+        let max = self.max();
+        local.x >= min.x && local.x <= max.x && local.y >= min.y && local.y <= max.y
     }
 }
 
@@ -57,6 +96,7 @@ pub struct InputState {
     pub preview: Option<Element>,
     pub move_delta: Vec2,
     pub marquee_bounds: Option<SelectionBounds>,
+    pub selection_bounds: Option<SelectionBounds>,
     pub drag_selection_bounds: Option<SelectionBounds>,
     pub transform_bounds_origin: Option<SelectionBounds>,
     pub active_text_id: Option<u64>,
@@ -106,6 +146,7 @@ impl InputState {
             preview: None,
             move_delta: Vec2::ZERO,
             marquee_bounds: None,
+            selection_bounds: None,
             drag_selection_bounds: None,
             transform_bounds_origin: None,
             active_text_id: None,

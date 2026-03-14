@@ -26,8 +26,24 @@ fn begin_transform_drag(
         .collect();
     state.move_start_world = world;
     state.move_delta = Vec2::ZERO;
-    state.transform_bounds_origin = board.selected_bounds();
+    state.transform_bounds_origin = current_multi_selection_bounds(state, board).or_else(|| board.selected_bounds());
     state.drag_selection_bounds = state.transform_bounds_origin;
+}
+
+fn current_multi_selection_bounds(state: &InputState, board: &Board) -> Option<SelectionBounds> {
+    if board.selected_count() <= 1 {
+        return None;
+    }
+
+    state.selection_bounds.or_else(|| board.selected_bounds())
+}
+
+fn sync_multi_selection_bounds(state: &mut InputState, board: &Board) {
+    state.selection_bounds = if board.selected_count() > 1 {
+        board.selected_bounds()
+    } else {
+        None
+    };
 }
 
 fn move_changes_from_delta(state: &InputState) -> Vec<ElementPropertyChange> {
@@ -45,9 +61,9 @@ fn move_changes_from_delta(state: &InputState) -> Vec<ElementPropertyChange> {
         .collect()
 }
 
-fn selection_handle_hit(board: &Board, world: Vec2) -> Option<DragMode> {
+fn selection_handle_hit(state: &InputState, board: &Board, world: Vec2) -> Option<DragMode> {
     if board.selected_count() > 1 {
-        let bounds = board.selected_bounds()?;
+        let bounds = current_multi_selection_bounds(state, board)?;
         for (index, point) in get_selection_bounds_handles(bounds).iter().enumerate() {
             let delta = world - *point;
             if delta.length_squared() < HANDLE_HIT_RADIUS * HANDLE_HIT_RADIUS {
@@ -103,8 +119,51 @@ fn rotate_point(point: Vec2, center: Vec2, angle: f32) -> Vec2 {
     )
 }
 
+fn inverse_rotate_point(point: Vec2, center: Vec2, angle: f32) -> Vec2 {
+    let offset = point - center;
+    let cos_a = angle.cos();
+    let sin_a = angle.sin();
+    center + Vec2::new(
+        offset.x * cos_a + offset.y * sin_a,
+        -offset.x * sin_a + offset.y * cos_a,
+    )
+}
+
 fn scale_point_from_anchor(point: Vec2, anchor: Vec2, scale_x: f32, scale_y: f32) -> Vec2 {
     anchor + Vec2::new((point.x - anchor.x) * scale_x, (point.y - anchor.y) * scale_y)
+}
+
+fn scale_point_from_anchor_in_frame(
+    point: Vec2,
+    anchor: Vec2,
+    scale_x: f32,
+    scale_y: f32,
+    frame_center: Vec2,
+    frame_rotation: f32,
+) -> Vec2 {
+    let local_point = inverse_rotate_point(point, frame_center, frame_rotation);
+    let local_anchor = inverse_rotate_point(anchor, frame_center, frame_rotation);
+    let scaled_local = scale_point_from_anchor(local_point, local_anchor, scale_x, scale_y);
+    rotate_point(scaled_local, frame_center, frame_rotation)
+}
+
+fn resized_selection_bounds(bounds: SelectionBounds, dir: HandleDir, world: Vec2) -> Option<SelectionBounds> {
+    let center = bounds.center();
+    let local_world = inverse_rotate_point(world, center, bounds.rotation);
+    let anchor = match dir {
+        HandleDir::TL => bounds.max(),
+        HandleDir::TR => Vec2::new(bounds.min().x, bounds.max().y),
+        HandleDir::BR => bounds.min(),
+        HandleDir::BL => Vec2::new(bounds.max().x, bounds.min().y),
+        _ => return None,
+    };
+    let local_min = local_world.min(anchor);
+    let local_max = local_world.max(anchor);
+    Some(SelectionBounds {
+        pos: local_min,
+        size: (local_max - local_min).max(Vec2::splat(1.0)),
+        rotation: bounds.rotation,
+    })
 }
 
 fn group_resize_from_handle(
@@ -112,16 +171,18 @@ fn group_resize_from_handle(
     dir: HandleDir,
     world: Vec2,
 ) -> Option<(Vec2, f32, f32)> {
+    let center = bounds.center();
+    let local_world = inverse_rotate_point(world, center, bounds.rotation);
     let min = bounds.min();
     let max = bounds.max();
     let width = bounds.size.x.max(1.0);
     let height = bounds.size.y.max(1.0);
 
     match dir {
-        HandleDir::TL => Some((max, (max.x - world.x) / width, (max.y - world.y) / height)),
-        HandleDir::TR => Some((Vec2::new(min.x, max.y), (world.x - min.x) / width, (max.y - world.y) / height)),
-        HandleDir::BR => Some((min, (world.x - min.x) / width, (world.y - min.y) / height)),
-        HandleDir::BL => Some((Vec2::new(max.x, min.y), (max.x - world.x) / width, (world.y - min.y) / height)),
+        HandleDir::TL => Some((rotate_point(max, center, bounds.rotation), (max.x - local_world.x) / width, (max.y - local_world.y) / height)),
+        HandleDir::TR => Some((rotate_point(Vec2::new(min.x, max.y), center, bounds.rotation), (local_world.x - min.x) / width, (max.y - local_world.y) / height)),
+        HandleDir::BR => Some((rotate_point(min, center, bounds.rotation), (local_world.x - min.x) / width, (local_world.y - min.y) / height)),
+        HandleDir::BL => Some((rotate_point(Vec2::new(max.x, min.y), center, bounds.rotation), (max.x - local_world.x) / width, (local_world.y - min.y) / height)),
         _ => None,
     }
 }
@@ -175,7 +236,7 @@ pub fn on_mouse_down(
     match toolbar.active_tool {
         Tool::Select => {
             let now = miniquad::date::now();
-            if let Some(drag_mode) = selection_handle_hit(board, world) {
+            if let Some(drag_mode) = selection_handle_hit(state, board, world) {
                 state.active_text_id = None;
                 state.text_selecting = false;
                 begin_transform_drag(state, board, drag_mode, world);
@@ -183,7 +244,7 @@ pub fn on_mouse_down(
             }
 
             if board.selected_count() > 1 {
-                if let Some(bounds) = board.selected_bounds() {
+                if let Some(bounds) = current_multi_selection_bounds(state, board) {
                     if bounds.contains(world) {
                         state.active_text_id = None;
                         state.text_selecting = false;
@@ -203,7 +264,8 @@ pub fn on_mouse_down(
                     state.last_click_at = None;
                     state.text_selecting = false;
                     board.toggle_selected(id);
-                    state.drag_selection_bounds = board.selected_bounds();
+                    sync_multi_selection_bounds(state, board);
+                    state.drag_selection_bounds = state.selection_bounds;
                     return None;
                 }
 
@@ -221,6 +283,7 @@ pub fn on_mouse_down(
                 if !already_selected {
                     board.deselect_all();
                     board.select_only(id);
+                    state.selection_bounds = None;
                 }
 
                 if is_double_click {
@@ -256,6 +319,7 @@ pub fn on_mouse_down(
                 state.move_start_world = world;
                 state.move_delta = Vec2::ZERO;
                 state.marquee_bounds = Some(SelectionBounds::from_points(world, world));
+                state.selection_bounds = None;
                 state.drag_selection_bounds = None;
                 state.transform_bounds_origin = None;
             }
@@ -306,11 +370,14 @@ pub fn on_mouse_up(
                 if let Some(bounds) = state.marquee_bounds.take() {
                     if bounds.size.x >= MARQUEE_MIN_SIZE || bounds.size.y >= MARQUEE_MIN_SIZE {
                         board.select_intersecting_bounds(bounds, state.shift_held);
+                        sync_multi_selection_bounds(state, board);
                     } else if !state.shift_held {
                         board.deselect_all();
+                        state.selection_bounds = None;
                     }
                 } else if !state.shift_held {
                     board.deselect_all();
+                    state.selection_bounds = None;
                 }
             }
             DragMode::MoveSelected => {
@@ -318,11 +385,17 @@ pub fn on_mouse_up(
                 if !changes.is_empty() {
                     board.apply_operation(BoardOperation::SetProperty { changes });
                 }
+                if state.move_origin.len() > 1 {
+                    state.selection_bounds = state.drag_selection_bounds;
+                }
             }
             _ => {
                 let changes = board.selected_transform_changes(&state.move_origin);
                 if !changes.is_empty() {
                     board.apply_operation(BoardOperation::SetProperty { changes });
+                }
+                if state.move_origin.len() > 1 {
+                    state.selection_bounds = state.drag_selection_bounds;
                 }
             }
         }
@@ -408,7 +481,7 @@ pub fn on_mouse_move(
         if state.drag_mode == DragMode::MoveSelected {
             state.drag_selection_bounds = state
                 .transform_bounds_origin
-                .map(|bounds| SelectionBounds::new(bounds.pos + state.move_delta, bounds.size));
+                .map(|bounds| bounds.with_rotation(bounds.rotation).with_position(bounds.pos + state.move_delta));
             return;
         }
 
@@ -432,6 +505,8 @@ pub fn on_mouse_move(
                                 let current_vec = world - center;
                                 let angle_diff = current_vec.y.atan2(current_vec.x)
                                     - start_vec.y.atan2(start_vec.x);
+
+                                state.drag_selection_bounds = Some(bounds.with_rotation(bounds.rotation + angle_diff));
 
                                 if element.shape == ShapeType::Line {
                                     let start = rotate_point(orig_pos, center, angle_diff);
@@ -465,20 +540,37 @@ pub fn on_mouse_move(
                                     continue;
                                 };
 
+                                state.drag_selection_bounds = resized_selection_bounds(bounds, dir, world);
+
                                 if element.shape == ShapeType::Line {
-                                    let start = scale_point_from_anchor(orig_pos, anchor, scale_x, scale_y);
-                                    let end = scale_point_from_anchor(
+                                    let start = scale_point_from_anchor_in_frame(
+                                        orig_pos,
+                                        anchor,
+                                        scale_x,
+                                        scale_y,
+                                        bounds.center(),
+                                        bounds.rotation,
+                                    );
+                                    let end = scale_point_from_anchor_in_frame(
                                         orig_pos + orig_size,
                                         anchor,
                                         scale_x,
                                         scale_y,
+                                        bounds.center(),
+                                        bounds.rotation,
                                     );
                                     element.pos = start;
                                     element.size = end - start;
                                 } else {
                                     let original_center = orig_pos + orig_size * 0.5;
-                                    let scaled_center =
-                                        scale_point_from_anchor(original_center, anchor, scale_x, scale_y);
+                                    let scaled_center = scale_point_from_anchor_in_frame(
+                                        original_center,
+                                        anchor,
+                                        scale_x,
+                                        scale_y,
+                                        bounds.center(),
+                                        bounds.rotation,
+                                    );
                                     let new_size = Vec2::new(
                                         orig_size.x * scale_x.abs(),
                                         orig_size.y * scale_y.abs(),
@@ -550,7 +642,9 @@ pub fn on_mouse_move(
                 }
             }
         }
-        state.drag_selection_bounds = board.selected_bounds();
+        if !is_group_transform {
+            state.drag_selection_bounds = None;
+        }
         return;
     }
 

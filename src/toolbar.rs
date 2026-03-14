@@ -263,7 +263,7 @@ fn bounds_outline_instance(
     InstanceData::new(
         (bounds.pos - Vec2::splat(expand)).to_array(),
         (bounds.size + Vec2::splat(expand * 2.0)).to_array(),
-        0.0,
+        bounds.rotation,
         color,
         3.0,
         alpha,

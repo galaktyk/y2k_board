@@ -464,8 +464,8 @@ impl EventHandler for App {
         } else {
             self.board_render_cache.visible_instances()
         };
-        self.renderer
-            .draw_instances(&mut *self.ctx, shape_instances, board_mvp);
+            self.renderer
+                .draw_instances(&mut *self.ctx, shape_instances, board_mvp, self.screen_size);
 
         // Build current edit snapshot for cache comparison
         let current_edit_snapshot = self.text_edit.as_ref().map(|edit| TextEditSnapshot {
@@ -560,7 +560,7 @@ impl EventHandler for App {
         if let Some(ref preview) = self.input.preview {
             let preview_inst = toolbar::preview_instances(preview, 0.5);
             self.renderer
-                .draw_instances(&mut *self.ctx, &preview_inst, board_mvp);
+                .draw_instances(&mut *self.ctx, &preview_inst, board_mvp, self.screen_size);
         }
 
         let mut selection_inst = Vec::new();
@@ -576,6 +576,7 @@ impl EventHandler for App {
         if let Some(bounds) = self
             .input
             .drag_selection_bounds
+            .or(self.input.selection_bounds)
             .or_else(|| {
                 if self.board.selected_count() > 1 {
                     self.board.selected_bounds()
@@ -591,7 +592,7 @@ impl EventHandler for App {
         }
         if !selection_inst.is_empty() {
             self.renderer
-                .draw_instances(&mut *self.ctx, &selection_inst, board_mvp);
+                .draw_instances(&mut *self.ctx, &selection_inst, board_mvp, self.screen_size);
         }
 
         // Selection handles
@@ -600,6 +601,7 @@ impl EventHandler for App {
             if let Some(bounds) = self
                 .input
                 .drag_selection_bounds
+                .or(self.input.selection_bounds)
                 .or_else(|| self.board.selected_bounds())
             {
                 handle_inst.extend(crate::input::selection_bounds_handles_to_instances(bounds));
@@ -618,7 +620,7 @@ impl EventHandler for App {
             }
         }
         if !handle_inst.is_empty() {
-            self.renderer.draw_instances(&mut *self.ctx, &handle_inst, board_mvp);
+            self.renderer.draw_instances(&mut *self.ctx, &handle_inst, board_mvp, self.screen_size);
         }
 
         let tb_inst = self.toolbar.build_instances(
@@ -629,7 +631,7 @@ impl EventHandler for App {
         let screen_mvp = Renderer::screen_mvp(self.screen_size);
 
         // Toolbar (full opacity, screen-space)
-        self.renderer.draw_instances(&mut *self.ctx, &tb_inst, screen_mvp);
+        self.renderer.draw_instances(&mut *self.ctx, &tb_inst, screen_mvp, self.screen_size);
 
         // ── Stats overlay ─────────────────────────────────────────────────
         let char_count = mono_instances.len() + color_instances.len();
@@ -642,7 +644,7 @@ impl EventHandler for App {
             self.frame_ms,
             self.screen_size,
         );
-        self.renderer.draw_instances(&mut *self.ctx, &stats_inst, screen_mvp);
+        self.renderer.draw_instances(&mut *self.ctx, &stats_inst, screen_mvp, self.screen_size);
 
         self.ctx.end_render_pass();
         self.ctx.commit_frame();

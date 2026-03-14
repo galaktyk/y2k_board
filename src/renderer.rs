@@ -84,6 +84,7 @@ attribute float i_rotation;
 attribute vec4 i_pack;
 
 uniform mat4 u_mvp;
+uniform float u_world_per_px;
 
 varying vec2 v_uv;
 varying vec4 v_color;
@@ -140,6 +141,8 @@ void main() {
 const FRAGMENT_SRC: &str = r#"#version 100
 precision highp float;
 
+uniform float u_world_per_px;
+
 varying vec2 v_uv;
 varying vec4 v_color;
 varying float v_shape;
@@ -179,8 +182,9 @@ void main() {
         // Rect border outline
         vec2 dist = min(uv, 1.0 - uv) * v_size;
         float edge = min(dist.x, dist.y);
-        float border = 2.5;
-        float a = smoothstep(0.0, 1.0, edge) * (1.0 - smoothstep(border, border + 1.0, edge));
+        float aa = max(u_world_per_px, 0.0001);
+        float border = max(2.5, aa);
+        float a = smoothstep(0.0, aa, edge) * (1.0 - smoothstep(border, border + aa, edge));
         gl_FragColor = vec4(v_color.rgb, alpha * a);
 
     } else if (v_shape < 4.5) {
@@ -188,9 +192,12 @@ void main() {
         vec2 c = uv * 2.0 - 1.0;
         float d = length(c);
         float r = min(v_size.x, v_size.y) * 0.5;
-        float br = 2.5 / r;
-        float outer = 1.0 - smoothstep(1.0, 1.0 + br * 0.5, d);
-        float inner = smoothstep(1.0 - br - 1.0 / r, 1.0 - br, d);
+        float aa = max(u_world_per_px, 0.0001);
+        float border = max(2.5, aa);
+        float border_n = border / max(r, 0.0001);
+        float aa_n = aa / max(r, 0.0001);
+        float outer = 1.0 - smoothstep(1.0, 1.0 + aa_n, d);
+        float inner = smoothstep(1.0 - border_n - aa_n, 1.0 - border_n, d);
         gl_FragColor = vec4(v_color.rgb, alpha * outer * inner);
 
     } else {
@@ -409,7 +416,10 @@ impl Renderer {
                 },
                 ShaderMeta {
                     uniforms: UniformBlockLayout {
-                        uniforms: vec![UniformDesc::new("u_mvp", UniformType::Mat4)],
+                        uniforms: vec![
+                            UniformDesc::new("u_mvp", UniformType::Mat4),
+                            UniformDesc::new("u_world_per_px", UniformType::Float1),
+                        ],
                     },
                     images: vec![],
                 },
@@ -703,10 +713,13 @@ impl Renderer {
         ctx: &mut dyn RenderingBackend,
         instances: &[InstanceData],
         mvp: glam::Mat4,
+        screen_size: Vec2,
     ) {
         if instances.is_empty() {
             return;
         }
+
+        let world_per_px = Self::world_per_px(mvp, screen_size);
 
         ctx.buffer_update(self.instance_buffer, BufferSource::slice(instances));
 
@@ -714,6 +727,7 @@ impl Renderer {
         ctx.apply_bindings(&self.shape_bindings);
         ctx.apply_uniforms(UniformsSource::table(&ShapeUniforms {
             u_mvp: mvp.to_cols_array_2d(),
+            u_world_per_px: world_per_px,
         }));
         ctx.draw(0, 6, instances.len() as i32);
     }
@@ -731,7 +745,7 @@ impl Renderer {
         ctx.buffer_update(self.text_instance_buffer, BufferSource::slice(instances));
         ctx.apply_pipeline(&self.text_pipeline);
         ctx.apply_bindings(&self.text_bindings);
-        ctx.apply_uniforms(UniformsSource::table(&ShapeUniforms {
+        ctx.apply_uniforms(UniformsSource::table(&TextUniforms {
             u_mvp: mvp.to_cols_array_2d(),
         }));
         ctx.draw(0, 6, instances.len() as i32);
@@ -750,10 +764,17 @@ impl Renderer {
         ctx.buffer_update(self.text_instance_buffer, BufferSource::slice(instances));
         ctx.apply_pipeline(&self.color_text_pipeline);
         ctx.apply_bindings(&self.color_text_bindings);
-        ctx.apply_uniforms(UniformsSource::table(&ShapeUniforms {
+        ctx.apply_uniforms(UniformsSource::table(&TextUniforms {
             u_mvp: mvp.to_cols_array_2d(),
         }));
         ctx.draw(0, 6, instances.len() as i32);
+    }
+
+    fn world_per_px(mvp: glam::Mat4, screen_size: Vec2) -> f32 {
+        let pixels_per_world_x = (mvp.x_axis.x * screen_size.x * 0.5).abs();
+        let pixels_per_world_y = (mvp.y_axis.y * screen_size.y * 0.5).abs();
+        let pixels_per_world = pixels_per_world_x.min(pixels_per_world_y).max(0.0001);
+        1.0 / pixels_per_world
     }
 
     pub fn text_atlas(&self) -> TextureId {
@@ -769,6 +790,12 @@ impl Renderer {
 
 #[repr(C)]
 struct ShapeUniforms {
+    u_mvp: [[f32; 4]; 4],
+    u_world_per_px: f32,
+}
+
+#[repr(C)]
+struct TextUniforms {
     u_mvp: [[f32; 4]; 4],
 }
 
