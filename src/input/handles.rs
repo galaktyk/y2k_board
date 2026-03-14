@@ -36,7 +36,7 @@ pub fn handles_to_instances(e: &Element) -> Vec<InstanceData> {
                 [handle_size, handle_size],
                 0.0,
                 [1.0, 1.0, 1.0, 1.0],
-                0.0,
+                1.0,
                 1.0,
             ));
         }
@@ -52,8 +52,8 @@ pub fn handles_to_instances(e: &Element) -> Vec<InstanceData> {
     let stick_center = rot(0.0, -e.size.y * 0.5 - 15.0);
 
     out.push(InstanceData::new(
-        [stick_center.x - 1.0, stick_center.y],
-        [2.0, 15.0],
+        [stick_center.x - 1.0, stick_center.y - 15.0],
+        [2.0, 30.0],
         e.rotation,
         [1.0, 1.0, 1.0, 0.9],
         0.0,
@@ -66,7 +66,7 @@ pub fn handles_to_instances(e: &Element) -> Vec<InstanceData> {
             [handle_size, handle_size],
             0.0,
             [1.0, 1.0, 1.0, 1.0],
-            0.0,
+            1.0,
             1.0,
         ));
     }
