@@ -54,11 +54,13 @@ impl BoardRenderCache {
         spatial: &SpatialGrid,
         camera: &Camera,
         screen_size: Vec2,
-    ) {
+    ) -> bool {
         let (vis_min, vis_max) = camera.visible_rect(screen_size);
         let min = vis_min - Vec2::splat(BOARD_VISIBILITY_MARGIN);
         let max = vis_max + Vec2::splat(BOARD_VISIBILITY_MARGIN);
         let visible_ids = spatial.query(min, max);
+
+        let previous_indices = self.visible_board_indices.clone();
 
         self.visible_instances.clear();
         self.visible_board_indices.clear();
@@ -70,6 +72,8 @@ impl BoardRenderCache {
                 self.push_visible(board_index, element.id);
             }
         }
+
+        self.visible_board_indices != previous_indices
     }
 
     fn update_elements(&mut self, board: &Board, dirty_ids: &HashSet<u64>) {
@@ -318,7 +322,9 @@ impl App {
             .collect()
     }
 
-    fn sync_board_render_cache(&mut self) {
+    fn sync_board_render_cache(&mut self) -> bool {
+        let mut visible_set_changed = false;
+
         if self.board_cache_dirty {
             self.rebuild_board_cache();
         }
@@ -335,7 +341,7 @@ impl App {
         }
 
         if self.visibility_dirty {
-            self.board_render_cache.rebuild_visible(
+            visible_set_changed = self.board_render_cache.rebuild_visible(
                 &self.board,
                 &self.spatial,
                 &self.camera,
@@ -343,6 +349,8 @@ impl App {
             );
             self.visibility_dirty = false;
         }
+
+        visible_set_changed
     }
 
     fn save_snapshot(&self) {
@@ -414,9 +422,7 @@ impl EventHandler for App {
         }
 
         // Capture visibility state BEFORE sync clears it
-        let visibility_changed = self.visibility_dirty;
-
-        self.sync_board_render_cache();
+        let visible_set_changed = self.sync_board_render_cache();
 
         self.ctx.begin_default_pass(PassAction::clear_color(0.09, 0.10, 0.13, 1.0));
 
@@ -463,7 +469,7 @@ impl EventHandler for App {
 
         // Check if we can reuse cached text draw
         let text_cache_valid = !self.text_dirty
-            && !visibility_changed
+            && !visible_set_changed
             && self.cached_text_draw.is_some()
             && self.cached_text_edit_snapshot == current_edit_snapshot;
 
