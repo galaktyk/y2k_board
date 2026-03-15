@@ -6,8 +6,7 @@ mod text_editing;
 use miniquad::*;
 use glam::Vec2;
 use std::collections::HashSet;
-use std::path::PathBuf;
-
+use std::path::{Path, PathBuf};
 use crate::board::{
     Board,
 };
@@ -26,6 +25,7 @@ pub struct App {
     renderer: Renderer,
     board: Board,
     snapshot_path: PathBuf,
+    snapshot_path_user_selected: bool,
     camera: Camera,
     toolbar: Toolbar,
     toolbar_icons: toolbar::ToolbarIcons,
@@ -67,6 +67,7 @@ impl App {
             renderer,
             board: Board::new(),
             snapshot_path,
+            snapshot_path_user_selected: false,
             camera: Camera::new(),
             toolbar: Toolbar::new(),
             toolbar_icons,
@@ -101,6 +102,67 @@ impl App {
             let (min, max) = e.aabb();
             self.spatial.insert(e.id, min, max);
         }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn pick_snapshot_save_path(&self) -> Option<PathBuf> {
+        let default_name = self
+            .snapshot_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("snapshot.bin");
+
+        rfd::FileDialog::new()
+            .add_filter("Quadboard Snapshots", &["bin"])
+            .set_directory(snapshot::snapshot_root(&self.snapshot_path))
+            .set_file_name(default_name)
+            .save_file()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn pick_snapshot_load_path(&self) -> Option<PathBuf> {
+        rfd::FileDialog::new()
+            .add_filter("Quadboard Snapshots", &["bin"])
+            .set_directory(snapshot::snapshot_root(&self.snapshot_path))
+            .pick_file()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn copy_snapshot_assets(&self, source_root: &Path, target_root: &Path) -> std::io::Result<()> {
+        if source_root == target_root {
+            return Ok(());
+        }
+
+        let mut copied_paths = HashSet::new();
+        for element in &self.board.elements {
+            let Some(image) = element.image.as_ref() else {
+                continue;
+            };
+
+            for relative_path in std::iter::once(image.asset_path.as_str())
+                .chain(image.hires_asset_path.iter().map(String::as_str))
+            {
+                if !copied_paths.insert(relative_path.to_string()) {
+                    continue;
+                }
+
+                let source_path = source_root.join(relative_path);
+                let target_path = target_root.join(relative_path);
+                if source_path == target_path {
+                    continue;
+                }
+
+                if let Some(parent) = target_path.parent() {
+                    if !parent.as_os_str().is_empty() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                }
+
+                std::fs::copy(&source_path, &target_path)?;
+            }
+        }
+
+        Ok(())
     }
 
     fn request_redraw(&self) {
@@ -176,18 +238,54 @@ impl App {
     }
 
     fn save_snapshot(&mut self) {
-        let asset_root = snapshot::snapshot_root(&self.snapshot_path);
-        self.image_manager.set_asset_root(&mut *self.ctx, asset_root);
-        match snapshot::save_to_path(&self.board, &self.snapshot_path) {
-            Ok(path) => println!("Saved snapshot to {}", path.display()),
+        #[cfg(not(target_arch = "wasm32"))]
+        let target_path = if self.snapshot_path_user_selected {
+            self.snapshot_path.clone()
+        } else {
+            let Some(path) = self.pick_snapshot_save_path() else {
+                return;
+            };
+            path
+        };
+
+        #[cfg(target_arch = "wasm32")]
+        let target_path = self.snapshot_path.clone();
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let current_root = snapshot::snapshot_root(&self.snapshot_path);
+            let target_root = snapshot::snapshot_root(&target_path);
+            if let Err(err) = self.copy_snapshot_assets(&current_root, &target_root) {
+                eprintln!("Failed to prepare snapshot assets: {err}");
+                return;
+            }
+        }
+
+        match snapshot::save_to_path(&self.board, &target_path) {
+            Ok(path) => {
+                self.snapshot_path = path.clone();
+                self.snapshot_path_user_selected = true;
+                let asset_root = snapshot::snapshot_root(&self.snapshot_path);
+                self.image_manager.set_asset_root(&mut *self.ctx, asset_root);
+                println!("Saved snapshot to {}", path.display());
+            }
             Err(err) => eprintln!("Failed to save snapshot: {err}"),
         }
     }
 
     fn load_snapshot(&mut self) {
-        match snapshot::load_from_path(&self.snapshot_path) {
+        #[cfg(not(target_arch = "wasm32"))]
+        let Some(path) = self.pick_snapshot_load_path() else {
+            return;
+        };
+
+        #[cfg(target_arch = "wasm32")]
+        let path = self.snapshot_path.clone();
+
+        match snapshot::load_from_path(&path) {
             Ok(loaded) => {
                 self.snapshot_path = loaded.path.clone();
+                self.snapshot_path_user_selected = true;
                 let asset_root = snapshot::snapshot_root(&self.snapshot_path);
                 self.image_manager.set_asset_root(&mut *self.ctx, asset_root);
                 self.board
