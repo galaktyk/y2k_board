@@ -102,7 +102,7 @@ impl Element {
 
         let padding = Vec2::splat(12.0);
         let min = self.pos + padding;
-        let max = self.pos + (self.size - padding * 2.0).max(Vec2::splat(1.0));
+        let max = min + (self.size - padding * 2.0).max(Vec2::splat(1.0));
         Some((min, max))
     }
 }
@@ -595,4 +595,32 @@ fn dist_point_segment(p: Vec2, a: Vec2, b: Vec2) -> f32 {
     }
     let t = ((p - a).dot(ab) / len2).clamp(0.0, 1.0);
     (p - (a + ab * t)).length()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_bounds_keep_inner_box_centered() {
+        let element = Element {
+            id: 1,
+            shape: ShapeType::Text,
+            pos: Vec2::new(100.0, 50.0),
+            size: Vec2::new(200.0, 120.0),
+            rotation: 0.4,
+            color: [0.0, 0.0, 0.0, 0.0],
+            selected: false,
+            text: Some(TextData::default()),
+            image: None,
+            text_layout_generation: 0,
+        };
+
+        let (min, max) = element.text_bounds().unwrap();
+        let inner_center = (min + max) * 0.5;
+
+        assert_eq!(min, Vec2::new(112.0, 62.0));
+        assert_eq!(max, Vec2::new(288.0, 158.0));
+        assert_eq!(inner_center, element.pos + element.size * 0.5);
+    }
 }

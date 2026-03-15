@@ -178,7 +178,7 @@ fn rotate_point(point: Vec2, center: Vec2, angle: f32) -> Vec2 {
 }
 
 fn rotate_instance(mut instance: InstanceData, center: Vec2, angle: f32) -> InstanceData {
-    if instance.shape_type == 2 {
+    if instance.shape_type == 2 || instance.shape_type == 7 {
         let start = Vec2::new(instance.pos[0], instance.pos[1]);
         let end = start + Vec2::new(instance.size[0], instance.size[1]);
         let rotated_start = rotate_point(start, center, angle);
@@ -735,14 +735,14 @@ impl EventHandler for App {
 
         
         if let Some(ref preview) = self.input.preview {
-            let preview_inst = toolbar::preview_instances(preview, 0.5);
+            let preview_inst = toolbar::preview_instances(preview, self.camera.zoom, 0.5);
             self.renderer
                 .draw_instances(&mut *self.ctx, &preview_inst, board_mvp, self.screen_size);
         }
 
         let mut selection_inst = Vec::new();
         for element in &self.board.elements {
-            if let Some(instance) = toolbar::selection_instance(element, 1.0) {
+            if let Some(instance) = toolbar::selection_instance(element, self.camera.zoom, 1.0) {
                 selection_inst.push(
                     if let Some((angle, center)) = rotate_drag_preview.filter(|_| element.selected) {
                         rotate_instance(instance, center, angle)
@@ -761,11 +761,11 @@ impl EventHandler for App {
                 .or(self.input.selection_bounds)
                 .or_else(|| self.board.selected_bounds())
             {
-                selection_inst.push(toolbar::selection_bounds_instance(bounds, 1.0));
+                selection_inst.push(toolbar::selection_bounds_instance(bounds, self.camera.zoom, 1.0));
             }
         }
         if let Some(bounds) = self.input.marquee_bounds {
-            selection_inst.push(toolbar::marquee_instance(bounds, 1.0));
+            selection_inst.push(toolbar::marquee_instance(bounds, self.camera.zoom, 1.0));
         }
         if !selection_inst.is_empty() {
             self.renderer
