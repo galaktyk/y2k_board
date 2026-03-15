@@ -20,7 +20,7 @@ pub fn rotate_point(point: Vec2, center: Vec2, angle: f32) -> Vec2 {
 }
 
 pub fn rotate_instance(mut instance: InstanceData, center: Vec2, angle: f32) -> InstanceData {
-    if instance.shape_type == 2 || instance.shape_type == 7 {
+    if instance.shape_type == 2 || instance.shape_type == 6 {
         let start = Vec2::new(instance.pos[0], instance.pos[1]);
         let end = start + Vec2::new(instance.size[0], instance.size[1]);
         let rotated_start = rotate_point(start, center, angle);

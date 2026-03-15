@@ -2,17 +2,7 @@
 hit test on text first (since our app text always on top of shape), then shape, then line, then image
 ---
 
-keyboard shortcut
-1= select
-2= rect
-3= ellipse
-4= line
-5= text
-esc = deselect, exit text edit mode, exit current tool (go back to select)
 
-
----
-image filename save as short uuid not simple index runner
 ---
 
 submenu
@@ -21,9 +11,7 @@ submenu
 ro sprite player
 
 ---
-scene space AA + min 1px 
-remove pre-esixted AA from all element
-like shape, border, text, line
+
 
 ---
 

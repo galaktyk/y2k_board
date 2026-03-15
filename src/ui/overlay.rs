@@ -10,8 +10,7 @@ const CREATION_OUTLINE_COLOR: [f32; 4] = palette::BLUE;
 const MULTI_SELECTION_BOUNDS_COLOR: [f32; 4] = palette::BLUE;
 
 const FIXED_SCREEN_OUTLINE_SHAPE_TYPE: f32 = 5.0;
-const FIXED_SCREEN_ELLIPSE_OUTLINE_SHAPE_TYPE: f32 = 6.0;
-const FIXED_SCREEN_LINE_OUTLINE_SHAPE_TYPE: f32 = 7.0;
+const FIXED_SCREEN_LINE_OUTLINE_SHAPE_TYPE: f32 = 6.0;
 
 pub fn element_instance(element: &Element, alpha: f32) -> InstanceData {
     let shape_type = match element.shape {
@@ -62,11 +61,15 @@ pub fn element_to_instances(element: &Element, alpha: f32) -> Vec<InstanceData> 
     vec![element_instance(element, alpha)]
 }
 
-fn selection_outline_instance(element: &Element, zoom: f32, alpha: f32) -> InstanceData {
+fn selection_outline_instance(
+    element: &Element,
+    zoom: f32,
+    alpha: f32,
+) -> InstanceData {
     let expand = 1.0 / zoom.max(0.0001);
     let shape_type = match element.shape {
         ShapeType::Rect | ShapeType::Text | ShapeType::Image => FIXED_SCREEN_OUTLINE_SHAPE_TYPE,
-        ShapeType::Ellipse => FIXED_SCREEN_ELLIPSE_OUTLINE_SHAPE_TYPE,
+        ShapeType::Ellipse => FIXED_SCREEN_OUTLINE_SHAPE_TYPE,
         ShapeType::Line => FIXED_SCREEN_LINE_OUTLINE_SHAPE_TYPE,
     };
 
