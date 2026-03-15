@@ -86,8 +86,8 @@ impl Renderer {
                 height: 1024,
                 format: TextureFormat::Alpha,
                 wrap: TextureWrap::Clamp,
-                min_filter: FilterMode::Linear,
-                mag_filter: FilterMode::Linear,
+                min_filter: FilterMode::Nearest,
+                mag_filter: FilterMode::Nearest,
                 ..Default::default()
             },
         );
@@ -99,8 +99,8 @@ impl Renderer {
                 height: 1024,
                 format: TextureFormat::RGBA8,
                 wrap: TextureWrap::Clamp,
-                min_filter: FilterMode::Linear,
-                mag_filter: FilterMode::Linear,
+                min_filter: FilterMode::Nearest,
+                mag_filter: FilterMode::Nearest,
                 ..Default::default()
             },
         );

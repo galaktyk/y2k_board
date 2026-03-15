@@ -109,40 +109,37 @@ float fixed_stroke_aa() {
     return max(u_world_per_px * 1.25, 0.0001);
 }
 
+float hard_edge_alpha(float signed_distance) {
+    return 1.0 - step(0.0, signed_distance);
+}
+
 void main() {
     float alpha = v_color.a * v_alpha;
     vec2 uv = v_uv;
 
     if (v_shape < 0.5) {
-        vec2 d = min(uv, 1.0 - uv);
-        float edge = min(d.x, d.y);
-        float a = smoothstep(0.0, 0.01, edge);
-        gl_FragColor = vec4(v_color.rgb, alpha * a);
+        gl_FragColor = vec4(v_color.rgb, alpha);
     } else if (v_shape < 1.5) {
         vec2 c = uv * 2.0 - 1.0;
-        float d = length(c);
-        float aa = max(u_world_per_px * 2.0 / min(v_size.x, v_size.y), 0.0001);
-        float a = 1.0 - smoothstep(1.0 - aa, 1.0, d);
+        float d = length(c) - 1.0;
+        float a = hard_edge_alpha(d);
         gl_FragColor = vec4(v_color.rgb, alpha * a);
     } else if (v_shape < 2.5) {
         vec2 p = v_line_p;
         float d = line_segment_distance(p, v_line_len);
         float thickness = 4.0;
-        float a = 1.0 - smoothstep(thickness - 1.0, thickness + 1.0, d);
+        float a = 1.0 - step(thickness, d);
         gl_FragColor = vec4(v_color.rgb, alpha * a);
     } else if (v_shape < 3.5) {
         vec2 dist = min(uv, 1.0 - uv) * v_size;
         float edge = min(dist.x, dist.y);
-        float aa = max(u_world_per_px * 1.25, 0.0001);
-        float border = max(2.5, aa);
-        float a = outline_alpha(edge, border, aa);
+        float a = 1.0 - step(2.5, edge);
         gl_FragColor = vec4(v_color.rgb, alpha * a);
     } else if (v_shape < 4.5) {
         vec2 p = (uv - 0.5) * v_size;
         vec2 r = abs(v_size) * 0.5;
-        float aa = max(u_world_per_px * 1.25, 0.0001);
-        float border = max(2.5, aa);
-        float a = ellipse_outline_alpha(p, r, border, aa);
+        float sd = abs(ellipse_signed_distance(p, r));
+        float a = 1.0 - step(2.5, sd);
         gl_FragColor = vec4(v_color.rgb, alpha * a);
     } else if (v_shape < 5.5) {
         vec2 dist = min(uv, 1.0 - uv) * v_size;
