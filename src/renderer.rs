@@ -196,12 +196,19 @@ float outline_alpha(float edge, float width, float aa) {
         * (1.0 - smoothstep(width - aa, width + aa, edge));
 }
 
-float ellipse_outline_alpha(float d, float radius, float width, float aa) {
-    float inv_radius = 1.0 / max(radius, 0.0001);
-    float width_n = width * inv_radius;
-    float aa_n = aa * inv_radius;
-    float outer = 1.0 - smoothstep(1.0, 1.0 + aa_n, d);
-    float inner = smoothstep(1.0 - width_n - aa_n, 1.0 - width_n + aa_n, d);
+float ellipse_signed_distance(vec2 p, vec2 radius) {
+    vec2 safe_radius = max(radius, vec2(0.0001));
+    vec2 inv_radius2 = 1.0 / (safe_radius * safe_radius);
+    float f = dot(p * p, inv_radius2) - 1.0;
+    vec2 grad = 2.0 * p * inv_radius2;
+    return f / max(length(grad), 0.0001);
+}
+
+float ellipse_outline_alpha(vec2 p, vec2 radius, float width, float aa) {
+    float sd = ellipse_signed_distance(p, radius);
+    float edge = max(-sd, 0.0);
+    float outer = 1.0 - smoothstep(0.0, aa, sd);
+    float inner = 1.0 - smoothstep(width - aa, width + aa, edge);
     return outer * inner;
 }
 
@@ -233,7 +240,8 @@ void main() {
         // Ellipse SDF
         vec2 c = uv * 2.0 - 1.0;           // -1..1
         float d = length(c);
-        float a = smoothstep(1.0, 0.98, d);
+        float aa = max(u_world_per_px * 2.0 / min(v_size.x, v_size.y), 0.0001);
+        float a = 1.0 - smoothstep(1.0 - aa, 1.0, d);
         gl_FragColor = vec4(v_color.rgb, alpha * a);
 
     } else if (v_shape < 2.5) {
@@ -255,12 +263,11 @@ void main() {
 
     } else if (v_shape < 4.5) {
         // Ellipse border outline
-        vec2 c = uv * 2.0 - 1.0;
-        float d = length(c);
-        float r = min(v_size.x, v_size.y) * 0.5;
+        vec2 p = (uv - 0.5) * v_size;
+        vec2 r = abs(v_size) * 0.5;
         float aa = max(u_world_per_px * 1.25, 0.0001);
         float border = max(2.5, aa);
-        float a = ellipse_outline_alpha(d, r, border, aa);
+        float a = ellipse_outline_alpha(p, r, border, aa);
         gl_FragColor = vec4(v_color.rgb, alpha * a);
 
     } else if (v_shape < 5.5) {
@@ -274,12 +281,11 @@ void main() {
 
     } else if (v_shape < 6.5) {
         // Ellipse border outline with a fixed 1px screen-space stroke.
-        vec2 c = uv * 2.0 - 1.0;
-        float d = length(c);
-        float r = min(v_size.x, v_size.y) * 0.5;
+        vec2 p = (uv - 0.5) * v_size;
+        vec2 r = abs(v_size) * 0.5;
         float border = fixed_stroke_width();
         float aa = fixed_stroke_aa();
-        float a = ellipse_outline_alpha(d, r, border, aa);
+        float a = ellipse_outline_alpha(p, r, border, aa);
         gl_FragColor = vec4(v_color.rgb, alpha * a);
 
     } else if (v_shape < 7.5) {

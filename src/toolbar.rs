@@ -22,13 +22,13 @@ const TOOLBAR_ICON_SIZE: f32 = 32.0;
 
 
 // When free drag on screen
-const MARQUEE_COLOR: [f32; 4] = palette::PALETTE_PURPLE_DARK;
+const MARQUEE_COLOR: [f32; 4] = palette::PALETTE_BLUE;
 
 // When creating new element or dragging existing one
-const CREATION_OUTLINE_COLOR: [f32; 4] = palette::PALETTE_PURPLE_DARK;
+const CREATION_OUTLINE_COLOR: [f32; 4] = palette::PALETTE_BLUE;
 
 
-const MULTI_SELECTION_BOUNDS_COLOR: [f32; 4] = palette::PALETTE_PURPLE_DARK;
+const MULTI_SELECTION_BOUNDS_COLOR: [f32; 4] = palette::PALETTE_BLUE;
 
 
 const FIXED_SCREEN_OUTLINE_SHAPE_TYPE: f32 = 5.0;
