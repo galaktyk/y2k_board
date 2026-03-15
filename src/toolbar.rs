@@ -19,6 +19,8 @@ const TOOLBAR_BG_COLOR: [f32; 4] = palette::GRAY_0;
 const TOOLBAR_HOVER_COLOR: [f32; 4] = palette::GRAY_1;
 const TOOLBAR_ACTIVE_COLOR: [f32; 4] = palette::GRAY_2;
 const TOOLBAR_ACTIVE_HOVER_COLOR: [f32; 4] = palette::BLUE_GRAY;
+const TOOLBAR_BORDER_HIGHLIGHT: [f32; 4] = [239.0 / 255.0, 239.0 / 255.0, 239.0 / 255.0, 1.0];
+const TOOLBAR_BORDER_SHADOW: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
 const TOOLBAR_ICON_COLOR: [f32; 4] = palette::BLACK;
 const TOOLBAR_ICON_SIZE: f32 = 32.0;
 
@@ -208,6 +210,38 @@ impl Toolbar {
             layout.size.to_array(),
             0.0,
             TOOLBAR_BG_COLOR,
+            0.0,
+            1.0,
+        ));
+        out.push(InstanceData::new(
+            layout.origin.to_array(),
+            [layout.size.x, 1.0],
+            0.0,
+            TOOLBAR_BORDER_HIGHLIGHT,
+            0.0,
+            1.0,
+        ));
+        out.push(InstanceData::new(
+            layout.origin.to_array(),
+            [1.0, layout.size.y],
+            0.0,
+            TOOLBAR_BORDER_HIGHLIGHT,
+            0.0,
+            1.0,
+        ));
+        out.push(InstanceData::new(
+            [layout.origin.x, layout.origin.y + layout.size.y - 1.0],
+            [layout.size.x, 1.0],
+            0.0,
+            TOOLBAR_BORDER_SHADOW,
+            0.0,
+            1.0,
+        ));
+        out.push(InstanceData::new(
+            [layout.origin.x + layout.size.x - 1.0, layout.origin.y],
+            [1.0, layout.size.y],
+            0.0,
+            TOOLBAR_BORDER_SHADOW,
             0.0,
             1.0,
         ));
