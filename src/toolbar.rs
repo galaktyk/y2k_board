@@ -64,8 +64,8 @@ pub struct ToolbarIcons {
     line: TextureId,
     text: TextureId,
     image: TextureId,
-    save: TextureId,
     load: TextureId,
+    save: TextureId,
 }
 
 impl ToolbarIcons {
@@ -77,8 +77,8 @@ impl ToolbarIcons {
             line: load_toolbar_icon(ctx, include_bytes!("../assets/toolbar/line.png")),
             text: load_toolbar_icon(ctx, include_bytes!("../assets/toolbar/text.png")),
             image: load_toolbar_icon(ctx, include_bytes!("../assets/toolbar/image.png")),
-            save: load_toolbar_icon(ctx, include_bytes!("../assets/toolbar/save.png")),
             load: load_toolbar_icon(ctx, include_bytes!("../assets/toolbar/load.png")),
+            save: load_toolbar_icon(ctx, include_bytes!("../assets/toolbar/save.png")),
         }
     }
 
@@ -90,8 +90,8 @@ impl ToolbarIcons {
             self.line,
             self.text,
             self.image,
-            self.save,
             self.load,
+            self.save,
         ] {
             ctx.delete_texture(texture);
         }
@@ -105,8 +105,8 @@ impl ToolbarIcons {
             BtnKind::Line => self.line,
             BtnKind::Text => self.text,
             BtnKind::Image => self.image,
-            BtnKind::Save => self.save,
             BtnKind::Load => self.load,
+            BtnKind::Save => self.save,
             BtnKind::Undo | BtnKind::Redo => return None,
         })
     }
@@ -126,8 +126,8 @@ impl Toolbar {
             BtnKind::Line,
             BtnKind::Text,
             BtnKind::Image,
-            BtnKind::Save,
             BtnKind::Load,
+            BtnKind::Save,
             BtnKind::Undo,
             BtnKind::Redo,
         ];
@@ -175,8 +175,8 @@ impl Toolbar {
                     BtnKind::Line    => ToolbarAction::SetTool(Tool::Line),
                     BtnKind::Text    => ToolbarAction::SetTool(Tool::Text),
                     BtnKind::Image   => ToolbarAction::ImportImage,
-                    BtnKind::Save    => ToolbarAction::Save,
                     BtnKind::Load    => ToolbarAction::Load,
+                    BtnKind::Save    => ToolbarAction::Save,
                     BtnKind::Undo    => ToolbarAction::Undo,
                     BtnKind::Redo    => ToolbarAction::Redo,
                 });
@@ -355,8 +355,8 @@ fn matches_button_action(kind: BtnKind, action: ToolbarAction) -> bool {
             | (BtnKind::Line, ToolbarAction::SetTool(Tool::Line))
             | (BtnKind::Text, ToolbarAction::SetTool(Tool::Text))
             | (BtnKind::Image, ToolbarAction::ImportImage)
-            | (BtnKind::Save, ToolbarAction::Save)
             | (BtnKind::Load, ToolbarAction::Load)
+            | (BtnKind::Save, ToolbarAction::Save)
             | (BtnKind::Undo, ToolbarAction::Undo)
             | (BtnKind::Redo, ToolbarAction::Redo)
     )
