@@ -9,6 +9,7 @@ use crate::input::state::{DragMode, HandleDir, InputState, SelectionBounds};
 use crate::toolbar::{Tool, Toolbar, ToolbarAction, TOOLBAR_HEIGHT};
 
 const MARQUEE_MIN_SIZE: f32 = 4.0;
+const DRAG_START_DISTANCE: f32 = 3.0;
 
 fn begin_transform_drag(
     state: &mut InputState,
@@ -16,6 +17,7 @@ fn begin_transform_drag(
     drag_mode: DragMode,
     world: Vec2,
 ) {
+    state.pending_drag_mode = DragMode::None;
     state.drag_mode = drag_mode;
     state.move_origin = board
         .elements
@@ -28,6 +30,27 @@ fn begin_transform_drag(
     state.rotate_delta = 0.0;
     state.transform_bounds_origin = current_multi_selection_bounds(state, board).or_else(|| board.selected_bounds());
     state.drag_selection_bounds = state.transform_bounds_origin;
+}
+
+fn begin_pending_drag(state: &mut InputState, drag_mode: DragMode, screen: Vec2, world: Vec2) {
+    state.pending_drag_mode = drag_mode;
+    state.pending_drag_start_screen = screen;
+    state.pending_drag_start_world = world;
+}
+
+fn clear_pending_drag(state: &mut InputState) {
+    state.pending_drag_mode = DragMode::None;
+}
+
+fn begin_marquee_drag(state: &mut InputState, world: Vec2) {
+    state.pending_drag_mode = DragMode::None;
+    state.drag_mode = DragMode::MarqueeSelect;
+    state.move_start_world = world;
+    state.move_delta = Vec2::ZERO;
+    state.marquee_bounds = Some(SelectionBounds::from_points(world, world));
+    state.selection_bounds = None;
+    state.drag_selection_bounds = None;
+    state.transform_bounds_origin = None;
 }
 
 fn current_multi_selection_bounds(state: &InputState, board: &Board) -> Option<SelectionBounds> {
@@ -251,6 +274,7 @@ pub fn on_mouse_down(
     match toolbar.active_tool {
         Tool::Select => {
             let now = miniquad::date::now();
+            clear_pending_drag(state);
             if let Some(drag_mode) = selection_handle_hit(state, board, world, camera.zoom) {
                 state.active_text_id = None;
                 state.text_selecting = false;
@@ -263,7 +287,7 @@ pub fn on_mouse_down(
                     if bounds.contains(world) {
                         state.active_text_id = None;
                         state.text_selecting = false;
-                        begin_transform_drag(state, board, DragMode::MoveSelected, world);
+                        begin_pending_drag(state, DragMode::MoveSelected, state.mouse_pos, world);
                         return None;
                     }
                 }
@@ -324,22 +348,17 @@ pub fn on_mouse_down(
                     return None;
                 }
 
-                begin_transform_drag(state, board, DragMode::MoveSelected, world);
+                begin_pending_drag(state, DragMode::MoveSelected, state.mouse_pos, world);
             } else {
                 state.last_click_id = None;
                 state.last_click_at = None;
                 state.active_text_id = None;
                 state.text_selecting = false;
-                state.drag_mode = DragMode::MarqueeSelect;
-                state.move_start_world = world;
-                state.move_delta = Vec2::ZERO;
-                state.marquee_bounds = Some(SelectionBounds::from_points(world, world));
-                state.selection_bounds = None;
-                state.drag_selection_bounds = None;
-                state.transform_bounds_origin = None;
+                begin_pending_drag(state, DragMode::MarqueeSelect, state.mouse_pos, world);
             }
         }
         Tool::Rect | Tool::Ellipse | Tool::Line | Tool::Text => {
+            clear_pending_drag(state);
             state.active_text_id = None;
             state.text_selecting = false;
             state.dragging_tool = true;
@@ -378,6 +397,14 @@ pub fn on_mouse_up(
     }
 
     state.text_selecting = false;
+
+    if state.pending_drag_mode != DragMode::None {
+        if state.pending_drag_mode == DragMode::MarqueeSelect && !state.shift_held {
+            board.deselect_all();
+            state.selection_bounds = None;
+        }
+        clear_pending_drag(state);
+    }
 
     if state.drag_mode != DragMode::None {
         match state.drag_mode {
@@ -509,6 +536,23 @@ pub fn on_mouse_move(
     }
 
     let world = camera.screen_to_world(state.mouse_pos, screen_size);
+
+    if state.pending_drag_mode != DragMode::None {
+        let pending_delta = state.mouse_pos - state.pending_drag_start_screen;
+        if pending_delta.length_squared() >= DRAG_START_DISTANCE * DRAG_START_DISTANCE {
+            match state.pending_drag_mode {
+                DragMode::MoveSelected => {
+                    begin_transform_drag(state, board, DragMode::MoveSelected, state.pending_drag_start_world);
+                }
+                DragMode::MarqueeSelect => {
+                    begin_marquee_drag(state, state.pending_drag_start_world);
+                }
+                DragMode::ResizingHandle(_) | DragMode::Rotating | DragMode::None => {
+                    clear_pending_drag(state);
+                }
+            }
+        }
+    }
 
     if state.drag_mode != DragMode::None {
         if state.drag_mode == DragMode::MarqueeSelect {
