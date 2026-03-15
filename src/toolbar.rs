@@ -23,6 +23,25 @@ const TOOLBAR_BORDER_HIGHLIGHT: [f32; 4] = [239.0 / 255.0, 239.0 / 255.0, 239.0 
 const TOOLBAR_BORDER_SHADOW: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
 const TOOLBAR_ICON_COLOR: [f32; 4] = palette::BLACK;
 const TOOLBAR_ICON_SIZE: f32 = 32.0;
+const TOOLBAR_ICON_BYTES: [&[u8]; 8] = [
+    include_bytes!("../assets/toolbar/select.png"),
+    include_bytes!("../assets/toolbar/rect.png"),
+    include_bytes!("../assets/toolbar/ellipse.png"),
+    include_bytes!("../assets/toolbar/line.png"),
+    include_bytes!("../assets/toolbar/text.png"),
+    include_bytes!("../assets/toolbar/image.png"),
+    include_bytes!("../assets/toolbar/load.png"),
+    include_bytes!("../assets/toolbar/save.png"),
+];
+
+const ICON_SELECT: usize = 0;
+const ICON_RECT: usize = 1;
+const ICON_ELLIPSE: usize = 2;
+const ICON_LINE: usize = 3;
+const ICON_TEXT: usize = 4;
+const ICON_IMAGE: usize = 5;
+const ICON_LOAD: usize = 6;
+const ICON_SAVE: usize = 7;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ToolbarAction {
@@ -60,57 +79,38 @@ struct Button {
 }
 
 pub struct ToolbarIcons {
-    select: TextureId,
-    rect: TextureId,
-    ellipse: TextureId,
-    line: TextureId,
-    text: TextureId,
-    image: TextureId,
-    load: TextureId,
-    save: TextureId,
+    atlas: TextureId,
+    uv_rects: [[[f32; 2]; 2]; 8],
 }
 
 impl ToolbarIcons {
     pub fn new(ctx: &mut dyn RenderingBackend) -> Self {
-        Self {
-            select: load_toolbar_icon(ctx, include_bytes!("../assets/toolbar/select.png")),
-            rect: load_toolbar_icon(ctx, include_bytes!("../assets/toolbar/rect.png")),
-            ellipse: load_toolbar_icon(ctx, include_bytes!("../assets/toolbar/ellipse.png")),
-            line: load_toolbar_icon(ctx, include_bytes!("../assets/toolbar/line.png")),
-            text: load_toolbar_icon(ctx, include_bytes!("../assets/toolbar/text.png")),
-            image: load_toolbar_icon(ctx, include_bytes!("../assets/toolbar/image.png")),
-            load: load_toolbar_icon(ctx, include_bytes!("../assets/toolbar/load.png")),
-            save: load_toolbar_icon(ctx, include_bytes!("../assets/toolbar/save.png")),
-        }
+        let (atlas, uv_rects) = load_toolbar_atlas(ctx, &TOOLBAR_ICON_BYTES);
+        Self { atlas, uv_rects }
     }
 
     pub fn destroy(&self, ctx: &mut dyn RenderingBackend) {
-        for texture in [
-            self.select,
-            self.rect,
-            self.ellipse,
-            self.line,
-            self.text,
-            self.image,
-            self.load,
-            self.save,
-        ] {
-            ctx.delete_texture(texture);
-        }
+        ctx.delete_texture(self.atlas);
     }
 
-    fn texture_for(&self, kind: BtnKind) -> Option<TextureId> {
-        Some(match kind {
-            BtnKind::Select => self.select,
-            BtnKind::Rect => self.rect,
-            BtnKind::Ellipse => self.ellipse,
-            BtnKind::Line => self.line,
-            BtnKind::Text => self.text,
-            BtnKind::Image => self.image,
-            BtnKind::Load => self.load,
-            BtnKind::Save => self.save,
+    fn atlas_texture(&self) -> TextureId {
+        self.atlas
+    }
+
+    fn uv_for(&self, kind: BtnKind) -> Option<([f32; 2], [f32; 2])> {
+        let index = match kind {
+            BtnKind::Select => ICON_SELECT,
+            BtnKind::Rect => ICON_RECT,
+            BtnKind::Ellipse => ICON_ELLIPSE,
+            BtnKind::Line => ICON_LINE,
+            BtnKind::Text => ICON_TEXT,
+            BtnKind::Image => ICON_IMAGE,
+            BtnKind::Load => ICON_LOAD,
+            BtnKind::Save => ICON_SAVE,
             BtnKind::Undo | BtnKind::Redo => return None,
-        })
+        };
+        let [uv_min, uv_max] = self.uv_rects[index];
+        Some((uv_min, uv_max))
     }
 }
 
@@ -339,9 +339,10 @@ impl Toolbar {
         let mut out = Vec::new();
         let layout = self.layout(screen_size);
         let hovered_action = self.hovered_action(screen_size, mouse_pos.x, mouse_pos.y);
+        let atlas = icons.atlas_texture();
 
         for btn in &self.buttons {
-            let Some(texture) = icons.texture_for(btn.kind) else {
+            let Some((uv_min, uv_max)) = icons.uv_for(btn.kind) else {
                 continue;
             };
 
@@ -363,14 +364,14 @@ impl Toolbar {
             let origin_y = layout.origin.y + (BTN_H - TOOLBAR_ICON_SIZE) * 0.5;
 
             out.push(PreparedImageDraw {
-                texture,
+                texture: atlas,
                 instance: ImageInstanceData::new(
                     [origin_x, origin_y],
                     [TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE],
                     [origin_x, origin_y],
                     0.0,
-                    [0.0, 0.0],
-                    [1.0, 1.0],
+                    uv_min,
+                    uv_max,
                     tint,
                 ),
             });
@@ -396,19 +397,54 @@ fn matches_button_action(kind: BtnKind, action: ToolbarAction) -> bool {
     )
 }
 
-fn load_toolbar_icon(ctx: &mut dyn RenderingBackend, bytes: &[u8]) -> TextureId {
-    let image = image::load_from_memory(bytes)
-        .expect("toolbar icon should decode")
-        .to_rgba8();
-    let (width, height) = image.dimensions();
-    debug_assert_eq!(width, height, "toolbar icons should be square");
+fn load_toolbar_atlas(
+    ctx: &mut dyn RenderingBackend,
+    icon_bytes: &[&[u8]],
+) -> (TextureId, [[[f32; 2]; 2]; 8]) {
+    debug_assert_eq!(icon_bytes.len(), 8, "toolbar atlas table must stay in sync");
 
-    ctx.new_texture(
+    let decoded: Vec<_> = icon_bytes
+        .iter()
+        .map(|bytes| {
+            image::load_from_memory(bytes)
+                .expect("toolbar icon should decode")
+                .to_rgba8()
+        })
+        .collect();
+
+    let (icon_width, icon_height) = decoded[0].dimensions();
+    debug_assert_eq!(icon_width, icon_height, "toolbar icons should be square");
+    for image in &decoded[1..] {
+        let dims = image.dimensions();
+        assert_eq!(dims, (icon_width, icon_height), "toolbar icons should share dimensions");
+    }
+
+    let atlas_width = icon_width * decoded.len() as u32;
+    let atlas_height = icon_height;
+    let mut atlas_pixels = vec![0u8; atlas_width as usize * atlas_height as usize * 4];
+    let mut uv_rects = [[[0.0; 2]; 2]; 8];
+
+    for (index, image) in decoded.iter().enumerate() {
+        let x_offset = index * icon_width as usize;
+        let row_bytes = icon_width as usize * 4;
+        for row in 0..icon_height as usize {
+            let src_start = row * row_bytes;
+            let dst_start = (row * atlas_width as usize + x_offset) * 4;
+            atlas_pixels[dst_start..dst_start + row_bytes]
+                .copy_from_slice(&image.as_raw()[src_start..src_start + row_bytes]);
+        }
+
+        let uv_min_x = x_offset as f32 / atlas_width as f32;
+        let uv_max_x = (x_offset + icon_width as usize) as f32 / atlas_width as f32;
+        uv_rects[index] = [[uv_min_x, 0.0], [uv_max_x, 1.0]];
+    }
+
+    let texture = ctx.new_texture(
         TextureAccess::Static,
-        TextureSource::Bytes(image.as_raw()),
+        TextureSource::Bytes(&atlas_pixels),
         TextureParams {
-            width,
-            height,
+            width: atlas_width,
+            height: atlas_height,
             format: TextureFormat::RGBA8,
             wrap: TextureWrap::Clamp,
             min_filter: FilterMode::Linear,
@@ -417,5 +453,7 @@ fn load_toolbar_icon(ctx: &mut dyn RenderingBackend, bytes: &[u8]) -> TextureId 
             allocate_mipmaps: false,
             ..Default::default()
         },
-    )
+    );
+
+    (texture, uv_rects)
 }
