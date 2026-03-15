@@ -191,6 +191,33 @@ varying vec2 v_line_p;
 varying float v_line_len;
 varying vec2 v_size;
 
+float outline_alpha(float edge, float width, float aa) {
+    return smoothstep(0.0, aa, edge)
+        * (1.0 - smoothstep(width - aa, width + aa, edge));
+}
+
+float ellipse_outline_alpha(float d, float radius, float width, float aa) {
+    float inv_radius = 1.0 / max(radius, 0.0001);
+    float width_n = width * inv_radius;
+    float aa_n = aa * inv_radius;
+    float outer = 1.0 - smoothstep(1.0, 1.0 + aa_n, d);
+    float inner = smoothstep(1.0 - width_n - aa_n, 1.0 - width_n + aa_n, d);
+    return outer * inner;
+}
+
+float line_segment_distance(vec2 p, float len) {
+    float dx = p.x - clamp(p.x, 0.0, len);
+    return length(vec2(dx, p.y));
+}
+
+float fixed_stroke_width() {
+    return max(u_world_per_px * 1.25, 0.0001);
+}
+
+float fixed_stroke_aa() {
+    return max(u_world_per_px * 1.25, 0.0001);
+}
+
 void main() {
     float alpha = v_color.a * v_alpha;
     vec2 uv = v_uv;          // 0..1
@@ -212,8 +239,7 @@ void main() {
     } else if (v_shape < 2.5) {
         // Line
         vec2 p = v_line_p;
-        float dx = p.x - clamp(p.x, 0.0, v_line_len);
-        float d = length(vec2(dx, p.y));
+        float d = line_segment_distance(p, v_line_len);
         float thickness = 4.0; // visual half-thickness
         float a = 1.0 - smoothstep(thickness - 1.0, thickness + 1.0, d);
         gl_FragColor = vec4(v_color.rgb, alpha * a);
@@ -222,9 +248,9 @@ void main() {
         // Rect border outline
         vec2 dist = min(uv, 1.0 - uv) * v_size;
         float edge = min(dist.x, dist.y);
-        float aa = max(u_world_per_px, 0.0001);
+        float aa = max(u_world_per_px * 1.25, 0.0001);
         float border = max(2.5, aa);
-        float a = smoothstep(0.0, aa, edge) * (1.0 - smoothstep(border, border + aa, edge));
+        float a = outline_alpha(edge, border, aa);
         gl_FragColor = vec4(v_color.rgb, alpha * a);
 
     } else if (v_shape < 4.5) {
@@ -232,21 +258,18 @@ void main() {
         vec2 c = uv * 2.0 - 1.0;
         float d = length(c);
         float r = min(v_size.x, v_size.y) * 0.5;
-        float aa = max(u_world_per_px, 0.0001);
+        float aa = max(u_world_per_px * 1.25, 0.0001);
         float border = max(2.5, aa);
-        float border_n = border / max(r, 0.0001);
-        float aa_n = aa / max(r, 0.0001);
-        float outer = 1.0 - smoothstep(1.0, 1.0 + aa_n, d);
-        float inner = smoothstep(1.0 - border_n - aa_n, 1.0 - border_n, d);
-        gl_FragColor = vec4(v_color.rgb, alpha * outer * inner);
+        float a = ellipse_outline_alpha(d, r, border, aa);
+        gl_FragColor = vec4(v_color.rgb, alpha * a);
 
     } else if (v_shape < 5.5) {
         // Rect border outline with a fixed 1px screen-space stroke.
         vec2 dist = min(uv, 1.0 - uv) * v_size;
         float edge = min(dist.x, dist.y);
-        float border = max(u_world_per_px, 0.0001);
-        float aa = max(border * 0.25, 0.0001);
-        float a = smoothstep(0.0, aa, edge) * (1.0 - smoothstep(border - aa, border + aa, edge));
+        float border = fixed_stroke_width();
+        float aa = fixed_stroke_aa();
+        float a = outline_alpha(edge, border, aa);
         gl_FragColor = vec4(v_color.rgb, alpha * a);
 
     } else if (v_shape < 6.5) {
@@ -254,22 +277,19 @@ void main() {
         vec2 c = uv * 2.0 - 1.0;
         float d = length(c);
         float r = min(v_size.x, v_size.y) * 0.5;
-        float border = max(u_world_per_px, 0.0001);
-        float aa = max(border * 0.25, 0.0001);
-        float border_n = border / max(r, 0.0001);
-        float aa_n = aa / max(r, 0.0001);
-        float outer = 1.0 - smoothstep(1.0, 1.0 + aa_n, d);
-        float inner = smoothstep(1.0 - border_n - aa_n, 1.0 - border_n + aa_n, d);
-        gl_FragColor = vec4(v_color.rgb, alpha * outer * inner);
+        float border = fixed_stroke_width();
+        float aa = fixed_stroke_aa();
+        float a = ellipse_outline_alpha(d, r, border, aa);
+        gl_FragColor = vec4(v_color.rgb, alpha * a);
 
     } else if (v_shape < 7.5) {
-        // Line highlight with a fixed 1px screen-space stroke.
+        // Line highlight with the same fixed screen-space stroke/AA treatment
+        // as the rect and ellipse border highlights.
         vec2 p = v_line_p;
-        float dx = p.x - clamp(p.x, 0.0, v_line_len);
-        float d = length(vec2(dx, p.y));
-        float border = max(u_world_per_px, 0.0001);
-        float aa = max(border * 0.25, 0.0001);
-        float a = 1.0 - smoothstep(border - aa, border + aa, d);
+        float d = line_segment_distance(p, v_line_len);
+        float half_width = fixed_stroke_width();
+        float aa = fixed_stroke_aa();
+        float a = 1.0 - smoothstep(half_width, half_width + aa, d);
         gl_FragColor = vec4(v_color.rgb, alpha * a);
 
     } else {
