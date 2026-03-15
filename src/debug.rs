@@ -1,6 +1,11 @@
+use std::fmt;
+use std::path::{Path, PathBuf};
+
 use glam::Vec2;
+
 use crate::board::{Board, Element, ShapeType, TextData};
 use crate::camera::Camera;
+use crate::images::{ImageImportError, ImageManager};
 
 
 
@@ -84,6 +89,114 @@ fn generate_lorem_text(size: Vec2, randomness: f32) -> String {
     result
 }
 
+#[derive(Debug)]
+pub enum DebugImageSpawnError {
+    ExecutablePath(std::io::Error),
+    ReadDir {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    FolderMissing(PathBuf),
+    NoImages(PathBuf),
+    Import {
+        path: PathBuf,
+        source: ImageImportError,
+    },
+}
+
+impl fmt::Display for DebugImageSpawnError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DebugImageSpawnError::ExecutablePath(err) => write!(f, "failed to resolve executable path: {err}"),
+            DebugImageSpawnError::ReadDir { path, source } => {
+                write!(f, "failed to read debug image folder {}: {source}", path.display())
+            }
+            DebugImageSpawnError::FolderMissing(path) => {
+                write!(f, "debug image folder not found: {}", path.display())
+            }
+            DebugImageSpawnError::NoImages(path) => {
+                write!(f, "no supported images found in {}", path.display())
+            }
+            DebugImageSpawnError::Import { path, source } => {
+                write!(f, "failed to import debug image {}: {source}", path.display())
+            }
+        }
+    }
+}
+
+impl std::error::Error for DebugImageSpawnError {}
+
+fn rng(seed: &mut u64) -> f32 {
+    *seed ^= *seed << 13;
+    *seed ^= *seed >> 7;
+    *seed ^= *seed << 17;
+    (*seed as u32) as f32 / u32::MAX as f32
+}
+
+fn viewport_image_size(display_size: [f32; 2], camera: &Camera, screen_size: Vec2) -> Vec2 {
+    let mut size = Vec2::from_array(display_size);
+    let viewport_world = Vec2::new(
+        screen_size.x / camera.zoom.max(0.0001),
+        screen_size.y / camera.zoom.max(0.0001),
+    ) * 0.6;
+    let scale = (viewport_world.x / size.x)
+        .min(viewport_world.y / size.y)
+        .min(1.0);
+    size *= scale.max(0.01);
+    size
+}
+
+fn debug_images_dir() -> Result<PathBuf, DebugImageSpawnError> {
+    let exe_path = std::env::current_exe().map_err(DebugImageSpawnError::ExecutablePath)?;
+    let Some(exe_dir) = exe_path.parent() else {
+        return Err(DebugImageSpawnError::FolderMissing(PathBuf::from("debug_images")));
+    };
+
+    Ok(exe_dir.join("debug_images"))
+}
+
+fn is_supported_debug_image(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|ext| ext.to_str()),
+        Some(ext)
+            if ext.eq_ignore_ascii_case("png")
+                || ext.eq_ignore_ascii_case("jpg")
+                || ext.eq_ignore_ascii_case("jpeg")
+                || ext.eq_ignore_ascii_case("webp")
+                || ext.eq_ignore_ascii_case("bmp")
+                || ext.eq_ignore_ascii_case("gif")
+    )
+}
+
+fn collect_debug_images(folder: &Path) -> Result<Vec<PathBuf>, DebugImageSpawnError> {
+    if !folder.is_dir() {
+        return Err(DebugImageSpawnError::FolderMissing(folder.to_path_buf()));
+    }
+
+    let entries = std::fs::read_dir(folder).map_err(|source| DebugImageSpawnError::ReadDir {
+        path: folder.to_path_buf(),
+        source,
+    })?;
+
+    let mut images = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|source| DebugImageSpawnError::ReadDir {
+            path: folder.to_path_buf(),
+            source,
+        })?;
+        let path = entry.path();
+        if path.is_file() && is_supported_debug_image(&path) {
+            images.push(path);
+        }
+    }
+
+    if images.is_empty() {
+        return Err(DebugImageSpawnError::NoImages(folder.to_path_buf()));
+    }
+
+    Ok(images)
+}
+
 pub fn spawn_debug_shapes(board: &mut Board, camera: &Camera, screen_size: Vec2) {
     let (vis_min, vis_max) = camera.visible_rect(screen_size);
     let vis_size = vis_max - vis_min;
@@ -92,13 +205,6 @@ pub fn spawn_debug_shapes(board: &mut Board, camera: &Camera, screen_size: Vec2)
         .wrapping_mul(0x9e3779b97f4a7c15)
         ^ 0xdeadbeefcafe1234;
         
-    let rng = |s: &mut u64| -> f32 {
-        *s ^= *s << 13;
-        *s ^= *s >> 7;
-        *s ^= *s << 17;
-        (*s as u32) as f32 / u32::MAX as f32
-    };
-    
     let mut spawn = |shape: ShapeType, with_text: bool| {
         let rx  = rng(&mut seed);
         let ry  = rng(&mut seed);
@@ -147,4 +253,62 @@ pub fn spawn_debug_shapes(board: &mut Board, camera: &Camera, screen_size: Vec2)
         "Alt+Ctrl+B: spawned 100 rect, 100 ellipse, 100 lines, 100 text | total elements: {}",
         board.elements.len()
     );
+}
+
+pub fn spawn_debug_images(
+    board: &mut Board,
+    camera: &Camera,
+    screen_size: Vec2,
+    image_manager: &mut ImageManager,
+) -> Result<usize, DebugImageSpawnError> {
+    let debug_dir = debug_images_dir()?;
+    let image_paths = collect_debug_images(&debug_dir)?;
+    let (vis_min, vis_max) = camera.visible_rect(screen_size);
+    let vis_size = vis_max - vis_min;
+
+    let mut seed: u64 = (board.elements.len() as u64)
+        .wrapping_mul(0x517cc1b727220a95)
+        ^ 0xa5a5f0f0deadbeef;
+    let mut spawned = 0usize;
+
+    for _ in 0..20 {
+        let pick = (rng(&mut seed) * image_paths.len() as f32) as usize;
+        let source_path = &image_paths[pick.min(image_paths.len() - 1)];
+        let asset_id = board.next_available_id();
+        let imported = image_manager.import_from_source(asset_id, source_path).map_err(|source| {
+            DebugImageSpawnError::Import {
+                path: source_path.clone(),
+                source,
+            }
+        })?;
+
+        let size = viewport_image_size(imported.display_size, camera, screen_size);
+        let max_x = (vis_size.x - size.x).max(0.0);
+        let max_y = (vis_size.y - size.y).max(0.0);
+        let pos = vis_min + Vec2::new(rng(&mut seed) * max_x, rng(&mut seed) * max_y);
+        let rotation = (rng(&mut seed) - 0.5) * 0.5;
+        let id = board.next_id();
+
+        board.insert_element_untracked(Element {
+            id,
+            shape: ShapeType::Image,
+            pos,
+            size,
+            rotation,
+            color: [1.0, 1.0, 1.0, 1.0],
+            selected: false,
+            text: None,
+            image: Some(imported.data),
+            text_layout_generation: 0,
+        });
+        spawned += 1;
+    }
+
+    println!(
+        "Alt+F8: spawned {spawned} images from {} | total elements: {}",
+        debug_dir.display(),
+        board.elements.len()
+    );
+
+    Ok(spawned)
 }

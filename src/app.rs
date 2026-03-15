@@ -1049,9 +1049,24 @@ impl EventHandler for App {
                 return;
             }
         }
-        if keycode == KeyCode::B && keymods.alt && keymods.ctrl {
+        if keycode == KeyCode::F7 && keymods.alt {
             crate::debug::spawn_debug_shapes(&mut self.board, &self.camera, self.screen_size);
             self.mark_board_structure_dirty();
+            return;
+        }
+        if keycode == KeyCode::F8 && keymods.alt {
+            match crate::debug::spawn_debug_images(
+                &mut self.board,
+                &self.camera,
+                self.screen_size,
+                &mut self.image_manager,
+            ) {
+                Ok(_) => self.mark_board_structure_dirty(),
+                Err(err) => {
+                    eprintln!("Failed to spawn debug images: {err}");
+                    self.request_redraw();
+                }
+            }
             return;
         }
 
