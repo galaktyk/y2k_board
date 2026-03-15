@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use cosmic_text::{
-    Attrs, Buffer, CacheKey, Color, Cursor, FontSystem, Metrics, Motion, Shaping, SwashCache,
+    Attrs, Buffer, CacheKey, Color, Cursor, Family, FontSystem, Metrics, Motion, Shaping, SwashCache,
     SwashContent, SwashImage, Wrap,
 };
 use glam::Vec2;
@@ -104,7 +104,13 @@ impl TextSystem {
             text.font_size.max(8.0),
             (text.font_size * 1.35).max(text.font_size + 4.0),
         );
-        let attrs = Attrs::new().color(rgba_to_cosmic_color(text.color));
+        let attrs = Attrs::new()
+            .family(if cfg!(target_os = "windows") {
+                Family::Name("Tahoma")
+            } else {
+                Family::SansSerif
+            })
+            .color(rgba_to_cosmic_color(text.color));
         let mut buffer = Buffer::new(&mut self.font_system, metrics);
         buffer.set_size(&mut self.font_system, Some(usable_width), None);
         buffer.set_wrap(&mut self.font_system, Wrap::WordOrGlyph);
@@ -398,7 +404,13 @@ impl TextSystem {
             text.font_size.max(8.0),
             (text.font_size * 1.35).max(text.font_size + 4.0),
         );
-        let attrs = Attrs::new().color(rgba_to_cosmic_color(text.color));
+        let attrs = Attrs::new()
+            .family(if cfg!(target_os = "windows") {
+                Family::Name("Tahoma")
+            } else {
+                Family::SansSerif
+            })
+            .color(rgba_to_cosmic_color(text.color));
         let mut buffer = Buffer::new(&mut self.font_system, metrics);
         buffer.set_size(&mut self.font_system, Some(width), Some(height));
         buffer.set_wrap(&mut self.font_system, Wrap::WordOrGlyph);
