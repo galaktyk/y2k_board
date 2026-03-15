@@ -1,12 +1,15 @@
 use glam::Vec2;
 
 
-use crate::board::{Board, BoardOperation, Element, ElementPropertyChange, ElementPropertyPatch, ElementTransform, ShapeType};
+use crate::board::{
+    Board, BoardOperation, Element, ElementPropertyChange, ElementPropertyPatch, ElementTransform,
+    ShapeType, DEFAULT_TEXT_COLOR,
+};
 use crate::camera::Camera;
 use crate::input::handles::{get_element_handles, get_selection_bounds_handles, handle_hit_radius};
 use crate::input::preview::default_color;
 use crate::input::state::{DragMode, HandleDir, InputState, SelectionBounds};
-use crate::toolbar::{Tool, Toolbar, ToolbarAction, TOOLBAR_HEIGHT};
+use crate::toolbar::{Tool, Toolbar, ToolbarAction};
 
 const MARQUEE_MIN_SIZE: f32 = 4.0;
 const DRAG_START_DISTANCE: f32 = 3.0;
@@ -255,8 +258,8 @@ pub fn on_mouse_down(
         return None;
     }
 
-    if y < TOOLBAR_HEIGHT {
-        if let Some(action) = toolbar.hit_test(x, y) {
+    if toolbar.contains_point(screen_size, x, y) {
+        if let Some(action) = toolbar.hit_test(screen_size, x, y) {
             return Some(action);
         }
         return None;
@@ -497,7 +500,7 @@ pub fn on_mouse_up(
                     element.text = Some(crate::board::TextData {
                         content: String::new(),
                         font_size: 24.0,
-                        color: [1.0, 1.0, 1.0, 1.0],
+                        color: DEFAULT_TEXT_COLOR,
                     });
                 }
                 board.apply_operation(BoardOperation::AddElement(element));
@@ -747,7 +750,7 @@ pub fn on_mouse_move(
                 Some(crate::board::TextData {
                     content: String::new(),
                     font_size: 24.0,
-                    color: [1.0, 1.0, 1.0, 1.0],
+                    color: DEFAULT_TEXT_COLOR,
                 })
             } else {
                 None

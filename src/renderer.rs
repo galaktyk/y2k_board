@@ -413,8 +413,8 @@ void main() {
     vec2 f = fract(v_cell);
     vec2 d = min(f, 1.0 - f);
     float line = min(d.x, d.y);
-    float a = 1.0 - smoothstep(0.0, 0.04, line);
-    gl_FragColor = vec4(0.25, 0.26, 0.28, a * 0.6);
+    float a = 1.0 - smoothstep(0.0, 0.03, line);
+    gl_FragColor = vec4(0.76, 0.79, 0.83, a * 0.3);
 }
 "#;
 

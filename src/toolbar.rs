@@ -1,13 +1,35 @@
 use glam::Vec2;
+use miniquad::{
+    FilterMode, MipmapFilterMode, RenderingBackend, TextureAccess, TextureFormat, TextureId,
+    TextureParams, TextureSource, TextureWrap,
+};
 
 use crate::input::SelectionBounds;
-use crate::renderer::InstanceData;
+use crate::palette;
+use crate::renderer::{ImageInstanceData, InstanceData, PreparedImageDraw};
 use crate::stats::emit_text;
 
 pub const TOOLBAR_HEIGHT: f32 = 48.0;
 pub const BTN_W: f32 = 52.0;
 pub const BTN_H: f32 = 48.0;
 pub const BTN_PAD: f32 = 4.0;
+pub const TOOLBAR_BOTTOM_MARGIN: f32 = 16.0;
+
+const TOOLBAR_BG_COLOR: [f32; 4] = palette::PALETTE_GRAY_0;
+const TOOLBAR_ACTIVE_COLOR: [f32; 4] = palette::PALETTE_GRAY_2;
+const TOOLBAR_ICON_COLOR: [f32; 4] = palette::PALETTE_BLACK;
+const TOOLBAR_ICON_SIZE: f32 = 32.0;
+
+
+// When free drag on screen
+const MARQUEE_COLOR: [f32; 4] = palette::PALETTE_PURPLE_DARK;
+
+// When creating new element or dragging existing one
+const CREATION_OUTLINE_COLOR: [f32; 4] = palette::PALETTE_PURPLE_DARK;
+
+
+const MULTI_SELECTION_BOUNDS_COLOR: [f32; 4] = palette::PALETTE_PURPLE_DARK;
+
 
 const FIXED_SCREEN_OUTLINE_SHAPE_TYPE: f32 = 5.0;
 const FIXED_SCREEN_ELLIPSE_OUTLINE_SHAPE_TYPE: f32 = 6.0;
@@ -33,6 +55,12 @@ pub enum ToolbarAction {
 }
 
 #[derive(Clone, Copy, Debug)]
+pub struct ToolbarLayout {
+    pub origin: Vec2,
+    pub size: Vec2,
+}
+
+#[derive(Clone, Copy, Debug)]
 enum BtnKind {
     Select,
     Rect,
@@ -49,6 +77,61 @@ enum BtnKind {
 struct Button {
     kind: BtnKind,
     x: f32,  // left edge in screen pixels
+}
+
+pub struct ToolbarIcons {
+    select: TextureId,
+    rect: TextureId,
+    ellipse: TextureId,
+    line: TextureId,
+    text: TextureId,
+    image: TextureId,
+    save: TextureId,
+    load: TextureId,
+}
+
+impl ToolbarIcons {
+    pub fn new(ctx: &mut dyn RenderingBackend) -> Self {
+        Self {
+            select: load_toolbar_icon(ctx, include_bytes!("../assets/toolbar/select.png")),
+            rect: load_toolbar_icon(ctx, include_bytes!("../assets/toolbar/rect.png")),
+            ellipse: load_toolbar_icon(ctx, include_bytes!("../assets/toolbar/ellipse.png")),
+            line: load_toolbar_icon(ctx, include_bytes!("../assets/toolbar/line.png")),
+            text: load_toolbar_icon(ctx, include_bytes!("../assets/toolbar/text.png")),
+            image: load_toolbar_icon(ctx, include_bytes!("../assets/toolbar/image.png")),
+            save: load_toolbar_icon(ctx, include_bytes!("../assets/toolbar/save.png")),
+            load: load_toolbar_icon(ctx, include_bytes!("../assets/toolbar/load.png")),
+        }
+    }
+
+    pub fn destroy(&self, ctx: &mut dyn RenderingBackend) {
+        for texture in [
+            self.select,
+            self.rect,
+            self.ellipse,
+            self.line,
+            self.text,
+            self.image,
+            self.save,
+            self.load,
+        ] {
+            ctx.delete_texture(texture);
+        }
+    }
+
+    fn texture_for(&self, kind: BtnKind) -> Option<TextureId> {
+        Some(match kind {
+            BtnKind::Select => self.select,
+            BtnKind::Rect => self.rect,
+            BtnKind::Ellipse => self.ellipse,
+            BtnKind::Line => self.line,
+            BtnKind::Text => self.text,
+            BtnKind::Image => self.image,
+            BtnKind::Save => self.save,
+            BtnKind::Load => self.load,
+            BtnKind::Undo | BtnKind::Redo => return None,
+        })
+    }
 }
 
 pub struct Toolbar {
@@ -77,12 +160,36 @@ impl Toolbar {
         Self { active_tool: Tool::Select, buttons }
     }
 
-    pub fn hit_test(&self, x: f32, y: f32) -> Option<ToolbarAction> {
-        if y < 0.0 || y >= TOOLBAR_HEIGHT {
+    pub fn layout(&self, screen_size: Vec2) -> ToolbarLayout {
+        let width = self.buttons.len() as f32 * BTN_W + (self.buttons.len() as f32 + 1.0) * BTN_PAD;
+        let origin = Vec2::new(
+            ((screen_size.x - width) * 0.5).max(0.0),
+            (screen_size.y - TOOLBAR_HEIGHT - TOOLBAR_BOTTOM_MARGIN).max(0.0),
+        );
+        ToolbarLayout {
+            origin,
+            size: Vec2::new(width, TOOLBAR_HEIGHT),
+        }
+    }
+
+    pub fn contains_point(&self, screen_size: Vec2, x: f32, y: f32) -> bool {
+        let layout = self.layout(screen_size);
+        x >= layout.origin.x
+            && x < layout.origin.x + layout.size.x
+            && y >= layout.origin.y
+            && y < layout.origin.y + layout.size.y
+    }
+
+    pub fn hit_test(&self, screen_size: Vec2, x: f32, y: f32) -> Option<ToolbarAction> {
+        let layout = self.layout(screen_size);
+        let local_x = x - layout.origin.x;
+        let local_y = y - layout.origin.y;
+
+        if local_y < 0.0 || local_y >= TOOLBAR_HEIGHT {
             return None;
         }
         for btn in &self.buttons {
-            if x >= btn.x && x < btn.x + BTN_W {
+            if local_x >= btn.x && local_x < btn.x + BTN_W {
                 return Some(match btn.kind {
                     BtnKind::Select  => ToolbarAction::SetTool(Tool::Select),
                     BtnKind::Rect    => ToolbarAction::SetTool(Tool::Rect),
@@ -101,31 +208,22 @@ impl Toolbar {
     }
 
     /// Build screen-space instance data for the toolbar background, buttons,
-    /// and icons.  `screen_w` is used to draw the full-width background bar.
+    /// and icons in a bottom-centered island rect.
     pub fn build_instances(
         &self,
-        screen_w: f32,
+        screen_size: Vec2,
         can_undo: bool,
         can_redo: bool,
     ) -> Vec<InstanceData> {
         let mut out: Vec<InstanceData> = Vec::new();
+        let layout = self.layout(screen_size);
 
-        // Full toolbar background
+        // Toolbar island background
         out.push(InstanceData::new(
-            [0.0, 0.0],
-            [screen_w, TOOLBAR_HEIGHT],
+            layout.origin.to_array(),
+            layout.size.to_array(),
             0.0,
-            [0.13, 0.14, 0.18, 1.0],
-            0.0,
-            1.0,
-        ));
-
-        // Separator line at bottom
-        out.push(InstanceData::new(
-            [0.0, TOOLBAR_HEIGHT - 1.0],
-            [screen_w, 1.0],
-            0.0,
-            [0.25, 0.26, 0.30, 1.0],
+            TOOLBAR_BG_COLOR,
             0.0,
             1.0,
         ));
@@ -151,19 +249,24 @@ impl Toolbar {
             // Button background (highlight if active)
             if is_active {
                 out.push(InstanceData::new(
-                    [btn.x + 2.0, 4.0],
+                    [layout.origin.x + btn.x + 2.0, layout.origin.y + 4.0],
                     [BTN_W - 4.0, BTN_H - 8.0],
                     0.0,
-                    [0.25, 0.48, 0.82, 0.35],
+                    TOOLBAR_ACTIVE_COLOR,
                     0.0,
                     1.0,
                 ));
             }
 
             let icon_alpha = if dimmed { 0.3 } else { 0.9 };
-            let icon_color = [0.85f32, 0.87, 0.90, icon_alpha];
-            let cx = btn.x + BTN_W * 0.5;
-            let cy = BTN_H * 0.5;
+            let icon_color = [
+                TOOLBAR_ICON_COLOR[0],
+                TOOLBAR_ICON_COLOR[1],
+                TOOLBAR_ICON_COLOR[2],
+                icon_alpha,
+            ];
+            let cx = layout.origin.x + btn.x + BTN_W * 0.5;
+            let cy = layout.origin.y + BTN_H * 0.5;
 
             // Text label: 3×5 bitmap font, scale=2 → glyph is 6px wide, 10px tall
             // stride per char = (3+1)*2 = 8px
@@ -174,16 +277,9 @@ impl Toolbar {
             const GLYPH_H: f32 = 5.0 * SCALE; // 10
 
             let label = match btn.kind {
-                BtnKind::Select  => "SEL",
-                BtnKind::Rect    => "RECT",
-                BtnKind::Ellipse => "ELPS",
-                BtnKind::Line    => "LINE",
-                BtnKind::Text    => "TEXT",
-                BtnKind::Image   => "IMG",
-                BtnKind::Undo    => "UNDO",
-                BtnKind::Redo    => "REDO",
-                BtnKind::Save    => "SAVE",
-                BtnKind::Load    => "LOAD",
+                BtnKind::Undo => "UNDO",
+                BtnKind::Redo => "REDO",
+                _ => continue,
             };
 
             let text_w = label.len() as f32 * STRIDE - GAP;
@@ -193,6 +289,69 @@ impl Toolbar {
         }
         out
     }
+
+    pub fn build_icon_draws(
+        &self,
+        screen_size: Vec2,
+        can_undo: bool,
+        can_redo: bool,
+        icons: &ToolbarIcons,
+    ) -> Vec<PreparedImageDraw> {
+        let mut out = Vec::new();
+        let layout = self.layout(screen_size);
+
+        for btn in &self.buttons {
+            let Some(texture) = icons.texture_for(btn.kind) else {
+                continue;
+            };
+
+            let dimmed = matches!(btn.kind, BtnKind::Undo) && !can_undo
+                || matches!(btn.kind, BtnKind::Redo) && !can_redo;
+            let icon_alpha = if dimmed { 0.3 } else { 0.9 };
+            let tint = [1.0, 1.0, 1.0, icon_alpha];
+            let origin_x = layout.origin.x + btn.x + (BTN_W - TOOLBAR_ICON_SIZE) * 0.5;
+            let origin_y = layout.origin.y + (BTN_H - TOOLBAR_ICON_SIZE) * 0.5;
+
+            out.push(PreparedImageDraw {
+                texture,
+                instance: ImageInstanceData::new(
+                    [origin_x, origin_y],
+                    [TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE],
+                    [origin_x, origin_y],
+                    0.0,
+                    [0.0, 0.0],
+                    [1.0, 1.0],
+                    tint,
+                ),
+            });
+        }
+
+        out
+    }
+}
+
+fn load_toolbar_icon(ctx: &mut dyn RenderingBackend, bytes: &[u8]) -> TextureId {
+    let image = image::load_from_memory(bytes)
+        .expect("toolbar icon should decode")
+        .to_rgba8();
+    let (width, height) = image.dimensions();
+    debug_assert_eq!(width, height, "toolbar icons should be square");
+
+    ctx.new_texture(
+        TextureAccess::Static,
+        TextureSource::Bytes(image.as_raw()),
+        TextureParams {
+            width,
+            height,
+            format: TextureFormat::RGBA8,
+            wrap: TextureWrap::Clamp,
+            min_filter: FilterMode::Linear,
+            mag_filter: FilterMode::Linear,
+            mipmap_filter: MipmapFilterMode::None,
+            allocate_mipmaps: false,
+            ..Default::default()
+        },
+    )
 }
 
 /// Convert a world-space element into one or more InstanceData entries.
@@ -247,7 +406,7 @@ fn selection_outline_instance(
         (e.pos - Vec2::splat(expand)).to_array(),
         (e.size + Vec2::splat(expand * 2.0)).to_array(),
         e.rotation,
-        [0.35, 0.65, 1.0, 1.0],
+        CREATION_OUTLINE_COLOR,
         st,
         alpha,
     )
@@ -258,7 +417,7 @@ pub fn selection_bounds_instance(
     zoom: f32,
     alpha: f32,
 ) -> InstanceData {
-    bounds_outline_instance(bounds, zoom, [0.35, 0.65, 1.0, 1.0], alpha)
+    bounds_outline_instance(bounds, zoom, MULTI_SELECTION_BOUNDS_COLOR, alpha)
 }
 
 pub fn marquee_instance(
@@ -266,7 +425,7 @@ pub fn marquee_instance(
     zoom: f32,
     alpha: f32,
 ) -> InstanceData {
-    bounds_outline_instance(bounds, zoom, [0.45, 0.78, 1.0, 1.0], alpha)
+    bounds_outline_instance(bounds, zoom, MARQUEE_COLOR, alpha)
 }
 
 fn bounds_outline_instance(

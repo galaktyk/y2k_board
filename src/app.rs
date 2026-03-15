@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 
 use cosmic_text::Motion;
 
-use crate::board::{Board, BoardOperation, Element, ElementPropertyChange, ElementPropertyPatch, ShapeType, TextData};
+use crate::board::{
+    default_text_box_color, Board, BoardOperation, Element, ElementPropertyChange,
+    ElementPropertyPatch, ShapeType, TextData, DEFAULT_TEXT_COLOR,
+};
 use crate::camera::Camera;
 use crate::clipboard::{self, ClipboardPaste};
 use crate::images::{ImageImportError, ImageManager, ImportedImage};
@@ -300,6 +303,7 @@ pub struct App {
     snapshot_path: PathBuf,
     camera: Camera,
     toolbar: Toolbar,
+    toolbar_icons: toolbar::ToolbarIcons,
     input: InputState,
     spatial: SpatialGrid,
     board_render_cache: BoardRenderCache,
@@ -328,6 +332,7 @@ impl App {
     pub fn new() -> Self {
         let mut ctx = window::new_rendering_backend();
         let renderer = Renderer::new(&mut *ctx);
+        let toolbar_icons = toolbar::ToolbarIcons::new(&mut *ctx);
         let snapshot_path = snapshot::default_snapshot_path();
         let asset_root = snapshot::snapshot_root(&snapshot_path);
         let image_manager = ImageManager::new(&mut *ctx, asset_root);
@@ -339,6 +344,7 @@ impl App {
             snapshot_path,
             camera: Camera::new(),
             toolbar: Toolbar::new(),
+            toolbar_icons,
             input: InputState::new(),
             spatial: SpatialGrid::new(),
             board_render_cache: BoardRenderCache::default(),
@@ -537,7 +543,12 @@ impl EventHandler for App {
             .zip(self.input.transform_bounds_origin.map(|bounds| bounds.center()));
         let image_draws = self.build_image_draws(move_drag_offset, rotate_drag_preview);
 
-        self.ctx.begin_default_pass(PassAction::clear_color(0.09, 0.10, 0.13, 1.0));
+        self.ctx.begin_default_pass(PassAction::clear_color(
+            139.0 / 255.0,
+            153.0 / 255.0,
+            180.0 / 255.0,
+            1.0,
+        ));
 
         self.renderer.draw_background_grid(&mut *self.ctx, &self.camera, self.screen_size);
 
@@ -801,14 +812,21 @@ impl EventHandler for App {
         }
 
         let tb_inst = self.toolbar.build_instances(
-            self.screen_size.x,
+            self.screen_size,
             self.board.can_undo(),
             self.board.can_redo(),
+        );
+        let tb_icon_draws = self.toolbar.build_icon_draws(
+            self.screen_size,
+            self.board.can_undo(),
+            self.board.can_redo(),
+            &self.toolbar_icons,
         );
         let screen_mvp = Renderer::screen_mvp(self.screen_size);
 
         // Toolbar (full opacity, screen-space)
         self.renderer.draw_instances(&mut *self.ctx, &tb_inst, screen_mvp, self.screen_size);
+        self.renderer.draw_image_draws(&mut *self.ctx, &tb_icon_draws, screen_mvp);
 
         // ── Stats overlay ─────────────────────────────────────────────────
         let char_count = mono_instances.len() + color_instances.len();
@@ -838,7 +856,10 @@ impl EventHandler for App {
     }
 
     fn mouse_button_down_event(&mut self, button: MouseButton, x: f32, y: f32) {
-        if button == MouseButton::Left && y < toolbar::TOOLBAR_HEIGHT && self.text_edit.is_some() {
+        if button == MouseButton::Left
+            && self.toolbar.contains_point(self.screen_size, x, y)
+            && self.text_edit.is_some()
+        {
             self.finish_text_edit(true);
         }
 
@@ -1122,6 +1143,12 @@ impl EventHandler for App {
     }
 }
 
+impl Drop for App {
+    fn drop(&mut self) {
+        self.toolbar_icons.destroy(&mut *self.ctx);
+    }
+}
+
 impl App {
     fn import_image_via_dialog(&mut self) {
         #[cfg(target_arch = "wasm32")]
@@ -1248,7 +1275,7 @@ impl App {
         let text_data = TextData {
             content,
             font_size: 24.0,
-            color: [1.0, 1.0, 1.0, 1.0],
+            color: DEFAULT_TEXT_COLOR,
         };
         let max_width = (self.screen_size.x / self.camera.zoom.max(0.0001) * 0.5).max(180.0);
         let size = self
@@ -1263,7 +1290,7 @@ impl App {
             pos: anchor - size * 0.5,
             size,
             rotation: 0.0,
-            color: [0.0, 0.0, 0.0, 0.0],
+            color: default_text_box_color(),
             selected: false,
             text: Some(text_data),
             image: None,

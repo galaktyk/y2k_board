@@ -6,6 +6,7 @@ mod debug;
 mod images;
 mod input;
 mod renderer;
+mod palette;
 mod snapshot;
 mod spatial;
 mod stats;

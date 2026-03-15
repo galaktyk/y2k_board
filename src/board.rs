@@ -1,5 +1,6 @@
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
+use crate::palette;
 
 use crate::input::SelectionBounds;
 
@@ -12,6 +13,17 @@ pub enum ShapeType {
     Line,
     Text,
     Image,
+}
+
+pub const DEFAULT_TEXT_COLOR: [f32; 4] = palette::PALETTE_GRAY_3;
+pub const DEFAULT_RECT_COLOR: [f32; 4] = palette::PALETTE_OLIVE_LIGHT;
+pub const DEFAULT_ELLIPSE_COLOR: [f32; 4] = palette::PALETTE_TEAL;
+pub const DEFAULT_LINE_COLOR: [f32; 4] = palette::PALETTE_RED;
+
+pub fn default_text_box_color() -> [f32; 4] {
+    let mut color = DEFAULT_TEXT_COLOR;
+    color[3] = 0.0;
+    color
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -37,7 +49,7 @@ impl Default for TextData {
         Self {
             content: String::new(),
             font_size: 24.0,
-            color: [0.0, 0.0, 0.0, 1.0],
+            color: DEFAULT_TEXT_COLOR,
         }
     }
 }

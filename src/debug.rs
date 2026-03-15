@@ -6,6 +6,7 @@ use glam::Vec2;
 use crate::board::{Board, Element, ShapeType, TextData};
 use crate::camera::Camera;
 use crate::images::{ImageImportError, ImageManager};
+use crate::palette;
 
 
 
@@ -210,21 +211,25 @@ pub fn spawn_debug_shapes(board: &mut Board, camera: &Camera, screen_size: Vec2)
         let ry  = rng(&mut seed);
         let rw  = rng(&mut seed);
         let rh  = rng(&mut seed);
-        let rc0 = rng(&mut seed);
-        let rc1 = rng(&mut seed);
-        let rc2 = rng(&mut seed);
+  let r_border_idx = rng(&mut seed);
+        let r_text_idx = rng(&mut seed);
         let r_text = rng(&mut seed);
 
         let pos   = vis_min + Vec2::new(rx * vis_size.x, ry * vis_size.y);
         let size  = Vec2::new(100.0 + rw * 300.0, 100.0 + rh * 300.0);
-        let color = [rc0 * 0.7 + 0.3, rc1 * 0.7 + 0.3, rc2 * 0.7 + 0.3, 0.85];
+        
+        let border_color_idx = (r_border_idx * palette::PALETTE.len() as f32) as usize % palette::PALETTE.len();
+        let text_color_idx = (r_text_idx * palette::PALETTE.len() as f32) as usize % palette::PALETTE.len();
+        let border_color = palette::PALETTE[border_color_idx];
+        let text_color = palette::PALETTE[text_color_idx];
+        
         let id    = board.next_id();
 
         let text = if with_text {
             Some(TextData {
                 content: generate_lorem_text(size, r_text),
                 font_size: 24.0,
-                color: [1.0, 1.0, 1.0, 1.0],
+                color: text_color,
             })
         } else {
             None
@@ -236,7 +241,7 @@ pub fn spawn_debug_shapes(board: &mut Board, camera: &Camera, screen_size: Vec2)
             pos,
             size,
             rotation: 0.0,
-            color,
+            color: border_color,
             selected: false,
             text,
             image: None,
