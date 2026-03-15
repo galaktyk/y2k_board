@@ -1,3 +1,5 @@
+mod edit;
+
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -10,6 +12,8 @@ use miniquad::{RenderingBackend, TextureId};
 
 use crate::board::{Board, Element, TextData};
 use crate::renderer::TextInstanceData;
+
+pub use edit::{TextEditSession, TextEditSnapshot};
 
 const TEXT_ATLAS_SIZE: usize = 1024;
 const EMOJI_ATLAS_SIZE: usize = 1024;

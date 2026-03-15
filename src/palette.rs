@@ -1,6 +1,8 @@
+#![allow(dead_code)]  
+
 /// CC-29 Color Palette
 /// Hex Code, RGB Decimal
-pub const PALETTE: [[f32; 4]; 30] = [
+pub const PALETTE: [[f32; 4]; 29] = [
   
     [242.0 / 255.0, 240.0 / 255.0, 229.0 / 255.0, 1.0],  // #f2f0e5
     [184.0 / 255.0, 181.0 / 255.0, 185.0 / 255.0, 1.0], // #b8b5b9
@@ -31,40 +33,42 @@ pub const PALETTE: [[f32; 4]; 30] = [
     [237.0 / 255.0, 200.0 / 255.0, 196.0 / 255.0, 1.0], // #edc8c4
     [207.0 / 255.0, 138.0 / 255.0, 203.0 / 255.0, 1.0], // #cf8acb
     [95.0 / 255.0, 85.0 / 255.0, 106.0 / 255.0, 1.0],   // #5f556a
-      [0f32, 0f32, 0f32, 1.0] , 
 ];
 
 
 
-pub const PALETTE_WHITE: [f32; 4] = PALETTE[0]; // #f2f0e5
-pub const PALETTE_GRAY_0: [f32; 4] = PALETTE[1]; // #b8b5b9
-pub const PALETTE_GRAY_1: [f32; 4] = PALETTE[2]; // #868188
-pub const PALETTE_GRAY_2: [f32; 4] = PALETTE[3]; // #646365
-pub const PALETTE_GRAY_3: [f32; 4] = PALETTE[4]; // #45444f
-pub const PALETTE_BLUE_DARK: [f32; 4] = PALETTE[5]; // #3a3858
-pub const PALETTE_BLACK: [f32; 4] = PALETTE[6]; // #212123
-pub const PALETTE_PURPLE_DARK: [f32; 4] = PALETTE[7]; // #352b42
-pub const PALETTE_BLUE_GRAY: [f32; 4] = PALETTE[8]; // #43436a
-pub const PALETTE_BLUE: [f32; 4] = PALETTE[9]; // #4b80ca
-pub const PALETTE_CYAN: [f32; 4] = PALETTE[10]; // #68c2d3
-pub const PALETTE_TEAL: [f32; 4] = PALETTE[11]; // #a2dcc7
-pub const PALETTE_YELLOW_PALE: [f32; 4] = PALETTE[12]; // #ede19e
-pub const PALETTE_ORANGE: [f32; 4] = PALETTE[13]; // #d3a068
-pub const PALETTE_RED: [f32; 4] = PALETTE[14]; // #b45252
-pub const PALETTE_PURPLE: [f32; 4] = PALETTE[15]; // #6a536e
-pub const PALETTE_PURPLE_GRAY: [f32; 4] = PALETTE[16]; // #4b4158
-pub const PALETTE_BROWN: [f32; 4] = PALETTE[17]; // #80493a
-pub const PALETTE_BROWN_LIGHT: [f32; 4] = PALETTE[18]; // #a77b5b
-pub const PALETTE_BEIGE: [f32; 4] = PALETTE[19]; // #e5ceb4
-pub const PALETTE_GREEN_YELLOW: [f32; 4] = PALETTE[20]; // #c2d368
-pub const PALETTE_GREEN: [f32; 4] = PALETTE[21]; // #8ab060
-pub const PALETTE_GREEN_DARK: [f32; 4] = PALETTE[22]; // #567b79
-pub const PALETTE_GREEN_DIM: [f32; 4] = PALETTE[23]; // #4e584a
-pub const PALETTE_OLIVE: [f32; 4] = PALETTE[24]; // #7b7243
-pub const PALETTE_OLIVE_LIGHT: [f32; 4] = PALETTE[25]; // #b2b47e
-pub const PALETTE_PINK: [f32; 4] = PALETTE[26]; // #edc8c4
-pub const PALETTE_MAGENTA: [f32; 4] = PALETTE[27]; // #cf8acb
-pub const PALETTE_PURPLE_MEDIUM: [f32; 4] = PALETTE[28]; // #5f556a
+
+pub const WHITE: [f32; 4] = PALETTE[0]; // #f2f0e5
+pub const GRAY_0: [f32; 4] = PALETTE[1]; // #b8b5b9
+pub const GRAY_1: [f32; 4] = PALETTE[2]; // #868188
+pub const GRAY_2: [f32; 4] = PALETTE[3]; // #646365
+pub const GRAY_3: [f32; 4] = PALETTE[4]; // #45444f
+
+pub const BLUE_DARK: [f32; 4] = PALETTE[5]; // #3a3858
+pub const BLACK: [f32; 4] = PALETTE[6]; // #212123
+pub const PURPLE_DARK: [f32; 4] = PALETTE[7]; // #352b42
+pub const BLUE_GRAY: [f32; 4] = PALETTE[8]; // #43436a
+pub const BLUE: [f32; 4] = PALETTE[9]; // #4b80ca
+pub const CYAN: [f32; 4] = PALETTE[10]; // #68c2d3
+pub const TEAL: [f32; 4] = PALETTE[11]; // #a2dcc7
+pub const YELLOW_PALE: [f32; 4] = PALETTE[12]; // #ede19e
+pub const ORANGE: [f32; 4] = PALETTE[13]; // #d3a068
+pub const RED: [f32; 4] = PALETTE[14]; // #b45252
+pub const PURPLE: [f32; 4] = PALETTE[15]; // #6a536e
+pub const PURPLE_GRAY: [f32; 4] = PALETTE[16]; // #4b4158
+pub const BROWN: [f32; 4] = PALETTE[17]; // #80493a
+pub const BROWN_LIGHT: [f32; 4] = PALETTE[18]; // #a77b5b
+pub const BEIGE: [f32; 4] = PALETTE[19]; // #e5ceb4
+pub const GREEN_YELLOW: [f32; 4] = PALETTE[20]; // #c2d368
+pub const GREEN: [f32; 4] = PALETTE[21]; // #8ab060
+pub const GREEN_DARK: [f32; 4] = PALETTE[22]; // #567b79
+pub const GREEN_DIM: [f32; 4] = PALETTE[23]; // #4e584a
+pub const OLIVE: [f32; 4] = PALETTE[24]; // #7b7243
+pub const OLIVE_LIGHT: [f32; 4] = PALETTE[25]; // #b2b47e
+pub const PINK: [f32; 4] = PALETTE[26]; // #edc8c4
+pub const MAGENTA: [f32; 4] = PALETTE[27]; // #cf8acb
+pub const PURPLE_MEDIUM: [f32; 4] = PALETTE[28]; // #5f556a
 
 
-pub const PALETTE_PURE_BLACK: [f32; 4] = PALETTE[29]; // #000000
+pub const PURE_BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0]; // #000000
+pub const PURE_WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0]; // #ffffff

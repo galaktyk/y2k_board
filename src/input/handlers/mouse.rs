@@ -9,7 +9,7 @@ use crate::camera::Camera;
 use crate::input::handles::{get_element_handles, get_selection_bounds_handles, handle_hit_radius};
 use crate::input::preview::default_color;
 use crate::input::state::{DragMode, HandleDir, InputState, SelectionBounds};
-use crate::toolbar::{Tool, Toolbar, ToolbarAction};
+use crate::tool::Tool;
 
 const MARQUEE_MIN_SIZE: f32 = 4.0;
 const DRAG_START_DISTANCE: f32 = 3.0;
@@ -232,12 +232,12 @@ pub fn on_mouse_down(
     state: &mut InputState,
     board: &mut Board,
     camera: &Camera,
-    toolbar: &mut Toolbar,
+    active_tool: Tool,
     screen_size: Vec2,
     x: f32,
     y: f32,
     btn: miniquad::MouseButton,
-) -> Option<ToolbarAction> {
+) {
     const DOUBLE_CLICK_WINDOW: f64 = 0.4;
 
     state.mouse_pos = Vec2::new(x, y);
@@ -255,26 +255,19 @@ pub fn on_mouse_down(
     }
 
     if btn != miniquad::MouseButton::Left {
-        return None;
-    }
-
-    if toolbar.contains_point(screen_size, x, y) {
-        if let Some(action) = toolbar.hit_test(screen_size, x, y) {
-            return Some(action);
-        }
-        return None;
+        return;
     }
 
     if state.want_pan() {
         state.panning = true;
         state.pan_start_screen = state.mouse_pos;
         state.pan_start_world = camera.pan;
-        return None;
+        return;
     }
 
     let world = camera.screen_to_world(state.mouse_pos, screen_size);
 
-    match toolbar.active_tool {
+    match active_tool {
         Tool::Select => {
             let now = miniquad::date::now();
             clear_pending_drag(state);
@@ -282,7 +275,7 @@ pub fn on_mouse_down(
                 state.active_text_id = None;
                 state.text_selecting = false;
                 begin_transform_drag(state, board, drag_mode, world);
-                return None;
+                return;
             }
 
             if board.selected_count() > 1 {
@@ -291,7 +284,7 @@ pub fn on_mouse_down(
                         state.active_text_id = None;
                         state.text_selecting = false;
                         begin_pending_drag(state, DragMode::MoveSelected, state.mouse_pos, world);
-                        return None;
+                        return;
                     }
                 }
             }
@@ -308,7 +301,7 @@ pub fn on_mouse_down(
                     board.toggle_selected(id);
                     sync_multi_selection_bounds(state, board);
                     state.drag_selection_bounds = state.selection_bounds;
-                    return None;
+                    return;
                 }
 
                 let is_double_click = state.last_click_id == Some(id)
@@ -344,11 +337,11 @@ pub fn on_mouse_down(
                     }
                     state.drag_mode = DragMode::None;
                     state.move_origin.clear();
-                    return None;
+                    return;
                 }
 
                 if state.active_text_id == Some(id) {
-                    return None;
+                    return;
                 }
 
                 begin_pending_drag(state, DragMode::MoveSelected, state.mouse_pos, world);
@@ -369,20 +362,18 @@ pub fn on_mouse_down(
             state.preview = None;
         }
     }
-
-    None
 }
 
 pub fn on_mouse_up(
     state: &mut InputState,
     board: &mut Board,
     camera: &Camera,
-    toolbar: &mut Toolbar,
+    active_tool: Tool,
     screen_size: Vec2,
     x: f32,
     y: f32,
     btn: miniquad::MouseButton,
-) {
+) -> Option<Tool> {
     state.mouse_pos = Vec2::new(x, y);
 
     match btn {
@@ -396,7 +387,7 @@ pub fn on_mouse_up(
     }
 
     if btn != miniquad::MouseButton::Left {
-        return;
+        return None;
     }
 
     state.text_selecting = false;
@@ -506,11 +497,11 @@ pub fn on_mouse_up(
                 board.apply_operation(BoardOperation::AddElement(element));
                 board.deselect_all();
                 board.select_only(new_id);
-                if matches!(toolbar.active_tool, Tool::Text) {
+                if matches!(active_tool, Tool::Text) {
                     state.active_text_id = Some(new_id);
                     state.text_cursor = 0;
                 }
-                toolbar.active_tool = Tool::Select;
+                return Some(Tool::Select);
             }
         }
     }
@@ -518,13 +509,15 @@ pub fn on_mouse_up(
     if btn == miniquad::MouseButton::Left && !state.mouse_down_middle {
         state.panning = false;
     }
+
+    None
 }
 
 pub fn on_mouse_move(
     state: &mut InputState,
     board: &mut Board,
     camera: &mut Camera,
-    toolbar: &Toolbar,
+    active_tool: Tool,
     screen_size: Vec2,
     x: f32,
     y: f32,
@@ -722,7 +715,7 @@ pub fn on_mouse_move(
         let start = state.drag_start_world;
         let current = world;
 
-        let shape = match toolbar.active_tool {
+        let shape = match active_tool {
             Tool::Rect => ShapeType::Rect,
             Tool::Ellipse => ShapeType::Ellipse,
             Tool::Line => ShapeType::Line,

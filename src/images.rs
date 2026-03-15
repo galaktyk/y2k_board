@@ -12,6 +12,7 @@ use miniquad::{
 };
 
 use crate::board::ImageData;
+use crate::platform::image_streaming::PlatformImageStreamingAdapter;
 use crate::renderer::{ImageInstanceData, PreparedImageDraw};
 
 pub const BASE_IMAGE_MAX_DIMENSION: u32 = 256;
@@ -43,7 +44,7 @@ impl fmt::Display for ImageImportError {
         match self {
             #[cfg(target_arch = "wasm32")]
             ImageImportError::UnsupportedPlatform => {
-                write!(f, "image import is only implemented for native desktop builds")
+                write!(f, "web image streaming is TODO; image import is only implemented for native desktop builds")
             }
             ImageImportError::InvalidData(message) => write!(f, "{message}"),
             ImageImportError::Io(err) => write!(f, "{err}"),
@@ -72,7 +73,7 @@ pub struct ImportedImage {
 }
 
 #[derive(Clone)]
-struct DecodedImage {
+pub(crate) struct DecodedImage {
     width: u32,
     height: u32,
     rgba: Vec<u8>,
@@ -110,6 +111,7 @@ struct AtlasBlitVertex {
 
 pub struct ImageManager {
     asset_root: PathBuf,
+    streaming_adapter: PlatformImageStreamingAdapter,
     ram_cache: HashMap<String, RamEntry>,
     ram_lru: Vec<String>,
     ram_used_bytes: usize,
@@ -138,6 +140,7 @@ impl ImageManager {
             create_atlas_blit_resources(ctx, missing_texture);
 
         Self {
+            streaming_adapter: PlatformImageStreamingAdapter::new(asset_root.clone()),
             asset_root,
             ram_cache: HashMap::new(),
             ram_lru: Vec::new(),
@@ -163,6 +166,7 @@ impl ImageManager {
         }
 
         self.asset_root = asset_root;
+        self.streaming_adapter.set_asset_root(self.asset_root.clone());
         self.clear_runtime_caches(ctx);
     }
 
@@ -208,21 +212,16 @@ impl ImageManager {
         let base_image = resize_to_limit(decoded, BASE_IMAGE_MAX_DIMENSION);
         let (base_width, base_height) = base_image.dimensions();
 
-        let images_dir = self.asset_root.join("images");
-        std::fs::create_dir_all(&images_dir)?;
-
         let asset_path = format!("images/image_{element_id}.webp");
-        write_webp(&base_image, &self.asset_root.join(&asset_path), BASE_WEBP_QUALITY)?;
+        self.streaming_adapter
+            .persist_webp(&asset_path, &base_image, BASE_WEBP_QUALITY)?;
         self.seed_ram(asset_path.clone(), decoded_from_image(&base_image));
 
         let hires_asset_path = if original_width.max(original_height) > BASE_IMAGE_MAX_DIMENSION {
             let hires_image = resize_to_limit(decoded, HIRES_IMAGE_MAX_DIMENSION);
             let hires_asset_path = format!("images/image_{element_id}_hires.webp");
-            write_webp(
-                &hires_image,
-                &self.asset_root.join(&hires_asset_path),
-                HIRES_WEBP_QUALITY,
-            )?;
+            self.streaming_adapter
+                .persist_webp(&hires_asset_path, &hires_image, HIRES_WEBP_QUALITY)?;
             self.seed_ram(hires_asset_path.clone(), decoded_from_image(&hires_image));
             Some(hires_asset_path)
         } else {
@@ -410,9 +409,7 @@ impl ImageManager {
             return Some(entry.image.clone());
         }
 
-        let full_path = self.asset_root.join(relative_path);
-        let decoded = image::open(&full_path).ok()?;
-        let decoded = decoded_from_image(&decoded);
+        let decoded = self.streaming_adapter.load_decoded(relative_path)?;
         self.seed_ram(relative_path.to_string(), decoded.clone());
         Some(decoded)
     }
@@ -507,15 +504,7 @@ fn resize_to_limit(image: &DynamicImage, max_dimension: u32) -> DynamicImage {
     image.resize(max_dimension, max_dimension, FilterType::CatmullRom)
 }
 
-fn write_webp(image: &DynamicImage, path: &Path, quality: f32) -> Result<(), ImageImportError> {
-    let rgba = image.to_rgba8();
-    let (width, height) = image.dimensions();
-    let encoded = webp::Encoder::from_rgba(rgba.as_raw(), width, height).encode(quality);
-    std::fs::write(path, encoded.as_ref())?;
-    Ok(())
-}
-
-fn decoded_from_image(image: &DynamicImage) -> DecodedImage {
+pub(crate) fn decoded_from_image(image: &DynamicImage) -> DecodedImage {
     let rgba = image.to_rgba8();
     DecodedImage {
         width: image.width(),

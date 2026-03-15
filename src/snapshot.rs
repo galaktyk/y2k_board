@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::board::{Board, Element};
+use crate::platform::snapshot::{PlatformSnapshotAdapter, SnapshotPersistenceAdapter};
 
 const SNAPSHOT_FILENAME: &str = "snapshot.bin";
 
@@ -81,33 +82,10 @@ pub fn snapshot_from_board(board: &Board) -> SnapshotData {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub fn save_to_path(board: &Board, path: &Path) -> Result<PathBuf, SnapshotError> {
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)?;
-        }
-    }
-    let bytes = bincode::serialize(&snapshot_from_board(board))?;
-    std::fs::write(path, bytes)?;
-    Ok(path.to_path_buf())
+    PlatformSnapshotAdapter::new().save_to_path(&snapshot_from_board(board), path)
 }
 
-#[cfg(target_arch = "wasm32")]
-pub fn save_to_path(_board: &Board, _path: &Path) -> Result<PathBuf, SnapshotError> {
-    Err(SnapshotError::UnsupportedPlatform)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 pub fn load_from_path(path: &Path) -> Result<LoadedSnapshot, SnapshotError> {
-    let bytes = std::fs::read(path)?;
-    Ok(LoadedSnapshot {
-        data: bincode::deserialize(&bytes)?,
-        path: path.to_path_buf(),
-    })
-}
-
-#[cfg(target_arch = "wasm32")]
-pub fn load_from_path(_path: &Path) -> Result<LoadedSnapshot, SnapshotError> {
-    Err(SnapshotError::UnsupportedPlatform)
+    PlatformSnapshotAdapter::new().load_from_path(path)
 }

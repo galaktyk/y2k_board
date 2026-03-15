@@ -17,6 +17,6 @@ pub fn default_color(shape: ShapeType) -> [f32; 4] {
         ShapeType::Ellipse => DEFAULT_ELLIPSE_COLOR,
         ShapeType::Line => DEFAULT_LINE_COLOR,
         ShapeType::Text => default_text_box_color(),
-        ShapeType::Image => palette::PALETTE_PURE_BLACK,
+        ShapeType::Image => palette::PURE_BLACK,
     }
 }

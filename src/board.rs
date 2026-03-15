@@ -15,10 +15,10 @@ pub enum ShapeType {
     Image,
 }
 
-pub const DEFAULT_TEXT_COLOR: [f32; 4] = palette::PALETTE_GRAY_3;
-pub const DEFAULT_RECT_COLOR: [f32; 4] = palette::PALETTE_OLIVE_LIGHT;
-pub const DEFAULT_ELLIPSE_COLOR: [f32; 4] = palette::PALETTE_TEAL;
-pub const DEFAULT_LINE_COLOR: [f32; 4] = palette::PALETTE_RED;
+pub const DEFAULT_TEXT_COLOR: [f32; 4] = palette::GRAY_3;
+pub const DEFAULT_RECT_COLOR: [f32; 4] = palette::OLIVE_LIGHT;
+pub const DEFAULT_ELLIPSE_COLOR: [f32; 4] = palette::TEAL;
+pub const DEFAULT_LINE_COLOR: [f32; 4] = palette::RED;
 
 pub fn default_text_box_color() -> [f32; 4] {
     let mut color = DEFAULT_TEXT_COLOR;

@@ -4,10 +4,10 @@ use miniquad::{
     TextureParams, TextureSource, TextureWrap,
 };
 
-use crate::input::SelectionBounds;
 use crate::palette;
 use crate::renderer::{ImageInstanceData, InstanceData, PreparedImageDraw};
 use crate::stats::emit_text;
+use crate::tool::Tool;
 
 pub const TOOLBAR_HEIGHT: f32 = 48.0;
 pub const BTN_W: f32 = 52.0;
@@ -15,36 +15,12 @@ pub const BTN_H: f32 = 48.0;
 pub const BTN_PAD: f32 = 4.0;
 pub const TOOLBAR_BOTTOM_MARGIN: f32 = 16.0;
 
-const TOOLBAR_BG_COLOR: [f32; 4] = palette::PALETTE_GRAY_0;
-const TOOLBAR_HOVER_COLOR: [f32; 4] = palette::PALETTE_GRAY_1;
-const TOOLBAR_ACTIVE_COLOR: [f32; 4] = palette::PALETTE_GRAY_2;
-const TOOLBAR_ACTIVE_HOVER_COLOR: [f32; 4] = palette::PALETTE_BLUE_GRAY;
-const TOOLBAR_ICON_COLOR: [f32; 4] = palette::PALETTE_BLACK;
+const TOOLBAR_BG_COLOR: [f32; 4] = palette::GRAY_0;
+const TOOLBAR_HOVER_COLOR: [f32; 4] = palette::GRAY_1;
+const TOOLBAR_ACTIVE_COLOR: [f32; 4] = palette::GRAY_2;
+const TOOLBAR_ACTIVE_HOVER_COLOR: [f32; 4] = palette::BLUE_GRAY;
+const TOOLBAR_ICON_COLOR: [f32; 4] = palette::BLACK;
 const TOOLBAR_ICON_SIZE: f32 = 32.0;
-
-
-// When free drag on screen
-const MARQUEE_COLOR: [f32; 4] = palette::PALETTE_BLUE;
-
-// When creating new element or dragging existing one
-const CREATION_OUTLINE_COLOR: [f32; 4] = palette::PALETTE_BLUE;
-
-
-const MULTI_SELECTION_BOUNDS_COLOR: [f32; 4] = palette::PALETTE_BLUE;
-
-
-const FIXED_SCREEN_OUTLINE_SHAPE_TYPE: f32 = 5.0;
-const FIXED_SCREEN_ELLIPSE_OUTLINE_SHAPE_TYPE: f32 = 6.0;
-const FIXED_SCREEN_LINE_OUTLINE_SHAPE_TYPE: f32 = 7.0;
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Tool {
-    Select,
-    Rect,
-    Ellipse,
-    Line,
-    Text,
-}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ToolbarAction {
@@ -408,116 +384,4 @@ fn load_toolbar_icon(ctx: &mut dyn RenderingBackend, bytes: &[u8]) -> TextureId 
             ..Default::default()
         },
     )
-}
-
-/// Convert a world-space element into one or more InstanceData entries.
-/// `selected` adds a highlight border.
-pub fn element_instance(
-    e: &crate::board::Element,
-    alpha: f32,
-) -> InstanceData {
-    let st = match e.shape {
-        crate::board::ShapeType::Rect => 0.0,
-        crate::board::ShapeType::Ellipse => 1.0,
-        crate::board::ShapeType::Line => 2.0,
-        crate::board::ShapeType::Text => 3.0,
-        crate::board::ShapeType::Image => 255.0,
-    };
-
-    InstanceData::new(
-        e.pos.to_array(),
-        e.size.to_array(),
-        e.rotation,
-        e.color,
-        st,
-        alpha,
-    )
-}
-
-pub fn selection_instance(
-    e: &crate::board::Element,
-    zoom: f32,
-    alpha: f32,
-) -> Option<InstanceData> {
-    if !e.selected {
-        return None;
-    }
-
-    Some(selection_outline_instance(e, zoom, alpha))
-}
-
-fn selection_outline_instance(
-    e: &crate::board::Element,
-    zoom: f32,
-    alpha: f32,
-) -> InstanceData {
-    let expand = 1.0 / zoom.max(0.0001);
-    let st = match e.shape {
-        crate::board::ShapeType::Rect | crate::board::ShapeType::Text | crate::board::ShapeType::Image => FIXED_SCREEN_OUTLINE_SHAPE_TYPE,
-        crate::board::ShapeType::Ellipse => FIXED_SCREEN_ELLIPSE_OUTLINE_SHAPE_TYPE,
-        crate::board::ShapeType::Line => FIXED_SCREEN_LINE_OUTLINE_SHAPE_TYPE,
-    };
-
-    InstanceData::new(
-        (e.pos - Vec2::splat(expand)).to_array(),
-        (e.size + Vec2::splat(expand * 2.0)).to_array(),
-        e.rotation,
-        CREATION_OUTLINE_COLOR,
-        st,
-        alpha,
-    )
-}
-
-pub fn selection_bounds_instance(
-    bounds: SelectionBounds,
-    zoom: f32,
-    alpha: f32,
-) -> InstanceData {
-    bounds_outline_instance(bounds, zoom, MULTI_SELECTION_BOUNDS_COLOR, alpha)
-}
-
-pub fn marquee_instance(
-    bounds: SelectionBounds,
-    zoom: f32,
-    alpha: f32,
-) -> InstanceData {
-    bounds_outline_instance(bounds, zoom, MARQUEE_COLOR, alpha)
-}
-
-fn bounds_outline_instance(
-    bounds: SelectionBounds,
-    zoom: f32,
-    color: [f32; 4],
-    alpha: f32,
-) -> InstanceData {
-    let expand = 1.0 / zoom.max(0.0001);
-    InstanceData::new(
-        (bounds.pos - Vec2::splat(expand)).to_array(),
-        (bounds.size + Vec2::splat(expand * 2.0)).to_array(),
-        bounds.rotation,
-        color,
-        FIXED_SCREEN_OUTLINE_SHAPE_TYPE,
-        alpha,
-    )
-}
-
-pub fn preview_instances(
-    e: &crate::board::Element,
-    zoom: f32,
-    alpha: f32,
-) -> Vec<InstanceData> {
-    let mut instances = element_to_instances(e, alpha);
-
-    if e.shape != crate::board::ShapeType::Line {
-        instances.push(selection_outline_instance(e, zoom, 1.0));
-    }
-
-    instances
-}
-
-pub fn element_to_instances(
-    e: &crate::board::Element,
-    alpha: f32,
-) -> Vec<InstanceData> {
-    vec![element_instance(e, alpha)]
 }

@@ -5,13 +5,18 @@ mod clipboard;
 mod debug;
 mod images;
 mod input;
+mod platform;
 mod renderer;
+mod rendering;
 mod palette;
+mod services;
 mod snapshot;
 mod spatial;
 mod stats;
 mod text;
+mod tool;
 mod toolbar;
+mod ui;
 
 use miniquad::conf;
 
