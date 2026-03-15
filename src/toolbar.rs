@@ -16,7 +16,9 @@ pub const BTN_PAD: f32 = 4.0;
 pub const TOOLBAR_BOTTOM_MARGIN: f32 = 16.0;
 
 const TOOLBAR_BG_COLOR: [f32; 4] = palette::PALETTE_GRAY_0;
+const TOOLBAR_HOVER_COLOR: [f32; 4] = palette::PALETTE_GRAY_1;
 const TOOLBAR_ACTIVE_COLOR: [f32; 4] = palette::PALETTE_GRAY_2;
+const TOOLBAR_ACTIVE_HOVER_COLOR: [f32; 4] = palette::PALETTE_BLUE_GRAY;
 const TOOLBAR_ICON_COLOR: [f32; 4] = palette::PALETTE_BLACK;
 const TOOLBAR_ICON_SIZE: f32 = 32.0;
 
@@ -44,7 +46,7 @@ pub enum Tool {
     Text,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ToolbarAction {
     SetTool(Tool),
     ImportImage,
@@ -207,16 +209,22 @@ impl Toolbar {
         None
     }
 
+    pub fn hovered_action(&self, screen_size: Vec2, x: f32, y: f32) -> Option<ToolbarAction> {
+        self.hit_test(screen_size, x, y)
+    }
+
     /// Build screen-space instance data for the toolbar background, buttons,
     /// and icons in a bottom-centered island rect.
     pub fn build_instances(
         &self,
         screen_size: Vec2,
+        mouse_pos: Vec2,
         can_undo: bool,
         can_redo: bool,
     ) -> Vec<InstanceData> {
         let mut out: Vec<InstanceData> = Vec::new();
         let layout = self.layout(screen_size);
+        let hovered_action = self.hovered_action(screen_size, mouse_pos.x, mouse_pos.y);
 
         // Toolbar island background
         out.push(InstanceData::new(
@@ -246,19 +254,39 @@ impl Toolbar {
                 BtnKind::Redo if !can_redo
             );
 
-            // Button background (highlight if active)
-            if is_active {
+            let is_hovered = !dimmed
+                && hovered_action
+                    .map(|action| matches_button_action(btn.kind, action))
+                    .unwrap_or(false);
+
+            let button_color = if is_active && is_hovered {
+                Some(TOOLBAR_ACTIVE_HOVER_COLOR)
+            } else if is_active {
+                Some(TOOLBAR_ACTIVE_COLOR)
+            } else if is_hovered {
+                Some(TOOLBAR_HOVER_COLOR)
+            } else {
+                None
+            };
+
+            if let Some(button_color) = button_color {
                 out.push(InstanceData::new(
                     [layout.origin.x + btn.x + 2.0, layout.origin.y + 4.0],
                     [BTN_W - 4.0, BTN_H - 8.0],
                     0.0,
-                    TOOLBAR_ACTIVE_COLOR,
+                    button_color,
                     0.0,
                     1.0,
                 ));
             }
 
-            let icon_alpha = if dimmed { 0.3 } else { 0.9 };
+            let icon_alpha = if dimmed {
+                0.3
+            } else if is_hovered {
+                1.0
+            } else {
+                0.9
+            };
             let icon_color = [
                 TOOLBAR_ICON_COLOR[0],
                 TOOLBAR_ICON_COLOR[1],
@@ -293,12 +321,14 @@ impl Toolbar {
     pub fn build_icon_draws(
         &self,
         screen_size: Vec2,
+        mouse_pos: Vec2,
         can_undo: bool,
         can_redo: bool,
         icons: &ToolbarIcons,
     ) -> Vec<PreparedImageDraw> {
         let mut out = Vec::new();
         let layout = self.layout(screen_size);
+        let hovered_action = self.hovered_action(screen_size, mouse_pos.x, mouse_pos.y);
 
         for btn in &self.buttons {
             let Some(texture) = icons.texture_for(btn.kind) else {
@@ -307,7 +337,17 @@ impl Toolbar {
 
             let dimmed = matches!(btn.kind, BtnKind::Undo) && !can_undo
                 || matches!(btn.kind, BtnKind::Redo) && !can_redo;
-            let icon_alpha = if dimmed { 0.3 } else { 0.9 };
+            let is_hovered = !dimmed
+                && hovered_action
+                    .map(|action| matches_button_action(btn.kind, action))
+                    .unwrap_or(false);
+            let icon_alpha = if dimmed {
+                0.3
+            } else if is_hovered {
+                1.0
+            } else {
+                0.9
+            };
             let tint = [1.0, 1.0, 1.0, icon_alpha];
             let origin_x = layout.origin.x + btn.x + (BTN_W - TOOLBAR_ICON_SIZE) * 0.5;
             let origin_y = layout.origin.y + (BTN_H - TOOLBAR_ICON_SIZE) * 0.5;
@@ -328,6 +368,22 @@ impl Toolbar {
 
         out
     }
+}
+
+fn matches_button_action(kind: BtnKind, action: ToolbarAction) -> bool {
+    matches!(
+        (kind, action),
+        (BtnKind::Select, ToolbarAction::SetTool(Tool::Select))
+            | (BtnKind::Rect, ToolbarAction::SetTool(Tool::Rect))
+            | (BtnKind::Ellipse, ToolbarAction::SetTool(Tool::Ellipse))
+            | (BtnKind::Line, ToolbarAction::SetTool(Tool::Line))
+            | (BtnKind::Text, ToolbarAction::SetTool(Tool::Text))
+            | (BtnKind::Image, ToolbarAction::ImportImage)
+            | (BtnKind::Save, ToolbarAction::Save)
+            | (BtnKind::Load, ToolbarAction::Load)
+            | (BtnKind::Undo, ToolbarAction::Undo)
+            | (BtnKind::Redo, ToolbarAction::Redo)
+    )
 }
 
 fn load_toolbar_icon(ctx: &mut dyn RenderingBackend, bytes: &[u8]) -> TextureId {

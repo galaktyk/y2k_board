@@ -813,11 +813,13 @@ impl EventHandler for App {
 
         let tb_inst = self.toolbar.build_instances(
             self.screen_size,
+            self.input.mouse_pos,
             self.board.can_undo(),
             self.board.can_redo(),
         );
         let tb_icon_draws = self.toolbar.build_icon_draws(
             self.screen_size,
+            self.input.mouse_pos,
             self.board.can_undo(),
             self.board.can_redo(),
             &self.toolbar_icons,
@@ -929,6 +931,9 @@ impl EventHandler for App {
     }
 
     fn mouse_motion_event(&mut self, x: f32, y: f32) {
+        let previous_hover = self
+            .toolbar
+            .hovered_action(self.screen_size, self.input.mouse_pos.x, self.input.mouse_pos.y);
         let mouse_pos = Vec2::new(x, y);
         if self.input.text_selecting {
             if let Some(id) = self.input.active_text_id {
@@ -948,6 +953,14 @@ impl EventHandler for App {
             &mut self.input, &mut self.board, &mut self.camera,
             &self.toolbar, self.screen_size, x, y,
         );
+
+        let current_hover = self
+            .toolbar
+            .hovered_action(self.screen_size, self.input.mouse_pos.x, self.input.mouse_pos.y);
+        if previous_hover != current_hover {
+            self.request_redraw();
+            return;
+        }
 
         if self.input.panning || was_panning {
             self.request_redraw();

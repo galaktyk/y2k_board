@@ -210,17 +210,13 @@ This reduces network traffic.
 
 
 # Sprint 3
-
+arrow, auto snap
 
 
 
 
 # TBD
 
-* image uploading
-* image rendering
 
-* partial instance buffer updates
 * networking
-* collaborative editing
 
