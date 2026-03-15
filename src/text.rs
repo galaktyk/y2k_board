@@ -73,8 +73,7 @@ impl TextSystem {
     pub fn new() -> Self {
         let mut font_system = FontSystem::new();
         font_system.db_mut().load_fonts_dir(Path::new("fonts"));
-        load_emoji_fonts(&mut font_system);
-        // Note: emoji font loading on WASM is not yet implemented.
+
 
         Self {
             font_system,
@@ -706,43 +705,6 @@ fn rgba_to_cosmic_color(color: [f32; 4]) -> Color {
     )
 }
 
-/// Loads system emoji fonts into `font_system` for the current platform.
-/// No-op on WASM.
-fn load_emoji_fonts(font_system: &mut FontSystem) {
-    #[cfg(target_os = "windows")]
-    {
-        let windir = std::env::var("WINDIR").unwrap_or("C:\\Windows".to_string());
-        let fonts_dir = format!("{windir}\\Fonts");
-        for entry in std::fs::read_dir(&fonts_dir).unwrap().flatten() {
-            let name = entry.file_name().to_string_lossy().to_lowercase();
-            if name.contains("emoji") || name.contains("emj") {
-                let _ = font_system.db_mut().load_font_file(&entry.path());
-                println!("Loaded emoji font: {}", entry.path().display());
-            }
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let _ = font_system
-            .db_mut()
-            .load_font_file(Path::new("/System/Library/Fonts/Apple Color Emoji.ttc"));
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        let paths = [
-            "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
-            "/usr/share/fonts/noto/NotoColorEmoji.ttf",
-        ];
-        for p in paths {
-            if Path::new(p).exists() {
-                let _ = font_system.db_mut().load_font_file(Path::new(p));
-                break;
-            }
-        }
-    }
-}
 
 /// Cached line byte-offset table for a string, used to convert between a
 /// flat byte index and a (line, column) `Cursor` without repeated scanning.
