@@ -1,6 +1,6 @@
 
-
-
+hit test on text first (since our app text always on top of shape), then shape, then line, then image
+---
 
 keyboard shortcut
 1= select

@@ -9,6 +9,36 @@ impl App {
         self.input.shift_held = keymods.shift;
         self.input.ctrl_held = keymods.ctrl;
 
+        if !keymods.ctrl && !keymods.alt {
+            match keycode {
+                KeyCode::Escape => {
+                    self.handle_escape();
+                    return;
+                }
+                KeyCode::Key1 => {
+                    self.set_active_tool(crate::tool::Tool::Select);
+                    return;
+                }
+                KeyCode::Key2 => {
+                    self.set_active_tool(crate::tool::Tool::Rect);
+                    return;
+                }
+                KeyCode::Key3 => {
+                    self.set_active_tool(crate::tool::Tool::Ellipse);
+                    return;
+                }
+                KeyCode::Key4 => {
+                    self.set_active_tool(crate::tool::Tool::Line);
+                    return;
+                }
+                KeyCode::Key5 => {
+                    self.set_active_tool(crate::tool::Tool::Text);
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         if self.input.active_text_id.is_some() {
             self.handle_text_edit_key_down(keycode, keymods);
             return;

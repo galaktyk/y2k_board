@@ -18,6 +18,7 @@ use crate::rendering::cache::BoardRenderCache;
 use crate::snapshot;
 use crate::spatial::SpatialGrid;
 use crate::text::{PreparedTextDraw, TextEditSession, TextEditSnapshot, TextSystem};
+use crate::tool::Tool;
 use crate::toolbar::{self, Toolbar, ToolbarAction};
 
 pub struct App {
@@ -206,6 +207,33 @@ impl App {
 
     fn selected_ids(&self) -> Vec<u64> {
         self.board.selected_ids()
+    }
+
+    fn set_active_tool(&mut self, tool: Tool) {
+        self.toolbar.active_tool = tool;
+        self.request_redraw();
+    }
+
+    fn handle_escape(&mut self) {
+        if self.input.active_text_id.is_some() {
+            self.finish_text_edit(true);
+        }
+
+        self.board.deselect_all();
+        self.input.dragging_tool = false;
+        self.input.drag_mode = DragMode::None;
+        self.input.pending_drag_mode = DragMode::None;
+        self.input.preview = None;
+        self.input.move_origin.clear();
+        self.input.move_delta = Vec2::ZERO;
+        self.input.rotate_delta = 0.0;
+        self.input.marquee_bounds = None;
+        self.input.selection_bounds = None;
+        self.input.drag_selection_bounds = None;
+        self.input.transform_bounds_origin = None;
+        self.input.active_text_id = None;
+        self.input.text_selecting = false;
+        self.set_active_tool(Tool::Select);
     }
 
     fn sync_board_render_cache(&mut self) {
