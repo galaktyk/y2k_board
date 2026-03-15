@@ -521,13 +521,6 @@ impl EventHandler for App {
             self.board_scene_dirty = false;
         }
 
-        self.ctx.begin_default_pass(PassAction::clear_color(0.09, 0.10, 0.13, 1.0));
-
-        self.renderer.draw_background_grid(&mut *self.ctx, &self.camera, self.screen_size);
-
-        // Draw board elements and toolbar in separate passes since they use different MVP matrices.
-        let board_mvp = Renderer::camera_mvp(&self.camera, self.screen_size);
-
         let move_drag_offset = (self.input.drag_mode == DragMode::MoveSelected)
             .then_some(self.input.move_delta)
             .filter(|delta| delta.length_squared() > 0.0);
@@ -536,6 +529,14 @@ impl EventHandler for App {
             .then_some(self.input.rotate_delta)
             .filter(|angle| angle.abs() > 0.0)
             .zip(self.input.transform_bounds_origin.map(|bounds| bounds.center()));
+        let image_draws = self.build_image_draws(move_drag_offset, rotate_drag_preview);
+
+        self.ctx.begin_default_pass(PassAction::clear_color(0.09, 0.10, 0.13, 1.0));
+
+        self.renderer.draw_background_grid(&mut *self.ctx, &self.camera, self.screen_size);
+
+        // Draw board elements and toolbar in separate passes since they use different MVP matrices.
+        let board_mvp = Renderer::camera_mvp(&self.camera, self.screen_size);
 
         // Board elements
         let rotated_shape_instances;
@@ -580,8 +581,6 @@ impl EventHandler for App {
             self.renderer
                 .draw_scene_instances(&mut *self.ctx, board_mvp, self.screen_size);
         }
-
-        let image_draws = self.build_image_draws(move_drag_offset, rotate_drag_preview);
         self.renderer
             .draw_image_draws(&mut *self.ctx, &image_draws, board_mvp);
 
