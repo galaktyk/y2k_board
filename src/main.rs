@@ -1,6 +1,7 @@
 mod app;
 mod board;
 mod camera;
+mod clipboard;
 mod debug;
 mod images;
 mod input;

@@ -94,6 +94,45 @@ impl TextSystem {
         self.layout_cache.retain(|id, _| live_ids.contains(id));
     }
 
+    pub fn measure_text_box(&mut self, content: &str, text: &TextData, max_width: f32) -> Vec2 {
+        let padding = Vec2::splat(12.0);
+        let usable_width = (max_width - padding.x * 2.0).max(1.0);
+        let metrics = Metrics::new(
+            text.font_size.max(8.0),
+            (text.font_size * 1.35).max(text.font_size + 4.0),
+        );
+        let attrs = Attrs::new().color(rgba_to_cosmic_color(text.color));
+        let mut buffer = Buffer::new(&mut self.font_system, metrics);
+        buffer.set_size(&mut self.font_system, Some(usable_width), None);
+        buffer.set_wrap(&mut self.font_system, Wrap::WordOrGlyph);
+        buffer.set_text(
+            &mut self.font_system,
+            content,
+            &attrs,
+            Shaping::Advanced,
+            None,
+        );
+        buffer.shape_until_scroll(&mut self.font_system, true);
+
+        let mut widest_line = 0.0f32;
+        let mut total_height = 0.0f32;
+        let mut had_runs = false;
+        for run in buffer.layout_runs() {
+            had_runs = true;
+            widest_line = widest_line.max(run.line_w);
+            total_height = total_height.max(run.line_top + run.line_height);
+        }
+
+        if !had_runs {
+            total_height = metrics.line_height.max(text.font_size + 4.0);
+        }
+
+        Vec2::new(
+            (widest_line + padding.x * 2.0).clamp(96.0, max_width.max(96.0)),
+            (total_height + padding.y * 2.0).max(text.font_size + padding.y * 2.0 + 4.0),
+        )
+    }
+
     pub fn build_text_instances(
         &mut self,
         ctx: &mut dyn RenderingBackend,

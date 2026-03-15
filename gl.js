@@ -1321,10 +1321,54 @@ var importObject = {
                 }
             });
 
-            window.addEventListener("paste", function (e) {
+            async function forwardFilesToWasm(files, fallbackName) {
+                if (!files || files.length === 0) {
+                    return false;
+                }
+
+                const encoder = new TextEncoder();
+                wasm_exports.on_files_dropped_start();
+
+                for (const file of files) {
+                    const fileName = file.name && file.name.length > 0
+                        ? file.name
+                        : (fallbackName || "pasted-image.png");
+                    const nameBytes = encoder.encode(fileName);
+                    const nameVec = wasm_exports.allocate_vec_u8(nameBytes.length);
+                    const nameHeap = new Uint8Array(wasm_memory.buffer, nameVec, nameBytes.length);
+                    nameHeap.set(nameBytes, 0);
+
+                    const fileBuf = await file.arrayBuffer();
+                    const fileLen = fileBuf.byteLength;
+                    const fileVec = wasm_exports.allocate_vec_u8(fileLen);
+                    const fileHeap = new Uint8Array(wasm_memory.buffer, fileVec, fileLen);
+                    fileHeap.set(new Uint8Array(fileBuf), 0);
+
+                    wasm_exports.on_file_dropped(nameVec, nameBytes.length, fileVec, fileLen);
+                }
+
+                wasm_exports.on_files_dropped_finish();
+                return true;
+            }
+
+            window.addEventListener("paste", async function (e) {
                 e.stopPropagation();
                 e.preventDefault();
                 var clipboardData = e.clipboardData || window.clipboardData;
+
+                if (clipboardData && clipboardData.items) {
+                    for (const item of clipboardData.items) {
+                        if (item.kind === "file" && item.type && item.type.indexOf("image/") === 0) {
+                            const file = item.getAsFile();
+                            if (file) {
+                                const extension = item.type.split("/")[1] || "png";
+                                await forwardFilesToWasm([file], "pasted-image." + extension);
+                                return;
+                            }
+                        }
+                    }
+                }
+
                 var pastedData = clipboardData.getData('Text');
 
                 if (pastedData != undefined && pastedData != null && pastedData.length != 0) {
@@ -1342,25 +1386,7 @@ var importObject = {
 
             window.ondrop = async function (e) {
                 e.preventDefault();
-
-                wasm_exports.on_files_dropped_start();
-
-                for (let file of e.dataTransfer.files) {
-                    const nameLen = file.name.length;
-                    const nameVec = wasm_exports.allocate_vec_u8(nameLen);
-                    const nameHeap = new Uint8Array(wasm_memory.buffer, nameVec, nameLen);
-                    stringToUTF8(file.name, nameHeap, 0, nameLen);
-
-                    const fileBuf = await file.arrayBuffer();
-                    const fileLen = fileBuf.byteLength;
-                    const fileVec = wasm_exports.allocate_vec_u8(fileLen);
-                    const fileHeap = new Uint8Array(wasm_memory.buffer, fileVec, fileLen);
-                    fileHeap.set(new Uint8Array(fileBuf), 0);
-
-                    wasm_exports.on_file_dropped(nameVec, nameLen, fileVec, fileLen);
-                }
-
-                wasm_exports.on_files_dropped_finish();
+                await forwardFilesToWasm(e.dataTransfer.files);
             };
 
             let lastFocus = document.hasFocus();

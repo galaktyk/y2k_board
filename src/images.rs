@@ -14,25 +14,26 @@ use miniquad::{
 use crate::board::ImageData;
 use crate::renderer::{ImageInstanceData, PreparedImageDraw};
 
-pub const BASE_IMAGE_MAX_DIMENSION: u32 = 512;
-pub const HIRES_IMAGE_MAX_DIMENSION: u32 = 2048;
+pub const BASE_IMAGE_MAX_DIMENSION: u32 = 256;
+pub const HIRES_IMAGE_MAX_DIMENSION: u32 = 1024;
 pub const HIRES_SCREEN_FRACTION: f32 = 0.8;
 pub const THUMB_ZOOM_THRESHOLD: f32 = 0.2;
 
 const MAX_RAM_BYTES: usize = 128 * 1024 * 1024;
 const MAX_GPU_BYTES: usize = 64 * 1024 * 1024;
 const THUMB_ATLAS_SIZE: u32 = 1024;
-const THUMB_SIZE: u32 = 64;
+const THUMB_SIZE: u32 = 32;
 const THUMB_SLOTS_PER_ROW: usize = (THUMB_ATLAS_SIZE / THUMB_SIZE) as usize;
 const THUMB_SLOT_COUNT: usize = THUMB_SLOTS_PER_ROW * THUMB_SLOTS_PER_ROW;
 
-const BASE_WEBP_QUALITY: f32 = 72.0;
-const HIRES_WEBP_QUALITY: f32 = 84.0;
+const BASE_WEBP_QUALITY: f32 = 40.0;
+const HIRES_WEBP_QUALITY: f32 = 40.0;
 
 #[derive(Debug)]
 pub enum ImageImportError {
     #[cfg(target_arch = "wasm32")]
     UnsupportedPlatform,
+    InvalidData(&'static str),
     Io(std::io::Error),
     Decode(image::ImageError),
 }
@@ -44,6 +45,7 @@ impl fmt::Display for ImageImportError {
             ImageImportError::UnsupportedPlatform => {
                 write!(f, "image import is only implemented for native desktop builds")
             }
+            ImageImportError::InvalidData(message) => write!(f, "{message}"),
             ImageImportError::Io(err) => write!(f, "{err}"),
             ImageImportError::Decode(err) => write!(f, "{err}"),
         }
@@ -175,49 +177,69 @@ impl ImageManager {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let decoded = image::open(source_path)?;
-            let (original_width, original_height) = decoded.dimensions();
-            let base_image = resize_to_limit(&decoded, BASE_IMAGE_MAX_DIMENSION);
-            let (base_width, base_height) = base_image.dimensions();
-
-            let images_dir = self.asset_root.join("images");
-            std::fs::create_dir_all(&images_dir)?;
-
-            let asset_path = format!("images/image_{element_id}.webp");
-            write_webp(&base_image, &self.asset_root.join(&asset_path), BASE_WEBP_QUALITY)?;
-            self.seed_ram(
-                asset_path.clone(),
-                decoded_from_image(&base_image),
-            );
-
-            let hires_asset_path = if original_width.max(original_height) > BASE_IMAGE_MAX_DIMENSION {
-                let hires_image = resize_to_limit(&decoded, HIRES_IMAGE_MAX_DIMENSION);
-                let hires_asset_path = format!("images/image_{element_id}_hires.webp");
-                write_webp(
-                    &hires_image,
-                    &self.asset_root.join(&hires_asset_path),
-                    HIRES_WEBP_QUALITY,
-                )?;
-                self.seed_ram(
-                    hires_asset_path.clone(),
-                    decoded_from_image(&hires_image),
-                );
-                Some(hires_asset_path)
-            } else {
-                None
-            };
-
-            Ok(ImportedImage {
-                data: ImageData {
-                    asset_path,
-                    hires_asset_path,
-                    original_width,
-                    original_height,
-                    base_width,
-                    base_height,
-                },
-                display_size: [base_width as f32, base_height as f32],
-            })
+            self.import_from_image(element_id, &decoded)
         }
+    }
+
+    pub fn import_from_bytes(&mut self, element_id: u64, bytes: &[u8]) -> Result<ImportedImage, ImageImportError> {
+        let decoded = image::load_from_memory(bytes)?;
+        self.import_from_image(element_id, &decoded)
+    }
+
+    pub fn import_from_rgba(
+        &mut self,
+        element_id: u64,
+        width: u32,
+        height: u32,
+        rgba: Vec<u8>,
+    ) -> Result<ImportedImage, ImageImportError> {
+        let image = image::RgbaImage::from_raw(width, height, rgba)
+            .ok_or(ImageImportError::InvalidData("clipboard image data had an invalid RGBA size"))?;
+        let decoded = DynamicImage::ImageRgba8(image);
+        self.import_from_image(element_id, &decoded)
+    }
+
+    pub fn import_from_image(
+        &mut self,
+        element_id: u64,
+        decoded: &DynamicImage,
+    ) -> Result<ImportedImage, ImageImportError> {
+        let (original_width, original_height) = decoded.dimensions();
+        let base_image = resize_to_limit(decoded, BASE_IMAGE_MAX_DIMENSION);
+        let (base_width, base_height) = base_image.dimensions();
+
+        let images_dir = self.asset_root.join("images");
+        std::fs::create_dir_all(&images_dir)?;
+
+        let asset_path = format!("images/image_{element_id}.webp");
+        write_webp(&base_image, &self.asset_root.join(&asset_path), BASE_WEBP_QUALITY)?;
+        self.seed_ram(asset_path.clone(), decoded_from_image(&base_image));
+
+        let hires_asset_path = if original_width.max(original_height) > BASE_IMAGE_MAX_DIMENSION {
+            let hires_image = resize_to_limit(decoded, HIRES_IMAGE_MAX_DIMENSION);
+            let hires_asset_path = format!("images/image_{element_id}_hires.webp");
+            write_webp(
+                &hires_image,
+                &self.asset_root.join(&hires_asset_path),
+                HIRES_WEBP_QUALITY,
+            )?;
+            self.seed_ram(hires_asset_path.clone(), decoded_from_image(&hires_image));
+            Some(hires_asset_path)
+        } else {
+            None
+        };
+
+        Ok(ImportedImage {
+            data: ImageData {
+                asset_path,
+                hires_asset_path,
+                original_width,
+                original_height,
+                base_width,
+                base_height,
+            },
+            display_size: [base_width as f32, base_height as f32],
+        })
     }
 
     pub fn prepare_draw(
