@@ -376,6 +376,12 @@ impl App {
         window::schedule_update();
     }
 
+    fn needs_continuous_redraw(&self) -> bool {
+        self.input.panning
+            || self.input.drag_mode != DragMode::None
+            || self.input.dragging_tool
+    }
+
     fn rebuild_board_cache(&mut self) {
         self.board_render_cache.rebuild_all(&self.board);
         self.board_cache_dirty = false;
@@ -825,6 +831,10 @@ impl EventHandler for App {
 
         self.ctx.end_render_pass();
         self.ctx.commit_frame();
+
+        if self.needs_continuous_redraw() {
+            self.request_redraw();
+        }
     }
 
     fn mouse_button_down_event(&mut self, button: MouseButton, x: f32, y: f32) {
@@ -912,6 +922,7 @@ impl EventHandler for App {
 
         let was_panning = self.input.panning;
         let was_dragging_tool = self.input.dragging_tool;
+
         input::on_mouse_move(
             &mut self.input, &mut self.board, &mut self.camera,
             &self.toolbar, self.screen_size, x, y,

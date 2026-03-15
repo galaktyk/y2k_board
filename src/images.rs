@@ -16,7 +16,7 @@ use crate::renderer::{ImageInstanceData, PreparedImageDraw};
 
 pub const BASE_IMAGE_MAX_DIMENSION: u32 = 256;
 pub const HIRES_IMAGE_MAX_DIMENSION: u32 = 1024;
-pub const HIRES_SCREEN_FRACTION: f32 = 0.8;
+pub const HIRES_SCREEN_FRACTION: f32 = 0.5;
 pub const THUMB_ZOOM_THRESHOLD: f32 = 0.2;
 
 const MAX_RAM_BYTES: usize = 128 * 1024 * 1024;
