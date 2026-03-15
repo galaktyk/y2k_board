@@ -487,6 +487,39 @@ impl Board {
         }
     }
 
+    pub fn bring_shape_to_front(&mut self, id: u64) -> bool {
+        let Some(index) = self.elements.iter().position(|element| element.id == id) else {
+            return false;
+        };
+
+        if self.elements[index].shape == ShapeType::Image {
+            return false;
+        }
+
+        let mut current_index = index;
+        let mut changed = false;
+
+        while let Some(next_shape_index) = self
+            .elements
+            .iter()
+            .enumerate()
+            .skip(current_index + 1)
+            .find_map(|(candidate_index, element)| {
+                (element.shape != ShapeType::Image).then_some(candidate_index)
+            })
+        {
+            self.elements.swap(current_index, next_shape_index);
+            current_index = next_shape_index;
+            changed = true;
+        }
+
+        if !changed {
+            return false;
+        }
+
+        true
+    }
+
     pub fn selected_bounds(&self) -> Option<SelectionBounds> {
         let mut bounds: Option<(Vec2, Vec2)> = None;
 
@@ -553,10 +586,23 @@ impl Board {
     /// Hit-test a world-space point against elements (last-on-top).
     pub fn hit_test(&self, p: Vec2) -> Option<u64> {
         for element in self.elements.iter().rev() {
-            if element_hit(element, p) {
+            if element.shape == ShapeType::Text && element_hit(element, p) {
                 return Some(element.id);
             }
         }
+
+        for element in self.elements.iter().rev() {
+            if element.shape == ShapeType::Image && element_hit(element, p) {
+                return Some(element.id);
+            }
+        }
+
+        for element in self.elements.iter().rev() {
+            if element.shape != ShapeType::Image && element.shape != ShapeType::Text && element_hit(element, p) {
+                return Some(element.id);
+            }
+        }
+
         None
     }
 
@@ -634,5 +680,175 @@ mod tests {
         assert_eq!(min, Vec2::new(112.0, 62.0));
         assert_eq!(max, Vec2::new(288.0, 158.0));
         assert_eq!(inner_center, element.pos + element.size * 0.5);
+    }
+
+    #[test]
+    fn bring_shape_to_front_keeps_images_after_shapes() {
+        let mut board = Board::new();
+        board.elements = vec![
+            Element {
+                id: 1,
+                shape: ShapeType::Rect,
+                pos: Vec2::ZERO,
+                size: Vec2::splat(10.0),
+                rotation: 0.0,
+                color: [1.0, 0.0, 0.0, 1.0],
+                selected: false,
+                text: None,
+                image: None,
+                text_layout_generation: 0,
+            },
+            Element {
+                id: 2,
+                shape: ShapeType::Image,
+                pos: Vec2::ZERO,
+                size: Vec2::splat(10.0),
+                rotation: 0.0,
+                color: [1.0, 1.0, 1.0, 1.0],
+                selected: false,
+                text: None,
+                image: Some(ImageData {
+                    asset_path: "img.webp".to_string(),
+                    hires_asset_path: None,
+                    original_width: 10,
+                    original_height: 10,
+                    base_width: 10,
+                    base_height: 10,
+                }),
+                text_layout_generation: 0,
+            },
+            Element {
+                id: 3,
+                shape: ShapeType::Ellipse,
+                pos: Vec2::ZERO,
+                size: Vec2::splat(10.0),
+                rotation: 0.0,
+                color: [0.0, 1.0, 0.0, 1.0],
+                selected: false,
+                text: None,
+                image: None,
+                text_layout_generation: 0,
+            },
+        ];
+
+        assert!(board.bring_shape_to_front(1));
+        assert_eq!(board.elements.iter().map(|element| element.id).collect::<Vec<_>>(), vec![3, 2, 1]);
+    }
+
+    #[test]
+    fn hit_test_prioritizes_images_over_shape_layer() {
+        let mut board = Board::new();
+        board.elements = vec![
+            Element {
+                id: 1,
+                shape: ShapeType::Image,
+                pos: Vec2::ZERO,
+                size: Vec2::splat(20.0),
+                rotation: 0.0,
+                color: [1.0, 1.0, 1.0, 1.0],
+                selected: false,
+                text: None,
+                image: Some(ImageData {
+                    asset_path: "img.webp".to_string(),
+                    hires_asset_path: None,
+                    original_width: 20,
+                    original_height: 20,
+                    base_width: 20,
+                    base_height: 20,
+                }),
+                text_layout_generation: 0,
+            },
+            Element {
+                id: 2,
+                shape: ShapeType::Rect,
+                pos: Vec2::ZERO,
+                size: Vec2::splat(20.0),
+                rotation: 0.0,
+                color: [1.0, 0.0, 0.0, 1.0],
+                selected: false,
+                text: None,
+                image: None,
+                text_layout_generation: 0,
+            },
+        ];
+
+        assert_eq!(board.hit_test(Vec2::new(10.0, 10.0)), Some(1));
+    }
+
+    #[test]
+    fn hit_test_uses_board_order_within_shape_layer() {
+        let mut board = Board::new();
+        board.elements = vec![
+            Element {
+                id: 1,
+                shape: ShapeType::Rect,
+                pos: Vec2::ZERO,
+                size: Vec2::splat(20.0),
+                rotation: 0.0,
+                color: [1.0, 0.0, 0.0, 1.0],
+                selected: false,
+                text: None,
+                image: None,
+                text_layout_generation: 0,
+            },
+            Element {
+                id: 2,
+                shape: ShapeType::Ellipse,
+                pos: Vec2::ZERO,
+                size: Vec2::splat(20.0),
+                rotation: 0.0,
+                color: [0.0, 1.0, 0.0, 1.0],
+                selected: false,
+                text: None,
+                image: None,
+                text_layout_generation: 0,
+            },
+        ];
+
+        assert_eq!(board.hit_test(Vec2::new(10.0, 10.0)), Some(2));
+    }
+
+    #[test]
+    fn hit_test_prioritizes_text_elements_over_images() {
+        let mut board = Board::new();
+        board.elements = vec![
+            Element {
+                id: 1,
+                shape: ShapeType::Image,
+                pos: Vec2::ZERO,
+                size: Vec2::splat(20.0),
+                rotation: 0.0,
+                color: [1.0, 1.0, 1.0, 1.0],
+                selected: false,
+                text: None,
+                image: Some(ImageData {
+                    asset_path: "img.webp".to_string(),
+                    hires_asset_path: None,
+                    original_width: 20,
+                    original_height: 20,
+                    base_width: 20,
+                    base_height: 20,
+                }),
+                text_layout_generation: 0,
+            },
+            Element {
+                id: 2,
+                shape: ShapeType::Text,
+                pos: Vec2::ZERO,
+                size: Vec2::splat(20.0),
+                rotation: 0.0,
+                color: [0.0, 0.0, 0.0, 0.0],
+                selected: false,
+                text: Some(TextData {
+                    content: "hello".to_string(),
+                    font_size: 24.0,
+                    color: DEFAULT_TEXT_COLOR,
+                }),
+                image: None,
+                text_layout_generation: 0,
+            },
+        ];
+
+        assert_eq!(board.hit_test(Vec2::new(10.0, 10.0)), Some(2));
     }
 }

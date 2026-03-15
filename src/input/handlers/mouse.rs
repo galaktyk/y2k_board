@@ -237,8 +237,9 @@ pub fn on_mouse_down(
     x: f32,
     y: f32,
     btn: miniquad::MouseButton,
-) {
+) -> bool {
     const DOUBLE_CLICK_WINDOW: f64 = 0.4;
+    let mut order_changed = false;
 
     state.mouse_pos = Vec2::new(x, y);
 
@@ -255,14 +256,14 @@ pub fn on_mouse_down(
     }
 
     if btn != miniquad::MouseButton::Left {
-        return;
+        return false;
     }
 
     if state.want_pan() {
         state.panning = true;
         state.pan_start_screen = state.mouse_pos;
         state.pan_start_world = camera.pan;
-        return;
+        return false;
     }
 
     let world = camera.screen_to_world(state.mouse_pos, screen_size);
@@ -275,7 +276,7 @@ pub fn on_mouse_down(
                 state.active_text_id = None;
                 state.text_selecting = false;
                 begin_transform_drag(state, board, drag_mode, world);
-                return;
+                return false;
             }
 
             if board.selected_count() > 1 {
@@ -284,7 +285,7 @@ pub fn on_mouse_down(
                         state.active_text_id = None;
                         state.text_selecting = false;
                         begin_pending_drag(state, DragMode::MoveSelected, state.mouse_pos, world);
-                        return;
+                        return false;
                     }
                 }
             }
@@ -299,9 +300,12 @@ pub fn on_mouse_down(
                     state.last_click_at = None;
                     state.text_selecting = false;
                     board.toggle_selected(id);
+                    if board.is_selected(id) {
+                        order_changed = board.bring_shape_to_front(id);
+                    }
                     sync_multi_selection_bounds(state, board);
                     state.drag_selection_bounds = state.selection_bounds;
-                    return;
+                    return order_changed;
                 }
 
                 let is_double_click = state.last_click_id == Some(id)
@@ -319,6 +323,7 @@ pub fn on_mouse_down(
                     board.deselect_all();
                     board.select_only(id);
                     state.selection_bounds = None;
+                    order_changed = board.bring_shape_to_front(id);
                 }
 
                 if is_double_click {
@@ -337,11 +342,11 @@ pub fn on_mouse_down(
                     }
                     state.drag_mode = DragMode::None;
                     state.move_origin.clear();
-                    return;
+                    return order_changed;
                 }
 
                 if state.active_text_id == Some(id) {
-                    return;
+                    return order_changed;
                 }
 
                 begin_pending_drag(state, DragMode::MoveSelected, state.mouse_pos, world);
@@ -362,6 +367,8 @@ pub fn on_mouse_down(
             state.preview = None;
         }
     }
+
+    order_changed
 }
 
 pub fn on_mouse_up(

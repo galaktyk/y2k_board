@@ -1,7 +1,9 @@
 
-hit test on text first (since our app text always on top of shape), then shape, then line, then image
+image not align with real location? try to reproduce
+
 ---
 
+auto bring selecting boject to front when select, so that it won't be hidden by other object
 
 ---
 
@@ -9,8 +11,6 @@ submenu
 ---
 
 ro sprite player
-
----
 
 
 ---

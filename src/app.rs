@@ -195,6 +195,14 @@ impl App {
         self.request_redraw();
     }
 
+    fn mark_board_order_dirty(&mut self) {
+        self.board_cache_dirty = true;
+        self.board_scene_dirty = true;
+        self.visibility_dirty = true;
+        self.text_dirty = true;
+        self.request_redraw();
+    }
+
     fn mark_elements_dirty<I>(&mut self, ids: I)
     where
         I: IntoIterator<Item = u64>,
@@ -377,7 +385,7 @@ impl EventHandler for App {
         }
 
         let previous_active = self.input.active_text_id;
-        input::on_mouse_down(
+        let order_changed = input::on_mouse_down(
             &mut self.input,
             &mut self.board,
             &self.camera,
@@ -387,6 +395,10 @@ impl EventHandler for App {
             y,
             button,
         );
+
+        if order_changed {
+            self.mark_board_order_dirty();
+        }
 
         let new_active = self.input.active_text_id;
         if previous_active != new_active {
