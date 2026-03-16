@@ -1,6 +1,8 @@
 use cosmic_text::Motion;
 use miniquad::{window, KeyCode, KeyMods};
 
+use crate::board::{BoardOperation, ElementRotationChange};
+
 use super::content::normalize_pasted_text;
 use super::App;
 
@@ -8,6 +10,15 @@ impl App {
     pub(super) fn handle_key_down(&mut self, keycode: KeyCode, keymods: KeyMods) {
         self.input.shift_held = keymods.shift;
         self.input.ctrl_held = keymods.ctrl;
+
+        if self.input.active_text_id.is_some() {
+            if keycode == KeyCode::F9 && keymods.alt {
+                self.flush_image_ram_cache(super::ImageRamFlushTrigger::Manual);
+                return;
+            }
+            self.handle_text_edit_key_down(keycode, keymods);
+            return;
+        }
 
         if !keymods.ctrl && !keymods.alt {
             match keycode {
@@ -35,17 +46,13 @@ impl App {
                     self.set_active_tool(crate::tool::Tool::Text);
                     return;
                 }
+                KeyCode::Tab => {
+                    if self.reset_selected_rotation() {
+                        return;
+                    }
+                }
                 _ => {}
             }
-        }
-
-        if self.input.active_text_id.is_some() {
-            if keycode == KeyCode::F9 && keymods.alt {
-                self.flush_image_ram_cache(super::ImageRamFlushTrigger::Manual);
-                return;
-            }
-            self.handle_text_edit_key_down(keycode, keymods);
-            return;
         }
 
         if keycode == KeyCode::Space {
@@ -172,5 +179,34 @@ impl App {
     fn selected_or_current_text(&self) -> Option<String> {
         self.selected_text()
             .or_else(|| self.current_text().map(str::to_string))
+    }
+
+    fn reset_selected_rotation(&mut self) -> bool {
+        let ids = self.selected_ids();
+        if ids.is_empty() {
+            self.request_redraw();
+            return false;
+        }
+
+        let changes: Vec<ElementRotationChange> = ids
+            .iter()
+            .filter_map(|id| {
+                let element = self.board.element(*id)?;
+                (element.rotation != 0.0).then_some(ElementRotationChange {
+                    id: *id,
+                    before: element.rotation,
+                    after: 0.0,
+                })
+            })
+            .collect();
+
+        if changes.is_empty() {
+            self.request_redraw();
+            return false;
+        }
+
+        self.board.apply_operation(BoardOperation::SetElementRotations { changes });
+        self.mark_elements_dirty(ids);
+        true
     }
 }

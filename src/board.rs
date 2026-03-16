@@ -363,12 +363,20 @@ pub struct ElementPropertyChange {
     pub patch: ElementPropertyPatch,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct ElementRotationChange {
+    pub id: u64,
+    pub before: f32,
+    pub after: f32,
+}
+
 #[derive(Clone, Debug)]
 pub enum BoardOperation {
     AddElement(Element),
     DeleteElement(Element),
     MoveElements { ids: Vec<u64>, delta: Vec2 },
     RotateElements { ids: Vec<u64>, center: Vec2, angle: f32 },
+    SetElementRotations { changes: Vec<ElementRotationChange> },
     SetProperty { changes: Vec<ElementPropertyChange> },
 }
 
@@ -390,6 +398,16 @@ fn inverse(op: &BoardOperation) -> BoardOperation {
             ids: ids.clone(),
             center: *center,
             angle: -*angle,
+        },
+        BoardOperation::SetElementRotations { changes } => BoardOperation::SetElementRotations {
+            changes: changes
+                .iter()
+                .map(|change| ElementRotationChange {
+                    id: change.id,
+                    before: change.after,
+                    after: change.before,
+                })
+                .collect(),
         },
         BoardOperation::SetProperty { changes } => BoardOperation::SetProperty {
             changes: changes
@@ -452,6 +470,17 @@ fn log_operation(op: &BoardOperation) {
                 center.y,
                 angle,
             );
+        }
+        BoardOperation::SetElementRotations { changes } => {
+            println!("[ops] SET_ELEMENT_ROTATIONS count={}", changes.len());
+            for change in changes {
+                println!(
+                    "[ops]   id={} rot={:.3}->{:.3}",
+                    change.id,
+                    change.before,
+                    change.after,
+                );
+            }
         }
         BoardOperation::SetProperty { changes } => {
             println!("[ops] SET_PROPERTY count={}", changes.len());
@@ -587,6 +616,15 @@ impl Board {
                 for id in ids {
                     if let Some(element) = self.elements.iter_mut().find(|element| &element.id == id) {
                         rotate_element(element, *center, *angle);
+                    }
+                }
+            }
+            BoardOperation::SetElementRotations { changes } => {
+                for change in changes {
+                    if let Some(element) = self.elements.iter_mut().find(|element| element.id == change.id)
+                    {
+                        element.rotation = change.after;
+                        element.bump_text_generation();
                     }
                 }
             }
