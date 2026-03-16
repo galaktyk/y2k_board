@@ -1,5 +1,5 @@
 use glam::Vec2;
-use crate::renderer::{InstanceData, TextInstanceData, MAX_SHAPE_INSTANCES, MAX_TEXT_INSTANCES};
+use crate::rendering::renderer::{InstanceData, TextInstanceData, MAX_SHAPE_INSTANCES, MAX_TEXT_INSTANCES};
 use crate::text::UiTextSpec;
 
 const STATS_TEXT_SIZE: f32 = 12.0;

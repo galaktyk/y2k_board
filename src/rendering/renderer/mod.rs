@@ -37,3 +37,5 @@ pub struct Renderer {
     grid_pipeline: Pipeline,
     grid_bindings: Bindings,
 }
+
+impl Renderer {}

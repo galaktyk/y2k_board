@@ -13,7 +13,7 @@ use miniquad::{
 
 use crate::board::ImageData;
 use crate::platform::image_streaming::PlatformImageStreamingAdapter;
-use crate::renderer::{ImageInstanceData, PreparedImageDraw};
+use crate::rendering::renderer::{ImageInstanceData, PreparedImageDraw};
 
 pub const BASE_IMAGE_MAX_DIMENSION: u32 = 256;
 pub const HIRES_IMAGE_MAX_DIMENSION: u32 = 1024;

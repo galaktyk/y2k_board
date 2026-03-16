@@ -1,3 +1,4 @@
+
 use cosmic_text::Motion;
 use miniquad::{window, KeyCode, KeyMods};
 
@@ -27,23 +28,23 @@ impl App {
                     return;
                 }
                 KeyCode::Key1 => {
-                    self.set_active_tool(crate::tool::Tool::Select);
+                    self.set_active_tool(crate::ui::tool::Tool::Select);
                     return;
                 }
                 KeyCode::Key2 => {
-                    self.set_active_tool(crate::tool::Tool::Rect);
+                    self.set_active_tool(crate::ui::tool::Tool::Rect);
                     return;
                 }
                 KeyCode::Key3 => {
-                    self.set_active_tool(crate::tool::Tool::Ellipse);
+                    self.set_active_tool(crate::ui::tool::Tool::Ellipse);
                     return;
                 }
                 KeyCode::Key4 => {
-                    self.set_active_tool(crate::tool::Tool::Line);
+                    self.set_active_tool(crate::ui::tool::Tool::Line);
                     return;
                 }
                 KeyCode::Key5 => {
-                    self.set_active_tool(crate::tool::Tool::Text);
+                    self.set_active_tool(crate::ui::tool::Tool::Text);
                     return;
                 }
                 KeyCode::Tab => {

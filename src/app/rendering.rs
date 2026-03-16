@@ -2,7 +2,7 @@ use glam::Vec2;
 use miniquad::PassAction;
 
 use crate::input::DragMode;
-use crate::renderer::{Renderer, TextInstanceData};
+use crate::rendering::renderer::{Renderer, TextInstanceData};
 use crate::rendering::transform::{
     offset_instance, offset_text_instance, rotate_instance, rotate_point, rotate_text_instance,
 };
@@ -80,7 +80,7 @@ impl App {
         board_mvp: glam::Mat4,
         move_drag_offset: Option<Vec2>,
         rotate_drag_preview: Option<(f32, Vec2)>,
-        image_draws: &[crate::renderer::PreparedImageDraw],
+        image_draws: &[crate::rendering::renderer::PreparedImageDraw],
     ) {
         if let Some(transformed) = self.transformed_shape_instances(move_drag_offset, rotate_drag_preview)
         {
@@ -99,7 +99,7 @@ impl App {
         &self,
         move_drag_offset: Option<Vec2>,
         rotate_drag_preview: Option<(f32, Vec2)>,
-    ) -> Option<Vec<crate::renderer::InstanceData>> {
+    ) -> Option<Vec<crate::rendering::renderer::InstanceData>> {
         if let Some((angle, center)) = rotate_drag_preview {
             let mut transformed = self.board_render_cache.all_instances().to_vec();
             for (board_index, element) in self.board.elements.iter().enumerate() {

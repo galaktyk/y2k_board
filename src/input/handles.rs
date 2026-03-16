@@ -2,7 +2,7 @@ use glam::Vec2;
 
 use crate::board::{Element, ShapeType};
 use crate::input::state::SelectionBounds;
-use crate::renderer::InstanceData;
+use crate::rendering::renderer::InstanceData;
 
 const HANDLE_SIZE_PX: f32 = 10.0;
 const ROTATION_HANDLE_OFFSET_PX: f32 = 30.0;

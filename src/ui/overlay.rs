@@ -3,7 +3,7 @@ use glam::Vec2;
 use crate::board::{Element, ShapeType};
 use crate::input::SelectionBounds;
 use crate::palette;
-use crate::renderer::InstanceData;
+use crate::rendering::renderer::InstanceData;
 
 const MARQUEE_COLOR: [f32; 4] = palette::BLUE;
 const CREATION_OUTLINE_COLOR: [f32; 4] = palette::BLUE;

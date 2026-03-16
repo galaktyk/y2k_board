@@ -8,7 +8,7 @@ use crate::board::{
 use crate::camera::Camera;
 use crate::input::handles::{get_element_handles, get_selection_bounds_handles, handle_hit_radius};
 use crate::input::state::{DragMode, HandleDir, InputState, SelectionBounds};
-use crate::tool::Tool;
+use crate::ui::tool::Tool;
 
 const MARQUEE_MIN_SIZE: f32 = 4.0;
 const DRAG_START_DISTANCE: f32 = 3.0;

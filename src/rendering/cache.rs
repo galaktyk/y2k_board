@@ -5,7 +5,7 @@ use glam::Vec2;
 
 use crate::board::{Board, Element};
 use crate::camera::Camera;
-use crate::renderer::InstanceData;
+use crate::rendering::renderer::InstanceData;
 use crate::spatial::SpatialGrid;
 use crate::ui::overlay;
 

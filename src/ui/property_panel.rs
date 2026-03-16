@@ -1,7 +1,7 @@
 use glam::Vec2;
 
 use crate::palette;
-use crate::renderer::InstanceData;
+use crate::rendering::renderer::InstanceData;
 use crate::text::UiTextSpec;
 
 const PANEL_BG_COLOR: [f32; 4] = palette::GRAY_0;

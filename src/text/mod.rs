@@ -12,7 +12,7 @@ use miniquad::{RenderingBackend, TextureId};
 
 use crate::board::{Board, Element, TextData};
 use crate::palette;
-use crate::renderer::TextInstanceData;
+use crate::rendering::renderer::TextInstanceData;
 
 pub use edit::{TextEditSession, TextEditSnapshot};
 
@@ -20,7 +20,7 @@ const TEXT_ATLAS_SIZE: usize = 1024;
 const EMOJI_ATLAS_SIZE: usize = 1024;
 const ATLAS_GAP: usize = 2;
 const FALLBACK_GLYPH_SIZE: usize = 8;
-const BUNDLED_UI_FONT_BYTES: &[u8] = include_bytes!("../fonts/W95FA.otf");
+const BUNDLED_UI_FONT_BYTES: &[u8] = include_bytes!("../../fonts/W95FA.otf");
 const BUNDLED_UI_FONT_FAMILY_HINT: &str = "W95FA";
 
 const SELECTION_COLOR: [f32; 4] = palette::TEXT_SELECTION_COLOR;

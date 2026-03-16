@@ -1,7 +1,7 @@
 use glam::Vec2;
 
 use crate::board::Element;
-use crate::renderer::{InstanceData, TextInstanceData};
+use crate::rendering::renderer::{InstanceData, TextInstanceData};
 
 pub fn offset_instance(mut instance: InstanceData, delta: Vec2) -> InstanceData {
     instance.pos[0] += delta.x;

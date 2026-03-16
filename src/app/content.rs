@@ -9,7 +9,7 @@ use crate::board::{
 };
 use crate::clipboard::{self, ClipboardPaste};
 use crate::images::{ImageImportError, ImportedImage};
-use crate::renderer::PreparedImageDraw;
+use crate::rendering::renderer::PreparedImageDraw;
 use crate::rendering::cache::element_in_expanded_view;
 use crate::rendering::transform::preview_rect_transform;
 

@@ -3,6 +3,8 @@ mod keyboard;
 mod rendering;
 mod text_editing;
 
+
+
 use miniquad::*;
 use glam::Vec2;
 use std::collections::HashSet;
@@ -17,12 +19,12 @@ use crate::board::{
 use crate::camera::Camera;
 use crate::images::ImageManager;
 use crate::input::{self, DragMode, InputState};
-use crate::renderer::Renderer;
+use crate::rendering::renderer::Renderer;
 use crate::rendering::cache::BoardRenderCache;
-use crate::snapshot;
+use crate::{snapshot, ui};
 use crate::spatial::SpatialGrid;
 use crate::text::{PreparedTextDraw, TextEditSession, TextEditSnapshot, TextSystem};
-use crate::tool::Tool;
+
 use crate::ui::toolbar::{self, Toolbar, ToolbarAction};
 use crate::ui::property_panel::{self, ColorTarget, WidthTarget};
 
@@ -50,7 +52,7 @@ impl ImageRamFlushTrigger {
 
 #[derive(Clone)]
 enum PropertyPanelSource {
-    Tool(Tool),
+    Tool(ui::tool::Tool),
     Selection(Vec<u64>),
 }
 
@@ -62,7 +64,7 @@ struct ResolvedPropertyPanel {
 
 enum WidthDragState {
     Tool {
-        tool: Tool,
+        tool: ui::tool::Tool,
         target: WidthTarget,
     },
     Selection {
@@ -317,7 +319,7 @@ impl App {
         self.board.selected_ids()
     }
 
-    fn set_active_tool(&mut self, tool: Tool) {
+    fn set_active_tool(&mut self, tool: ui::tool::Tool) {
         self.toolbar.active_tool = tool;
         self.request_redraw();
     }
@@ -377,7 +379,7 @@ impl App {
 
     fn resolve_tool_property_panel(&self) -> Option<ResolvedPropertyPanel> {
         let (title, tabs, active_color, border_width, stroke_width) = match self.toolbar.active_tool {
-            Tool::Rect => {
+            ui::tool::Tool::Rect => {
                 let tabs = panel_tabs(true, true, true);
                 let active = self.resolve_panel_target(tabs)?;
                 (
@@ -388,7 +390,7 @@ impl App {
                     None,
                 )
             }
-            Tool::Ellipse => {
+            ui::tool::Tool::Ellipse => {
                 let tabs = panel_tabs(true, true, true);
                 let active = self.resolve_panel_target(tabs)?;
                 (
@@ -399,7 +401,7 @@ impl App {
                     None,
                 )
             }
-            Tool::Text => {
+            ui::tool::Tool::Text => {
                 let tabs = panel_tabs(true, true, true);
                 let active = self.resolve_panel_target(tabs)?;
                 (
@@ -410,7 +412,7 @@ impl App {
                     None,
                 )
             }
-            Tool::Line => {
+            ui::tool::Tool::Line => {
                 let tabs = panel_tabs(false, false, true);
                 (
                     "LINE",
@@ -420,7 +422,7 @@ impl App {
                     Some(self.tool_style_defaults.line.stroke_width.clamp(1, 16)),
                 )
             }
-            Tool::Select => return None,
+            ui::tool::Tool::Select => return None,
         };
 
         Some(ResolvedPropertyPanel {
@@ -571,27 +573,27 @@ impl App {
         }
     }
 
-    fn apply_tool_panel_color(&mut self, tool: Tool, target: ColorTarget, color: [f32; 4]) {
+    fn apply_tool_panel_color(&mut self, tool: ui::tool::Tool, target: ColorTarget, color: [f32; 4]) {
         match tool {
-            Tool::Rect => apply_box_color(&mut self.tool_style_defaults.rect, target, color),
-            Tool::Ellipse => apply_box_color(&mut self.tool_style_defaults.ellipse, target, color),
-            Tool::Text => apply_box_color(&mut self.tool_style_defaults.text, target, color),
-            Tool::Line => {
+            ui::tool::Tool::Rect => apply_box_color(&mut self.tool_style_defaults.rect, target, color),
+            ui::tool::Tool::Ellipse => apply_box_color(&mut self.tool_style_defaults.ellipse, target, color),
+            ui::tool::Tool::Text => apply_box_color(&mut self.tool_style_defaults.text, target, color),
+            ui::tool::Tool::Line => {
                 if target == ColorTarget::Stroke {
                     self.tool_style_defaults.line.color = color;
                 }
             }
-            Tool::Select => {}
+            ui::tool::Tool::Select => {}
         }
     }
 
-    fn apply_tool_panel_width(&mut self, tool: Tool, target: WidthTarget, width: u8) {
+    fn apply_tool_panel_width(&mut self, tool: ui::tool::Tool, target: WidthTarget, width: u8) {
         match tool {
-            Tool::Rect if target == WidthTarget::Border => self.tool_style_defaults.rect.border_width = width,
-            Tool::Ellipse if target == WidthTarget::Border => self.tool_style_defaults.ellipse.border_width = width,
-            Tool::Text if target == WidthTarget::Border => self.tool_style_defaults.text.border_width = width,
-            Tool::Line if target == WidthTarget::Stroke => self.tool_style_defaults.line.stroke_width = width,
-            Tool::Select => {}
+            ui::tool::Tool::Rect if target == WidthTarget::Border => self.tool_style_defaults.rect.border_width = width,
+            ui::tool::Tool::Ellipse if target == WidthTarget::Border => self.tool_style_defaults.ellipse.border_width = width,
+            ui::tool::Tool::Text if target == WidthTarget::Border => self.tool_style_defaults.text.border_width = width,
+            ui::tool::Tool::Line if target == WidthTarget::Stroke => self.tool_style_defaults.line.stroke_width = width,
+            ui::tool::Tool::Select => {}
             _ => {}
         }
     }
@@ -616,7 +618,7 @@ impl App {
         self.input.active_text_id = None;
         self.input.text_selecting = false;
         self.property_width_drag = None;
-        self.set_active_tool(Tool::Select);
+        self.set_active_tool(ui::tool::Tool::Select);
     }
 
     fn sync_board_render_cache(&mut self) {
