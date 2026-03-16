@@ -12,23 +12,12 @@ const MULTI_SELECTION_BOUNDS_COLOR: [f32; 4] = palette::BLUE;
 const FIXED_SCREEN_OUTLINE_SHAPE_TYPE: f32 = 5.0;
 const FIXED_SCREEN_LINE_OUTLINE_SHAPE_TYPE: f32 = 6.0;
 
+#[allow(dead_code)]
 pub fn element_instance(element: &Element, alpha: f32) -> InstanceData {
-    let shape_type = match element.shape {
-        ShapeType::Rect => 0.0,
-        ShapeType::Ellipse => 1.0,
-        ShapeType::Line => 2.0,
-        ShapeType::Text => 3.0,
-        ShapeType::Image => 255.0,
-    };
-
-    InstanceData::new(
-        element.pos.to_array(),
-        element.size.to_array(),
-        element.rotation,
-        element.color,
-        shape_type,
-        alpha,
-    )
+    element_to_instances(element, alpha)
+        .into_iter()
+        .next()
+        .unwrap_or_default()
 }
 
 pub fn selection_instance(element: &Element, zoom: f32, alpha: f32) -> Option<InstanceData> {
@@ -58,7 +47,95 @@ pub fn preview_instances(element: &Element, zoom: f32, alpha: f32) -> Vec<Instan
 }
 
 pub fn element_to_instances(element: &Element, alpha: f32) -> Vec<InstanceData> {
-    vec![element_instance(element, alpha)]
+    let mut out = Vec::new();
+
+    match element.shape {
+        ShapeType::Rect => {
+            push_fill_instance(&mut out, element, 0.0, element.color, alpha);
+            push_border_instance(&mut out, element, 3.0, element.effective_stroke_color(), alpha);
+        }
+        ShapeType::Ellipse => {
+            push_fill_instance(&mut out, element, 1.0, element.color, alpha);
+            push_border_instance(&mut out, element, 4.0, element.effective_stroke_color(), alpha);
+        }
+        ShapeType::Line => {
+            let color = element.effective_stroke_color();
+            if color[3] > 0.0 {
+                out.push(
+                    InstanceData::new(
+                        element.pos.to_array(),
+                        element.size.to_array(),
+                        element.rotation,
+                        color,
+                        2.0,
+                        alpha,
+                    )
+                    .with_stroke_width(element.stroke_width),
+                );
+            }
+        }
+        ShapeType::Text => {
+            push_fill_instance(&mut out, element, 0.0, element.color, alpha);
+            push_border_instance(&mut out, element, 3.0, element.effective_stroke_color(), alpha);
+        }
+        ShapeType::Image => {
+            out.push(InstanceData::new(
+                element.pos.to_array(),
+                element.size.to_array(),
+                element.rotation,
+                element.color,
+                255.0,
+                alpha,
+            ));
+        }
+    }
+
+    out
+}
+
+fn push_fill_instance(
+    out: &mut Vec<InstanceData>,
+    element: &Element,
+    shape_type: f32,
+    color: [f32; 4],
+    alpha: f32,
+) {
+    if color[3] <= 0.0 {
+        return;
+    }
+
+    out.push(InstanceData::new(
+        element.pos.to_array(),
+        element.size.to_array(),
+        element.rotation,
+        color,
+        shape_type,
+        alpha,
+    ));
+}
+
+fn push_border_instance(
+    out: &mut Vec<InstanceData>,
+    element: &Element,
+    shape_type: f32,
+    color: [f32; 4],
+    alpha: f32,
+) {
+    if color[3] <= 0.0 || element.stroke_width <= 0.0 {
+        return;
+    }
+
+    out.push(
+        InstanceData::new(
+            element.pos.to_array(),
+            element.size.to_array(),
+            element.rotation,
+            color,
+            shape_type,
+            alpha,
+        )
+        .with_stroke_width(element.stroke_width),
+    );
 }
 
 fn selection_outline_instance(

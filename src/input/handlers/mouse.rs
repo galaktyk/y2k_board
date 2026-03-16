@@ -3,11 +3,10 @@ use glam::Vec2;
 
 use crate::board::{
     Board, BoardOperation, Element, ElementPropertyChange, ElementPropertyPatch, ElementTransform,
-    ShapeType, DEFAULT_TEXT_COLOR,
+    ShapeType, ToolStyleDefaults,
 };
 use crate::camera::Camera;
 use crate::input::handles::{get_element_handles, get_selection_bounds_handles, handle_hit_radius};
-use crate::input::preview::default_color;
 use crate::input::state::{DragMode, HandleDir, InputState, SelectionBounds};
 use crate::tool::Tool;
 
@@ -494,11 +493,11 @@ pub fn on_mouse_up(
                 let _ = screen_size;
                 let new_id = board.next_id();
                 element.id = new_id;
-                if element.shape == ShapeType::Text {
+                if element.shape == ShapeType::Text && element.text.is_none() {
                     element.text = Some(crate::board::TextData {
                         content: String::new(),
                         font_size: 24.0,
-                        color: DEFAULT_TEXT_COLOR,
+                        color: crate::board::DEFAULT_TEXT_COLOR,
                     });
                 }
                 board.apply_operation(BoardOperation::AddElement(element));
@@ -524,6 +523,7 @@ pub fn on_mouse_move(
     state: &mut InputState,
     board: &mut Board,
     camera: &mut Camera,
+    tool_style_defaults: &ToolStyleDefaults,
     active_tool: Tool,
     screen_size: Vec2,
     x: f32,
@@ -744,13 +744,15 @@ pub fn on_mouse_move(
             pos,
             size,
             rotation: 0.0,
-            color: default_color(shape),
+            color: preview_fill_color(shape, tool_style_defaults),
+            stroke_color: preview_stroke_color(shape, tool_style_defaults),
+            stroke_width: preview_stroke_width(shape, tool_style_defaults),
             selected: false,
-            text: if shape == ShapeType::Text {
+            text: if matches!(shape, ShapeType::Rect | ShapeType::Ellipse | ShapeType::Text) {
                 Some(crate::board::TextData {
                     content: String::new(),
                     font_size: 24.0,
-                    color: DEFAULT_TEXT_COLOR,
+                    color: preview_text_color(shape, tool_style_defaults),
                 })
             } else {
                 None
@@ -758,5 +760,44 @@ pub fn on_mouse_move(
             image: None,
             text_layout_generation: 0,
         });
+    }
+}
+
+fn preview_fill_color(shape: ShapeType, defaults: &ToolStyleDefaults) -> [f32; 4] {
+    match shape {
+        ShapeType::Rect => defaults.rect.fill_color,
+        ShapeType::Ellipse => defaults.ellipse.fill_color,
+        ShapeType::Text => defaults.text.fill_color,
+        ShapeType::Line => defaults.line.color,
+        ShapeType::Image => crate::palette::PURE_BLACK,
+    }
+}
+
+fn preview_stroke_color(shape: ShapeType, defaults: &ToolStyleDefaults) -> [f32; 4] {
+    match shape {
+        ShapeType::Rect => defaults.rect.stroke_color,
+        ShapeType::Ellipse => defaults.ellipse.stroke_color,
+        ShapeType::Text => defaults.text.stroke_color,
+        ShapeType::Line => defaults.line.color,
+        ShapeType::Image => crate::board::DEFAULT_STROKE_COLOR,
+    }
+}
+
+fn preview_stroke_width(shape: ShapeType, defaults: &ToolStyleDefaults) -> f32 {
+    match shape {
+        ShapeType::Rect => defaults.rect.stroke_width,
+        ShapeType::Ellipse => defaults.ellipse.stroke_width,
+        ShapeType::Text => defaults.text.stroke_width,
+        ShapeType::Line => defaults.line.stroke_width,
+        ShapeType::Image => crate::board::DEFAULT_STROKE_WIDTH,
+    }
+}
+
+fn preview_text_color(shape: ShapeType, defaults: &ToolStyleDefaults) -> [f32; 4] {
+    match shape {
+        ShapeType::Rect => defaults.rect.text_color,
+        ShapeType::Ellipse => defaults.ellipse.text_color,
+        ShapeType::Text => defaults.text.text_color,
+        ShapeType::Line | ShapeType::Image => crate::board::DEFAULT_TEXT_COLOR,
     }
 }

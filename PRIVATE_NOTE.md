@@ -4,7 +4,7 @@ image not align with real location? try to reproduce
 
 ---
 
-add submenu to the screen right 
+add submenu to the screen right. design similar to current toolbar island but stick to the screen edge
 
 this will show when select creation tools or corresponding object is selected
 
@@ -77,13 +77,5 @@ I'm considering threshold on image size on screen like hires switch but doing th
 
 
 
----
-auto clear all image in RAM every 1 min
-(visible image is fine because it's in GPU)
-
-
-----
-add debug images
-check many image
-check many image zoom out
----
+--- 
+500ms debounce ops

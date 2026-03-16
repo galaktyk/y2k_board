@@ -101,35 +101,31 @@ impl App {
         rotate_drag_preview: Option<(f32, Vec2)>,
     ) -> Option<Vec<crate::renderer::InstanceData>> {
         if let Some((angle, center)) = rotate_drag_preview {
-            return Some(
-                self.board_render_cache
-                    .all_instances()
-                    .iter()
-                    .enumerate()
-                    .map(|(board_index, &instance)| {
-                        if self.board.elements[board_index].selected {
-                            rotate_instance(instance, center, angle)
-                        } else {
-                            instance
-                        }
-                    })
-                    .collect(),
-            );
+            let mut transformed = self.board_render_cache.all_instances().to_vec();
+            for (board_index, element) in self.board.elements.iter().enumerate() {
+                if !element.selected {
+                    continue;
+                }
+
+                for instance in &mut transformed[self.board_render_cache.element_range(board_index)] {
+                    *instance = rotate_instance(*instance, center, angle);
+                }
+            }
+            return Some(transformed);
         }
 
         move_drag_offset.map(|offset| {
-            self.board_render_cache
-                .all_instances()
-                .iter()
-                .enumerate()
-                .map(|(board_index, &instance)| {
-                    if self.board.elements[board_index].selected {
-                        offset_instance(instance, offset)
-                    } else {
-                        instance
-                    }
-                })
-                .collect()
+            let mut transformed = self.board_render_cache.all_instances().to_vec();
+            for (board_index, element) in self.board.elements.iter().enumerate() {
+                if !element.selected {
+                    continue;
+                }
+
+                for instance in &mut transformed[self.board_render_cache.element_range(board_index)] {
+                    *instance = offset_instance(*instance, offset);
+                }
+            }
+            transformed
         })
     }
 
@@ -398,11 +394,21 @@ impl App {
         self.renderer
             .draw_image_draws(&mut *self.ctx, &tb_icon_draws, screen_mvp);
 
+        if let Some(panel) = self.resolve_property_panel() {
+            let panel_inst = crate::ui::property_panel::build_instances(
+                self.screen_size,
+                &panel.view,
+                self.input.mouse_pos,
+            );
+            self.renderer
+                .draw_instances(&mut *self.ctx, &panel_inst, screen_mvp, self.screen_size);
+        }
+
         let text_draw = self.cached_text_draw.as_ref().unwrap();
         let char_count = text_draw.mono_instances.len() + text_draw.color_instances.len();
         let stats_inst = stats::build_stats_instances(
             self.camera.zoom,
-            self.board_render_cache.all_instances().len(),
+            self.board.elements.len(),
             char_count,
             self.image_manager.atlas_count(),
             self.image_manager.atlas_capacity(),

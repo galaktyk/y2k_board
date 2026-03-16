@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 
 use glam::Vec2;
 
-use crate::board::{Board, Element, ShapeType, TextData};
+use crate::board::{
+    default_stroke_color, default_stroke_width, Board, Element, ShapeType, TextData,
+};
 use crate::camera::Camera;
 use crate::images::{ImageImportError, ImageManager};
 use crate::palette;
@@ -242,6 +244,12 @@ pub fn spawn_debug_shapes(board: &mut Board, camera: &Camera, screen_size: Vec2)
             size,
             rotation: 0.0,
             color: border_color,
+            stroke_color: if shape == ShapeType::Line {
+                border_color
+            } else {
+                default_stroke_color()
+            },
+            stroke_width: default_stroke_width(),
             selected: false,
             text,
             image: None,
@@ -301,6 +309,8 @@ pub fn spawn_debug_images(
             size,
             rotation,
             color: [1.0, 1.0, 1.0, 1.0],
+            stroke_color: default_stroke_color(),
+            stroke_width: default_stroke_width(),
             selected: false,
             text: None,
             image: Some(imported.data),

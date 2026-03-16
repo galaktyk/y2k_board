@@ -16,11 +16,13 @@ varying float v_alpha;
 varying vec2 v_line_p;
 varying float v_line_len;
 varying vec2 v_size;
+varying float v_stroke_width;
 
 void main() {
     // Instance data is packed on the Rust side to keep the vertex format compact.
     float i_alpha = i_pack.x / 255.0;
     float i_shape = i_pack.y;
+    float i_stroke_width = max(i_pack.z, 1.0);
     vec4 actual_color = i_color / 255.0;
 
     vec2 world_pos;
@@ -63,6 +65,7 @@ void main() {
     v_shape = i_shape;
     v_alpha = i_alpha;
     v_size = i_size;
+    v_stroke_width = i_stroke_width;
 }
 "#;
 
@@ -78,6 +81,7 @@ varying float v_alpha;
 varying vec2 v_line_p;
 varying float v_line_len;
 varying vec2 v_size;
+varying float v_stroke_width;
 
 // Rectangle and ellipse outlines use edge distance inside an expanded quad.
 float outline_alpha(float edge, float width, float aa) {
@@ -136,19 +140,23 @@ void main() {
     } else if (v_shape < 2.5) {
         vec2 p = v_line_p;
         float d = line_segment_distance(p, v_line_len);
-        float thickness = 1.0;
+        float thickness = max(v_stroke_width * u_world_per_px, u_world_per_px);
         float a = 1.0 - step(thickness, d);
         gl_FragColor = vec4(v_color.rgb, alpha * a);
     } else if (v_shape < 3.5) {
         vec2 dist = min(uv, 1.0 - uv) * v_size;
         float edge = min(dist.x, dist.y);
-        float a = 1.0 - step(2.5, edge);
+        float width = max(v_stroke_width * u_world_per_px, u_world_per_px);
+        float aa = max(u_world_per_px * 0.75, 0.0001);
+        float a = outline_alpha(edge, width, aa);
         gl_FragColor = vec4(v_color.rgb, alpha * a);
     } else if (v_shape < 4.5) {
         vec2 p = (uv - 0.5) * v_size;
         vec2 r = abs(v_size) * 0.5;
         float sd = abs(ellipse_signed_distance(p, r));
-        float a = 1.0 - step(2.5, sd);
+        float width = max(v_stroke_width * u_world_per_px, u_world_per_px);
+        float aa = max(u_world_per_px * 0.75, 0.0001);
+        float a = outline_alpha(sd, width, aa);
         gl_FragColor = vec4(v_color.rgb, alpha * a);
     } else if (v_shape < 5.5) {
         vec2 dist = min(uv, 1.0 - uv) * v_size;

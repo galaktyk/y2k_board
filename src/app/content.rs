@@ -3,7 +3,10 @@ use std::path::Path;
 use glam::Vec2;
 use miniquad::window;
 
-use crate::board::{default_text_box_color, BoardOperation, Element, ShapeType, TextData, DEFAULT_TEXT_COLOR};
+use crate::board::{
+    default_stroke_color, default_stroke_width, default_text_box_color, BoardOperation, Element,
+    ShapeType, TextData, DEFAULT_TEXT_COLOR,
+};
 use crate::clipboard::{self, ClipboardPaste};
 use crate::images::{ImageImportError, ImportedImage};
 use crate::renderer::PreparedImageDraw;
@@ -75,6 +78,8 @@ impl App {
             size,
             rotation: 0.0,
             color: [1.0, 1.0, 1.0, 1.0],
+            stroke_color: default_stroke_color(),
+            stroke_width: default_stroke_width(),
             selected: false,
             text: None,
             image: Some(imported.data),
@@ -154,6 +159,8 @@ impl App {
             size,
             rotation: 0.0,
             color: default_text_box_color(),
+            stroke_color: default_stroke_color(),
+            stroke_width: default_stroke_width(),
             selected: false,
             text: Some(text_data),
             image: None,

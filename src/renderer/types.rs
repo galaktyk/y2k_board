@@ -11,7 +11,8 @@ pub struct InstanceData {
     pub rotation: f32,
     pub alpha: u8,
     pub shape_type: u8,
-    pub _pad: [u8; 2],
+    pub stroke_width: u8,
+    pub _pad: u8,
 }
 
 #[repr(C)]
@@ -65,8 +66,14 @@ impl InstanceData {
             rotation,
             alpha: (alpha_f32 * 255.0) as u8,
             shape_type: shape_type as u8,
-            _pad: [0, 0],
+            stroke_width: 1,
+            _pad: 0,
         }
+    }
+
+    pub fn with_stroke_width(mut self, stroke_width: f32) -> Self {
+        self.stroke_width = stroke_width.round().clamp(1.0, 255.0) as u8;
+        self
     }
 }
 

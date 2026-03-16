@@ -19,11 +19,103 @@ pub const DEFAULT_TEXT_COLOR: [f32; 4] = palette::GRAY_3;
 pub const DEFAULT_RECT_COLOR: [f32; 4] = palette::OLIVE_LIGHT;
 pub const DEFAULT_ELLIPSE_COLOR: [f32; 4] = palette::TEAL;
 pub const DEFAULT_LINE_COLOR: [f32; 4] = palette::RED;
+pub const DEFAULT_STROKE_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
+pub const DEFAULT_STROKE_WIDTH: f32 = 1.0;
+pub const DEFAULT_BOX_STROKE_COLOR: [f32; 4] = palette::BLACK;
 
 pub fn default_text_box_color() -> [f32; 4] {
     let mut color = DEFAULT_TEXT_COLOR;
     color[3] = 0.0;
     color
+}
+
+pub fn default_stroke_color() -> [f32; 4] {
+    DEFAULT_STROKE_COLOR
+}
+
+pub fn default_stroke_width() -> f32 {
+    DEFAULT_STROKE_WIDTH
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BoxToolStyle {
+    pub fill_color: [f32; 4],
+    pub stroke_color: [f32; 4],
+    pub stroke_width: f32,
+    pub text_color: [f32; 4],
+}
+
+impl BoxToolStyle {
+    pub fn rect_default() -> Self {
+        Self {
+            fill_color: DEFAULT_RECT_COLOR,
+            stroke_color: DEFAULT_BOX_STROKE_COLOR,
+            stroke_width: 1.0,
+            text_color: DEFAULT_TEXT_COLOR,
+        }
+    }
+
+    pub fn ellipse_default() -> Self {
+        Self {
+            fill_color: DEFAULT_ELLIPSE_COLOR,
+            stroke_color: DEFAULT_BOX_STROKE_COLOR,
+            stroke_width: 1.0,
+            text_color: DEFAULT_TEXT_COLOR,
+        }
+    }
+
+    pub fn text_default() -> Self {
+        let mut stroke_color = DEFAULT_BOX_STROKE_COLOR;
+        stroke_color[3] = 0.0;
+        Self {
+            fill_color: default_text_box_color(),
+            stroke_color,
+            stroke_width: 1.0,
+            text_color: DEFAULT_TEXT_COLOR,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LineToolStyle {
+    pub color: [f32; 4],
+    pub stroke_width: f32,
+}
+
+impl LineToolStyle {
+    pub fn default_line() -> Self {
+        Self {
+            color: DEFAULT_LINE_COLOR,
+            stroke_width: 1.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ToolStyleDefaults {
+    pub rect: BoxToolStyle,
+    pub ellipse: BoxToolStyle,
+    pub text: BoxToolStyle,
+    pub line: LineToolStyle,
+}
+
+impl Default for ToolStyleDefaults {
+    fn default() -> Self {
+        Self {
+            rect: BoxToolStyle::rect_default(),
+            ellipse: BoxToolStyle::ellipse_default(),
+            text: BoxToolStyle::text_default(),
+            line: LineToolStyle::default_line(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ElementStyleSnapshot {
+    pub fill_color: [f32; 4],
+    pub stroke_color: [f32; 4],
+    pub stroke_width: f32,
+    pub text_color: Option<[f32; 4]>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -64,6 +156,10 @@ pub struct Element {
     pub size: Vec2,
     pub rotation: f32,
     pub color: [f32; 4],
+    #[serde(default = "default_stroke_color")]
+    pub stroke_color: [f32; 4],
+    #[serde(default = "default_stroke_width")]
+    pub stroke_width: f32,
     pub selected: bool,
     #[serde(default)]
     pub text: Option<TextData>,
@@ -76,6 +172,58 @@ pub struct Element {
 }
 
 impl Element {
+    pub fn current_text_color(&self) -> Option<[f32; 4]> {
+        self.can_host_text().then(|| {
+            self.text
+                .as_ref()
+                .map(|text| text.color)
+                .unwrap_or(DEFAULT_TEXT_COLOR)
+        })
+    }
+
+    pub fn effective_stroke_color(&self) -> [f32; 4] {
+        if self.shape == ShapeType::Line && self.stroke_color[3] <= 0.0 {
+            self.color
+        } else {
+            self.stroke_color
+        }
+    }
+
+    pub fn style_snapshot(&self) -> ElementStyleSnapshot {
+        ElementStyleSnapshot {
+            fill_color: self.color,
+            stroke_color: self.effective_stroke_color(),
+            stroke_width: self.stroke_width.max(1.0),
+            text_color: self.current_text_color(),
+        }
+    }
+
+    pub fn apply_style_snapshot(&mut self, style: ElementStyleSnapshot) {
+        self.color = style.fill_color;
+        self.stroke_color = style.stroke_color;
+        self.stroke_width = style.stroke_width.max(1.0);
+
+        if self.shape == ShapeType::Line {
+            self.color = style.stroke_color;
+        }
+
+        if self.can_host_text() {
+            if let Some(text_color) = style.text_color {
+                match self.text.as_mut() {
+                    Some(text) => text.color = text_color,
+                    None => {
+                        self.text = Some(TextData {
+                            color: text_color,
+                            ..TextData::default()
+                        });
+                    }
+                }
+            }
+        }
+
+        self.bump_text_generation();
+    }
+
     /// Axis-aligned bounding box for spatial queries.
     pub fn aabb(&self) -> (Vec2, Vec2) {
         match self.shape {
@@ -177,6 +325,10 @@ pub enum ElementPropertyPatch {
         before: ElementTransform,
         after: ElementTransform,
     },
+    Style {
+        before: ElementStyleSnapshot,
+        after: ElementStyleSnapshot,
+    },
     Text {
         before: Option<TextData>,
         after: Option<TextData>,
@@ -225,6 +377,12 @@ fn inverse(op: &BoardOperation) -> BoardOperation {
                     patch: match &change.patch {
                         ElementPropertyPatch::Transform { before, after } => {
                             ElementPropertyPatch::Transform {
+                                before: *after,
+                                after: *before,
+                            }
+                        }
+                        ElementPropertyPatch::Style { before, after } => {
+                            ElementPropertyPatch::Style {
                                 before: *after,
                                 after: *before,
                             }
@@ -291,6 +449,20 @@ fn log_operation(op: &BoardOperation) {
                             after.size.y,
                             before.rotation,
                             after.rotation,
+                        );
+                    }
+                    ElementPropertyPatch::Style { before, after } => {
+                        println!(
+                            "[ops]   id={} style fill={:?}->{:?} stroke={:?}->{:?} width={:.1}->{:.1} text={:?}->{:?}",
+                            change.id,
+                            before.fill_color,
+                            after.fill_color,
+                            before.stroke_color,
+                            after.stroke_color,
+                            before.stroke_width,
+                            after.stroke_width,
+                            before.text_color,
+                            after.text_color,
                         );
                     }
                     ElementPropertyPatch::Text { before, after } => {
@@ -398,7 +570,7 @@ impl Board {
                 for change in changes {
                     let after = match &change.patch {
                         ElementPropertyPatch::Transform { after, .. } => after,
-                        ElementPropertyPatch::Text { .. } => continue,
+                        ElementPropertyPatch::Style { .. } | ElementPropertyPatch::Text { .. } => continue,
                     };
                     if let Some(element) = self.elements.iter_mut().find(|e| e.id == change.id) {
                         apply_transform(element, *after);
@@ -406,8 +578,17 @@ impl Board {
                 }
                 for change in changes {
                     let after = match &change.patch {
+                        ElementPropertyPatch::Style { after, .. } => after,
+                        ElementPropertyPatch::Transform { .. } | ElementPropertyPatch::Text { .. } => continue,
+                    };
+                    if let Some(element) = self.elements.iter_mut().find(|e| e.id == change.id) {
+                        element.apply_style_snapshot(*after);
+                    }
+                }
+                for change in changes {
+                    let after = match &change.patch {
                         ElementPropertyPatch::Text { after, .. } => after,
-                        ElementPropertyPatch::Transform { .. } => continue,
+                        ElementPropertyPatch::Transform { .. } | ElementPropertyPatch::Style { .. } => continue,
                     };
                     if let Some(element) = self.elements.iter_mut().find(|e| e.id == change.id) {
                         element.text = after.clone();
@@ -609,6 +790,10 @@ impl Board {
     pub fn element(&self, id: u64) -> Option<&Element> {
         self.elements.iter().find(|element| element.id == id)
     }
+
+    pub fn element_mut(&mut self, id: u64) -> Option<&mut Element> {
+        self.elements.iter_mut().find(|element| element.id == id)
+    }
 }
 
 fn element_hit(e: &Element, mut p: Vec2) -> bool {
@@ -640,7 +825,7 @@ fn element_hit(e: &Element, mut p: Vec2) -> bool {
         ShapeType::Line => {
             let a = e.pos;
             let b = e.pos + e.size;
-            dist_point_segment(p, a, b) <= 8.0
+            dist_point_segment(p, a, b) <= (e.stroke_width.max(1.0) * 0.5 + 8.0)
         }
     }
 }
@@ -668,6 +853,8 @@ mod tests {
             size: Vec2::new(200.0, 120.0),
             rotation: 0.4,
             color: [0.0, 0.0, 0.0, 0.0],
+            stroke_color: default_stroke_color(),
+            stroke_width: default_stroke_width(),
             selected: false,
             text: Some(TextData::default()),
             image: None,
@@ -693,6 +880,8 @@ mod tests {
                 size: Vec2::splat(10.0),
                 rotation: 0.0,
                 color: [1.0, 0.0, 0.0, 1.0],
+                stroke_color: default_stroke_color(),
+                stroke_width: default_stroke_width(),
                 selected: false,
                 text: None,
                 image: None,
@@ -705,6 +894,8 @@ mod tests {
                 size: Vec2::splat(10.0),
                 rotation: 0.0,
                 color: [1.0, 1.0, 1.0, 1.0],
+                stroke_color: default_stroke_color(),
+                stroke_width: default_stroke_width(),
                 selected: false,
                 text: None,
                 image: Some(ImageData {
@@ -724,6 +915,8 @@ mod tests {
                 size: Vec2::splat(10.0),
                 rotation: 0.0,
                 color: [0.0, 1.0, 0.0, 1.0],
+                stroke_color: default_stroke_color(),
+                stroke_width: default_stroke_width(),
                 selected: false,
                 text: None,
                 image: None,
@@ -746,6 +939,8 @@ mod tests {
                 size: Vec2::splat(20.0),
                 rotation: 0.0,
                 color: [1.0, 1.0, 1.0, 1.0],
+                stroke_color: default_stroke_color(),
+                stroke_width: default_stroke_width(),
                 selected: false,
                 text: None,
                 image: Some(ImageData {
@@ -765,6 +960,8 @@ mod tests {
                 size: Vec2::splat(20.0),
                 rotation: 0.0,
                 color: [1.0, 0.0, 0.0, 1.0],
+                stroke_color: default_stroke_color(),
+                stroke_width: default_stroke_width(),
                 selected: false,
                 text: None,
                 image: None,
@@ -786,6 +983,8 @@ mod tests {
                 size: Vec2::splat(20.0),
                 rotation: 0.0,
                 color: [1.0, 0.0, 0.0, 1.0],
+                stroke_color: default_stroke_color(),
+                stroke_width: default_stroke_width(),
                 selected: false,
                 text: None,
                 image: None,
@@ -798,6 +997,8 @@ mod tests {
                 size: Vec2::splat(20.0),
                 rotation: 0.0,
                 color: [0.0, 1.0, 0.0, 1.0],
+                stroke_color: default_stroke_color(),
+                stroke_width: default_stroke_width(),
                 selected: false,
                 text: None,
                 image: None,
@@ -819,6 +1020,8 @@ mod tests {
                 size: Vec2::splat(20.0),
                 rotation: 0.0,
                 color: [1.0, 1.0, 1.0, 1.0],
+                stroke_color: default_stroke_color(),
+                stroke_width: default_stroke_width(),
                 selected: false,
                 text: None,
                 image: Some(ImageData {
@@ -838,6 +1041,8 @@ mod tests {
                 size: Vec2::splat(20.0),
                 rotation: 0.0,
                 color: [0.0, 0.0, 0.0, 0.0],
+                stroke_color: default_stroke_color(),
+                stroke_width: default_stroke_width(),
                 selected: false,
                 text: Some(TextData {
                     content: "hello".to_string(),

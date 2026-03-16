@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 
 use glam::Vec2;
 
@@ -19,26 +20,29 @@ struct VisibleRange {
 #[derive(Default)]
 pub struct BoardRenderCache {
     all_instances: Vec<InstanceData>,
+    element_ranges: Vec<Range<usize>>,
     id_by_index: Vec<u64>,
     index_by_id: HashMap<u64, usize>,
-    visible_instances: Vec<InstanceData>,
-    visible_board_indices: Vec<usize>,
-    visible_index_by_id: HashMap<u64, usize>,
     visible_range: Option<VisibleRange>,
 }
 
 impl BoardRenderCache {
     pub fn rebuild_all(&mut self, board: &Board) {
         self.all_instances.clear();
+        self.element_ranges.clear();
         self.id_by_index.clear();
         self.index_by_id.clear();
-        self.all_instances.reserve(board.elements.len());
+        self.all_instances.reserve(board.elements.len() * 2);
+        self.element_ranges.reserve(board.elements.len());
         self.id_by_index.reserve(board.elements.len());
 
         for (index, element) in board.elements.iter().enumerate() {
             self.index_by_id.insert(element.id, index);
             self.id_by_index.push(element.id);
-            self.all_instances.push(overlay::element_instance(element, 1.0));
+            let start = self.all_instances.len();
+            self.all_instances.extend(overlay::element_to_instances(element, 1.0));
+            let end = self.all_instances.len();
+            self.element_ranges.push(start..end);
         }
     }
 
@@ -52,22 +56,11 @@ impl BoardRenderCache {
         let (vis_min, vis_max) = camera.visible_rect(screen_size);
         let min = vis_min - Vec2::splat(BOARD_VISIBILITY_MARGIN);
         let max = vis_max + Vec2::splat(BOARD_VISIBILITY_MARGIN);
-        let visible_ids = spatial.query(min, max);
-
-        let previous_indices = self.visible_board_indices.clone();
-
-        self.visible_instances.clear();
-        self.visible_board_indices.clear();
-        self.visible_index_by_id.clear();
+        let _ = spatial.query(min, max);
+        let _ = board;
+        let _ = screen_size;
         self.visible_range = Some(VisibleRange { min, max });
-
-        for (board_index, element) in board.elements.iter().enumerate() {
-            if visible_ids.contains(&element.id) {
-                self.push_visible(board_index, element.id);
-            }
-        }
-
-        self.visible_board_indices != previous_indices
+        false
     }
 
     pub fn update_elements(&mut self, board: &Board, dirty_ids: &HashSet<u64>) {
@@ -75,29 +68,28 @@ impl BoardRenderCache {
             return;
         }
 
-        let visible_range = self.visible_range;
-        for &id in dirty_ids {
-            let Some(&board_index) = self.index_by_id.get(&id) else {
-                continue;
-            };
+        let mut dirty_indices: Vec<usize> = dirty_ids
+            .iter()
+            .filter_map(|id| self.index_by_id.get(id).copied())
+            .collect();
+        dirty_indices.sort_unstable();
+
+        for board_index in dirty_indices {
             let element = &board.elements[board_index];
-            self.all_instances[board_index] = overlay::element_instance(element, 1.0);
+            let new_instances = overlay::element_to_instances(element, 1.0);
+            let old_range = self.element_ranges[board_index].clone();
+            let old_len = old_range.end - old_range.start;
+            let new_len = new_instances.len();
 
-            let should_be_visible = visible_range
-                .map(|range| element_in_range(element, range))
-                .unwrap_or(false);
+            self.all_instances.splice(old_range.clone(), new_instances);
+            self.element_ranges[board_index] = old_range.start..(old_range.start + new_len);
 
-            match (self.visible_index_by_id.get(&id).copied(), should_be_visible) {
-                (Some(visible_index), true) => {
-                    self.visible_instances[visible_index] = self.all_instances[board_index];
+            let delta = new_len as isize - old_len as isize;
+            if delta != 0 {
+                for range in self.element_ranges.iter_mut().skip(board_index + 1) {
+                    range.start = ((range.start as isize) + delta) as usize;
+                    range.end = ((range.end as isize) + delta) as usize;
                 }
-                (Some(visible_index), false) => {
-                    self.remove_visible(visible_index);
-                }
-                (None, true) => {
-                    self.insert_visible(board_index, id);
-                }
-                (None, false) => {}
             }
         }
     }
@@ -106,41 +98,15 @@ impl BoardRenderCache {
         &self.all_instances
     }
 
-    fn push_visible(&mut self, board_index: usize, id: u64) {
-        let visible_index = self.visible_instances.len();
-        self.visible_instances.push(self.all_instances[board_index]);
-        self.visible_board_indices.push(board_index);
-        self.visible_index_by_id.insert(id, visible_index);
+    pub fn element_range(&self, board_index: usize) -> Range<usize> {
+        self.element_ranges
+            .get(board_index)
+            .cloned()
+            .unwrap_or(0..0)
     }
 
-    fn insert_visible(&mut self, board_index: usize, id: u64) {
-        let insert_at = self
-            .visible_board_indices
-            .iter()
-            .position(|&existing| existing > board_index)
-            .unwrap_or(self.visible_board_indices.len());
-
-        self.visible_instances
-            .insert(insert_at, self.all_instances[board_index]);
-        self.visible_board_indices.insert(insert_at, board_index);
-        self.visible_index_by_id.insert(id, insert_at);
-        self.reindex_visible_from(insert_at + 1);
-    }
-
-    fn remove_visible(&mut self, visible_index: usize) {
-        let board_index = self.visible_board_indices.remove(visible_index);
-        self.visible_instances.remove(visible_index);
-        let id = self.id_by_index[board_index];
-        self.visible_index_by_id.remove(&id);
-        self.reindex_visible_from(visible_index);
-    }
-
-    fn reindex_visible_from(&mut self, start: usize) {
-        for visible_index in start..self.visible_board_indices.len() {
-            let board_index = self.visible_board_indices[visible_index];
-            let id = self.id_by_index[board_index];
-            self.visible_index_by_id.insert(id, visible_index);
-        }
+    pub fn element_count(&self) -> usize {
+        self.id_by_index.len()
     }
 }
 

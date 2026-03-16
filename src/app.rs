@@ -11,7 +11,8 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 use crate::board::{
-    Board,
+    Board, Element, ElementPropertyChange, ElementPropertyPatch, ElementStyleSnapshot,
+    ShapeType, ToolStyleDefaults,
 };
 use crate::camera::Camera;
 use crate::images::ImageManager;
@@ -23,6 +24,7 @@ use crate::spatial::SpatialGrid;
 use crate::text::{PreparedTextDraw, TextEditSession, TextEditSnapshot, TextSystem};
 use crate::tool::Tool;
 use crate::toolbar::{self, Toolbar, ToolbarAction};
+use crate::ui::property_panel::{self, ColorTarget};
 
 const IMAGE_RAM_FLUSH_INTERVAL: Duration = Duration::from_secs(60);
 const IMAGE_RAM_FLUSH_INTERVAL_SECS: f64 = IMAGE_RAM_FLUSH_INTERVAL.as_secs_f64();
@@ -44,6 +46,27 @@ impl ImageRamFlushTrigger {
     fn should_request_redraw(self) -> bool {
         matches!(self, Self::Manual)
     }
+}
+
+#[derive(Clone)]
+enum PropertyPanelSource {
+    Tool(Tool),
+    Selection(Vec<u64>),
+}
+
+#[derive(Clone)]
+struct ResolvedPropertyPanel {
+    source: PropertyPanelSource,
+    view: property_panel::PropertyPanelView,
+}
+
+enum WidthDragState {
+    Tool {
+        tool: Tool,
+    },
+    Selection {
+        before: Vec<(u64, ElementStyleSnapshot)>,
+    },
 }
 
 pub struct App {
@@ -69,6 +92,9 @@ pub struct App {
     image_ram_flush_stop: Arc<(Mutex<bool>, Condvar)>,
     image_ram_flush_thread: Option<JoinHandle<()>>,
     image_ram_flush_deadline: f64,
+    tool_style_defaults: ToolStyleDefaults,
+    property_panel_target: ColorTarget,
+    property_width_drag: Option<WidthDragState>,
     text_edit: Option<TextEditSession>,
     // ── text cache ────────────────────────────────────────────────────────
     cached_text_draw: Option<PreparedTextDraw>,
@@ -116,6 +142,9 @@ impl App {
             image_ram_flush_stop,
             image_ram_flush_thread: Some(image_ram_flush_thread),
             image_ram_flush_deadline: now + IMAGE_RAM_FLUSH_INTERVAL_SECS,
+            tool_style_defaults: ToolStyleDefaults::default(),
+            property_panel_target: ColorTarget::Fill,
+            property_width_drag: None,
             text_edit: None,
             cached_text_draw: None,
             text_dirty: true,
@@ -283,6 +312,261 @@ impl App {
         self.request_redraw();
     }
 
+    fn resolve_property_panel(&self) -> Option<ResolvedPropertyPanel> {
+        if self.board.selected_count() > 0 {
+            self.resolve_selection_property_panel()
+        } else {
+            self.resolve_tool_property_panel()
+        }
+    }
+
+    fn resolve_selection_property_panel(&self) -> Option<ResolvedPropertyPanel> {
+        let selected: Vec<&Element> = self.board.elements.iter().filter(|element| element.selected).collect();
+        if selected.is_empty() {
+            return None;
+        }
+
+        let ids: Vec<u64> = selected.iter().map(|element| element.id).collect();
+        let can_fill = selected
+            .iter()
+            .all(|element| matches!(element.shape, ShapeType::Rect | ShapeType::Ellipse | ShapeType::Text));
+        let can_text = selected.iter().all(|element| element.can_host_text());
+        let can_stroke = selected.iter().all(|element| {
+            matches!(element.shape, ShapeType::Rect | ShapeType::Ellipse | ShapeType::Line | ShapeType::Text)
+        });
+
+        if !can_fill && !can_text && !can_stroke {
+            return None;
+        }
+
+        let tabs = panel_tabs(can_text, can_fill, can_stroke);
+        let active_target = self.resolve_panel_target(tabs)?;
+        let title = panel_title_for_selection(&selected);
+        let active_color = panel_color_for_selection(&selected, active_target);
+        let stroke_width = can_stroke.then(|| selected[0].stroke_width.clamp(1.0, 16.0));
+
+        Some(ResolvedPropertyPanel {
+            source: PropertyPanelSource::Selection(ids),
+            view: property_panel::PropertyPanelView {
+                title,
+                tabs,
+                active_target,
+                active_color,
+                stroke_width,
+            },
+        })
+    }
+
+    fn resolve_tool_property_panel(&self) -> Option<ResolvedPropertyPanel> {
+        let (title, tabs, active_color, stroke_width) = match self.toolbar.active_tool {
+            Tool::Rect => {
+                let tabs = panel_tabs(true, true, true);
+                let active = self.resolve_panel_target(tabs)?;
+                (
+                    "RECT",
+                    tabs,
+                    panel_color_for_box_defaults(self.tool_style_defaults.rect, active),
+                    Some(self.tool_style_defaults.rect.stroke_width.clamp(1.0, 16.0)),
+                )
+            }
+            Tool::Ellipse => {
+                let tabs = panel_tabs(true, true, true);
+                let active = self.resolve_panel_target(tabs)?;
+                (
+                    "ELPS",
+                    tabs,
+                    panel_color_for_box_defaults(self.tool_style_defaults.ellipse, active),
+                    Some(self.tool_style_defaults.ellipse.stroke_width.clamp(1.0, 16.0)),
+                )
+            }
+            Tool::Text => {
+                let tabs = panel_tabs(true, true, true);
+                let active = self.resolve_panel_target(tabs)?;
+                (
+                    "TEXT",
+                    tabs,
+                    panel_color_for_box_defaults(self.tool_style_defaults.text, active),
+                    Some(self.tool_style_defaults.text.stroke_width.clamp(1.0, 16.0)),
+                )
+            }
+            Tool::Line => {
+                let tabs = panel_tabs(false, false, true);
+                (
+                    "LINE",
+                    tabs,
+                    self.tool_style_defaults.line.color,
+                    Some(self.tool_style_defaults.line.stroke_width.clamp(1.0, 16.0)),
+                )
+            }
+            Tool::Select => return None,
+        };
+
+        Some(ResolvedPropertyPanel {
+            source: PropertyPanelSource::Tool(self.toolbar.active_tool),
+            view: property_panel::PropertyPanelView {
+                title,
+                tabs,
+                active_target: self.resolve_panel_target(tabs)?,
+                active_color,
+                stroke_width,
+            },
+        })
+    }
+
+    fn resolve_panel_target(&self, tabs: [Option<ColorTarget>; 3]) -> Option<ColorTarget> {
+        tabs.into_iter()
+            .flatten()
+            .find(|target| *target == self.property_panel_target)
+            .or_else(|| property_panel::first_available_target(tabs))
+    }
+
+    fn apply_property_panel_hit(&mut self, hit: property_panel::PropertyPanelHit) {
+        match hit {
+            property_panel::PropertyPanelHit::Tab(target) => {
+                self.property_panel_target = target;
+            }
+            property_panel::PropertyPanelHit::Swatch(index) => {
+                self.apply_property_panel_color(self.property_panel_target, crate::palette::PALETTE[index]);
+            }
+            property_panel::PropertyPanelHit::Width(width) => {
+                self.begin_property_width_drag(width);
+            }
+        }
+    }
+
+    fn apply_property_panel_color(&mut self, target: ColorTarget, color: [f32; 4]) {
+        let Some(panel) = self.resolve_property_panel() else {
+            return;
+        };
+
+        match panel.source {
+            PropertyPanelSource::Tool(tool) => {
+                self.apply_tool_panel_color(tool, target, color);
+                self.request_redraw();
+            }
+            PropertyPanelSource::Selection(ids) => {
+                let changes: Vec<ElementPropertyChange> = ids
+                    .iter()
+                    .filter_map(|id| {
+                        let element = self.board.element(*id)?;
+                        let before = element.style_snapshot();
+                        let after = updated_style_with_color(element, target, color)?;
+                        (before != after).then_some(ElementPropertyChange {
+                            id: *id,
+                            patch: ElementPropertyPatch::Style { before, after },
+                        })
+                    })
+                    .collect();
+
+                if changes.is_empty() {
+                    self.request_redraw();
+                    return;
+                }
+
+                self.board.apply_operation(crate::board::BoardOperation::SetProperty { changes });
+                self.mark_elements_dirty(ids);
+            }
+        }
+    }
+
+    fn begin_property_width_drag(&mut self, width: f32) {
+        let Some(panel) = self.resolve_property_panel() else {
+            return;
+        };
+
+        self.property_width_drag = Some(match panel.source.clone() {
+            PropertyPanelSource::Tool(tool) => WidthDragState::Tool { tool },
+            PropertyPanelSource::Selection(ids) => WidthDragState::Selection {
+                before: ids
+                    .iter()
+                    .filter_map(|id| self.board.element(*id).map(|element| (*id, element.style_snapshot())))
+                    .collect(),
+            },
+        });
+        self.preview_property_width(width);
+    }
+
+    fn preview_property_width(&mut self, width: f32) {
+        let width = width.clamp(1.0, 16.0);
+        let Some(state) = self.property_width_drag.as_ref() else {
+            return;
+        };
+
+        match state {
+            WidthDragState::Tool { tool } => {
+                self.apply_tool_panel_width(*tool, width);
+                self.request_redraw();
+            }
+            WidthDragState::Selection { before } => {
+                let ids: Vec<u64> = before.iter().map(|(id, _)| *id).collect();
+                for (id, _) in before {
+                    if let Some(element) = self.board.element_mut(*id) {
+                        if let Some(after) = updated_style_with_width(element, width) {
+                            element.apply_style_snapshot(after);
+                        }
+                    }
+                }
+                self.mark_elements_dirty(ids);
+            }
+        }
+    }
+
+    fn finish_property_width_drag(&mut self) {
+        let Some(state) = self.property_width_drag.take() else {
+            return;
+        };
+
+        match state {
+            WidthDragState::Tool { .. } => {
+                self.request_redraw();
+            }
+            WidthDragState::Selection { before } => {
+                let ids: Vec<u64> = before.iter().map(|(id, _)| *id).collect();
+                let changes: Vec<ElementPropertyChange> = before
+                    .into_iter()
+                    .filter_map(|(id, before)| {
+                        let after = self.board.element(id)?.style_snapshot();
+                        (before != after).then_some(ElementPropertyChange {
+                            id,
+                            patch: ElementPropertyPatch::Style { before, after },
+                        })
+                    })
+                    .collect();
+
+                if !changes.is_empty() {
+                    self.board.apply_operation(crate::board::BoardOperation::SetProperty { changes });
+                    self.mark_elements_dirty(ids);
+                } else {
+                    self.request_redraw();
+                }
+            }
+        }
+    }
+
+    fn apply_tool_panel_color(&mut self, tool: Tool, target: ColorTarget, color: [f32; 4]) {
+        match tool {
+            Tool::Rect => apply_box_color(&mut self.tool_style_defaults.rect, target, color),
+            Tool::Ellipse => apply_box_color(&mut self.tool_style_defaults.ellipse, target, color),
+            Tool::Text => apply_box_color(&mut self.tool_style_defaults.text, target, color),
+            Tool::Line => {
+                if target == ColorTarget::Stroke {
+                    self.tool_style_defaults.line.color = color;
+                }
+            }
+            Tool::Select => {}
+        }
+    }
+
+    fn apply_tool_panel_width(&mut self, tool: Tool, width: f32) {
+        match tool {
+            Tool::Rect => self.tool_style_defaults.rect.stroke_width = width,
+            Tool::Ellipse => self.tool_style_defaults.ellipse.stroke_width = width,
+            Tool::Text => self.tool_style_defaults.text.stroke_width = width,
+            Tool::Line => self.tool_style_defaults.line.stroke_width = width,
+            Tool::Select => {}
+        }
+    }
+
     fn handle_escape(&mut self) {
         if self.input.active_text_id.is_some() {
             self.finish_text_edit(true);
@@ -302,6 +586,7 @@ impl App {
         self.input.transform_bounds_origin = None;
         self.input.active_text_id = None;
         self.input.text_selecting = false;
+        self.property_width_drag = None;
         self.set_active_tool(Tool::Select);
     }
 
@@ -390,6 +675,9 @@ impl App {
                 self.camera = Camera::new();
                 self.input = InputState::new();
                 self.toolbar = Toolbar::new();
+                self.tool_style_defaults = ToolStyleDefaults::default();
+                self.property_panel_target = ColorTarget::Fill;
+                self.property_width_drag = None;
                 self.board_cache_dirty = true;
                 self.spatial_dirty = true;
                 self.visibility_dirty = true;
@@ -408,8 +696,7 @@ impl App {
     fn handle_toolbar_action(&mut self, action: ToolbarAction) {
         match action {
             ToolbarAction::SetTool(tool) => {
-                self.toolbar.active_tool = tool;
-                self.request_redraw();
+                self.set_active_tool(tool);
             }
             ToolbarAction::ImportImage => self.import_image_via_dialog(),
             ToolbarAction::Save => self.save_snapshot(),
@@ -426,6 +713,98 @@ impl App {
     }
 }
 
+fn panel_tabs(
+    show_text: bool,
+    show_fill: bool,
+    show_stroke: bool,
+) -> [Option<ColorTarget>; 3] {
+    [
+        show_text.then_some(ColorTarget::Text),
+        show_fill.then_some(ColorTarget::Fill),
+        show_stroke.then_some(ColorTarget::Stroke),
+    ]
+}
+
+fn panel_title_for_selection(selected: &[&Element]) -> &'static str {
+    let first_shape = selected.first().map(|element| element.shape);
+    if selected
+        .iter()
+        .all(|element| Some(element.shape) == first_shape)
+    {
+        match first_shape {
+            Some(ShapeType::Rect) => "RECT",
+            Some(ShapeType::Ellipse) => "ELPS",
+            Some(ShapeType::Line) => "LINE",
+            Some(ShapeType::Text) => "TEXT",
+            Some(ShapeType::Image) | None => "MIX",
+        }
+    } else {
+        "MIX"
+    }
+}
+
+fn panel_color_for_selection(selected: &[&Element], target: ColorTarget) -> [f32; 4] {
+    let Some(first) = selected.first() else {
+        return crate::palette::BLACK;
+    };
+
+    match target {
+        ColorTarget::Text => first.current_text_color().unwrap_or(crate::board::DEFAULT_TEXT_COLOR),
+        ColorTarget::Fill => first.color,
+        ColorTarget::Stroke => first.effective_stroke_color(),
+    }
+}
+
+fn panel_color_for_box_defaults(style: crate::board::BoxToolStyle, target: ColorTarget) -> [f32; 4] {
+    match target {
+        ColorTarget::Text => style.text_color,
+        ColorTarget::Fill => style.fill_color,
+        ColorTarget::Stroke => style.stroke_color,
+    }
+}
+
+fn apply_box_color(style: &mut crate::board::BoxToolStyle, target: ColorTarget, color: [f32; 4]) {
+    match target {
+        ColorTarget::Text => style.text_color = color,
+        ColorTarget::Fill => style.fill_color = color,
+        ColorTarget::Stroke => style.stroke_color = color,
+    }
+}
+
+fn updated_style_with_color(
+    element: &Element,
+    target: ColorTarget,
+    color: [f32; 4],
+) -> Option<ElementStyleSnapshot> {
+    let mut after = element.style_snapshot();
+    match target {
+        ColorTarget::Text if element.can_host_text() => after.text_color = Some(color),
+        ColorTarget::Fill if matches!(element.shape, ShapeType::Rect | ShapeType::Ellipse | ShapeType::Text) => {
+            after.fill_color = color;
+        }
+        ColorTarget::Stroke
+            if matches!(element.shape, ShapeType::Rect | ShapeType::Ellipse | ShapeType::Line | ShapeType::Text) =>
+        {
+            after.stroke_color = color;
+            if element.shape == ShapeType::Line {
+                after.fill_color = color;
+            }
+        }
+        _ => return None,
+    }
+    Some(after)
+}
+
+fn updated_style_with_width(element: &Element, width: f32) -> Option<ElementStyleSnapshot> {
+    if !matches!(element.shape, ShapeType::Rect | ShapeType::Ellipse | ShapeType::Line | ShapeType::Text) {
+        return None;
+    }
+
+    let mut after = element.style_snapshot();
+    after.stroke_width = width.clamp(1.0, 16.0);
+    Some(after)
+}
+
 impl EventHandler for App {
     fn update(&mut self) {
         self.update_image_ram_maintenance();
@@ -436,6 +815,21 @@ impl EventHandler for App {
     }
 
     fn mouse_button_down_event(&mut self, button: MouseButton, x: f32, y: f32) {
+        if button == MouseButton::Left {
+            if let Some(panel) = self.resolve_property_panel() {
+                if property_panel::contains_point(self.screen_size, &panel.view, x, y) {
+                    if self.text_edit.is_some() {
+                        self.finish_text_edit(true);
+                    }
+                    if let Some(hit) = property_panel::hit_test(self.screen_size, &panel.view, x, y) {
+                        self.apply_property_panel_hit(hit);
+                    }
+                    self.request_redraw();
+                    return;
+                }
+            }
+        }
+
         if button == MouseButton::Left && self.toolbar.contains_point(self.screen_size, x, y) {
             if self.text_edit.is_some() {
                 self.finish_text_edit(true);
@@ -486,6 +880,12 @@ impl EventHandler for App {
     }
 
     fn mouse_button_up_event(&mut self, button: MouseButton, x: f32, y: f32) {
+        if button == MouseButton::Left && self.property_width_drag.is_some() {
+            self.input.mouse_pos = Vec2::new(x, y);
+            self.finish_property_width_drag();
+            return;
+        }
+
         let drag_mode_before_up = self.input.drag_mode;
         let had_drag = drag_mode_before_up != DragMode::None;
         let had_preview = self.input.preview.is_some();
@@ -520,7 +920,7 @@ impl EventHandler for App {
             self.mark_board_structure_dirty();
             return;
         }
-        if had_preview || self.board.elements.len() != self.board_render_cache.all_instances().len() {
+        if had_preview || self.board.elements.len() != self.board_render_cache.element_count() {
             self.mark_board_structure_dirty();
             return;
         }
@@ -531,7 +931,21 @@ impl EventHandler for App {
         let previous_hover = self
             .toolbar
             .hovered_action(self.screen_size, self.input.mouse_pos.x, self.input.mouse_pos.y);
+        let previous_panel_hover = self
+            .resolve_property_panel()
+            .and_then(|panel| property_panel::hit_test(self.screen_size, &panel.view, self.input.mouse_pos.x, self.input.mouse_pos.y));
         let mouse_pos = Vec2::new(x, y);
+
+        if self.property_width_drag.is_some() {
+            self.input.mouse_pos = mouse_pos;
+            if let Some(panel) = self.resolve_property_panel() {
+                if let Some(width) = property_panel::width_at_x(self.screen_size, &panel.view, x) {
+                    self.preview_property_width(width);
+                }
+            }
+            return;
+        }
+
         if self.input.text_selecting {
             if let Some(id) = self.input.active_text_id {
                 self.input.mouse_pos = mouse_pos;
@@ -550,6 +964,7 @@ impl EventHandler for App {
             &mut self.input,
             &mut self.board,
             &mut self.camera,
+            &self.tool_style_defaults,
             self.toolbar.active_tool,
             self.screen_size,
             x,
@@ -559,7 +974,10 @@ impl EventHandler for App {
         let current_hover = self
             .toolbar
             .hovered_action(self.screen_size, self.input.mouse_pos.x, self.input.mouse_pos.y);
-        if previous_hover != current_hover {
+        let current_panel_hover = self
+            .resolve_property_panel()
+            .and_then(|panel| property_panel::hit_test(self.screen_size, &panel.view, self.input.mouse_pos.x, self.input.mouse_pos.y));
+        if previous_hover != current_hover || previous_panel_hover != current_panel_hover {
             self.request_redraw();
             return;
         }
