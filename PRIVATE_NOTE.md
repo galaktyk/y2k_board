@@ -1,6 +1,11 @@
 
 image not align with real location? try to reproduce
 
+---
+remove the text element type and re-use the rectangle element type
+text box now is just rect with transparent fill and 0px border when first created
+
+
 
 ---
 

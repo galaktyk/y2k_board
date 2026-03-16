@@ -20,7 +20,8 @@ pub const DEFAULT_RECT_COLOR: [f32; 4] = palette::OLIVE_LIGHT;
 pub const DEFAULT_ELLIPSE_COLOR: [f32; 4] = palette::TEAL;
 pub const DEFAULT_LINE_COLOR: [f32; 4] = palette::RED;
 pub const DEFAULT_STROKE_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
-pub const DEFAULT_STROKE_WIDTH: f32 = 1.0;
+pub const DEFAULT_BORDER_WIDTH: u8 = 1;
+pub const DEFAULT_LINE_STROKE_WIDTH: u8 = 1;
 pub const DEFAULT_BOX_STROKE_COLOR: [f32; 4] = palette::BLACK;
 
 pub fn default_text_box_color() -> [f32; 4] {
@@ -33,15 +34,19 @@ pub fn default_stroke_color() -> [f32; 4] {
     DEFAULT_STROKE_COLOR
 }
 
-pub fn default_stroke_width() -> f32 {
-    DEFAULT_STROKE_WIDTH
+pub fn default_border_width() -> u8 {
+    DEFAULT_BORDER_WIDTH
+}
+
+pub fn default_line_stroke_width() -> u8 {
+    DEFAULT_LINE_STROKE_WIDTH
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BoxToolStyle {
     pub fill_color: [f32; 4],
     pub stroke_color: [f32; 4],
-    pub stroke_width: f32,
+    pub border_width: u8,
     pub text_color: [f32; 4],
 }
 
@@ -50,7 +55,7 @@ impl BoxToolStyle {
         Self {
             fill_color: DEFAULT_RECT_COLOR,
             stroke_color: DEFAULT_BOX_STROKE_COLOR,
-            stroke_width: 1.0,
+            border_width: DEFAULT_BORDER_WIDTH,
             text_color: DEFAULT_TEXT_COLOR,
         }
     }
@@ -59,7 +64,7 @@ impl BoxToolStyle {
         Self {
             fill_color: DEFAULT_ELLIPSE_COLOR,
             stroke_color: DEFAULT_BOX_STROKE_COLOR,
-            stroke_width: 1.0,
+            border_width: DEFAULT_BORDER_WIDTH,
             text_color: DEFAULT_TEXT_COLOR,
         }
     }
@@ -70,7 +75,7 @@ impl BoxToolStyle {
         Self {
             fill_color: default_text_box_color(),
             stroke_color,
-            stroke_width: 1.0,
+            border_width: DEFAULT_BORDER_WIDTH,
             text_color: DEFAULT_TEXT_COLOR,
         }
     }
@@ -79,14 +84,14 @@ impl BoxToolStyle {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LineToolStyle {
     pub color: [f32; 4],
-    pub stroke_width: f32,
+    pub stroke_width: u8,
 }
 
 impl LineToolStyle {
     pub fn default_line() -> Self {
         Self {
             color: DEFAULT_LINE_COLOR,
-            stroke_width: 1.0,
+            stroke_width: DEFAULT_LINE_STROKE_WIDTH,
         }
     }
 }
@@ -114,7 +119,8 @@ impl Default for ToolStyleDefaults {
 pub struct ElementStyleSnapshot {
     pub fill_color: [f32; 4],
     pub stroke_color: [f32; 4],
-    pub stroke_width: f32,
+    pub border_width: Option<u8>,
+    pub stroke_width: Option<u8>,
     pub text_color: Option<[f32; 4]>,
 }
 
@@ -158,8 +164,10 @@ pub struct Element {
     pub color: [f32; 4],
     #[serde(default = "default_stroke_color")]
     pub stroke_color: [f32; 4],
-    #[serde(default = "default_stroke_width")]
-    pub stroke_width: f32,
+    #[serde(default = "default_border_width")]
+    pub border_width: u8,
+    #[serde(default = "default_line_stroke_width")]
+    pub stroke_width: u8,
     pub selected: bool,
     #[serde(default)]
     pub text: Option<TextData>,
@@ -172,6 +180,14 @@ pub struct Element {
 }
 
 impl Element {
+    pub fn uses_border_width(&self) -> bool {
+        matches!(self.shape, ShapeType::Rect | ShapeType::Ellipse | ShapeType::Text)
+    }
+
+    pub fn uses_stroke_width(&self) -> bool {
+        self.shape == ShapeType::Line
+    }
+
     pub fn current_text_color(&self) -> Option<[f32; 4]> {
         self.can_host_text().then(|| {
             self.text
@@ -193,7 +209,8 @@ impl Element {
         ElementStyleSnapshot {
             fill_color: self.color,
             stroke_color: self.effective_stroke_color(),
-            stroke_width: self.stroke_width.max(1.0),
+            border_width: self.uses_border_width().then_some(self.border_width),
+            stroke_width: self.uses_stroke_width().then_some(self.stroke_width.max(1)),
             text_color: self.current_text_color(),
         }
     }
@@ -201,7 +218,12 @@ impl Element {
     pub fn apply_style_snapshot(&mut self, style: ElementStyleSnapshot) {
         self.color = style.fill_color;
         self.stroke_color = style.stroke_color;
-        self.stroke_width = style.stroke_width.max(1.0);
+        if self.uses_border_width() {
+            self.border_width = style.border_width.unwrap_or(0);
+        }
+        if self.uses_stroke_width() {
+            self.stroke_width = style.stroke_width.unwrap_or(DEFAULT_LINE_STROKE_WIDTH).max(1);
+        }
 
         if self.shape == ShapeType::Line {
             self.color = style.stroke_color;
@@ -453,12 +475,14 @@ fn log_operation(op: &BoardOperation) {
                     }
                     ElementPropertyPatch::Style { before, after } => {
                         println!(
-                            "[ops]   id={} style fill={:?}->{:?} stroke={:?}->{:?} width={:.1}->{:.1} text={:?}->{:?}",
+                            "[ops]   id={} style fill={:?}->{:?} stroke={:?}->{:?} border={:?}->{:?} line={:?}->{:?} text={:?}->{:?}",
                             change.id,
                             before.fill_color,
                             after.fill_color,
                             before.stroke_color,
                             after.stroke_color,
+                            before.border_width,
+                            after.border_width,
                             before.stroke_width,
                             after.stroke_width,
                             before.text_color,
@@ -825,7 +849,7 @@ fn element_hit(e: &Element, mut p: Vec2) -> bool {
         ShapeType::Line => {
             let a = e.pos;
             let b = e.pos + e.size;
-            dist_point_segment(p, a, b) <= (e.stroke_width.max(1.0) * 0.5 + 8.0)
+            dist_point_segment(p, a, b) <= (f32::from(e.stroke_width.max(1)) * 0.5 + 8.0)
         }
     }
 }
@@ -854,7 +878,8 @@ mod tests {
             rotation: 0.4,
             color: [0.0, 0.0, 0.0, 0.0],
             stroke_color: default_stroke_color(),
-            stroke_width: default_stroke_width(),
+            border_width: default_border_width(),
+            stroke_width: default_line_stroke_width(),
             selected: false,
             text: Some(TextData::default()),
             image: None,
@@ -881,7 +906,8 @@ mod tests {
                 rotation: 0.0,
                 color: [1.0, 0.0, 0.0, 1.0],
                 stroke_color: default_stroke_color(),
-                stroke_width: default_stroke_width(),
+                border_width: default_border_width(),
+                stroke_width: default_line_stroke_width(),
                 selected: false,
                 text: None,
                 image: None,
@@ -895,7 +921,8 @@ mod tests {
                 rotation: 0.0,
                 color: [1.0, 1.0, 1.0, 1.0],
                 stroke_color: default_stroke_color(),
-                stroke_width: default_stroke_width(),
+                border_width: default_border_width(),
+                stroke_width: default_line_stroke_width(),
                 selected: false,
                 text: None,
                 image: Some(ImageData {
@@ -916,7 +943,8 @@ mod tests {
                 rotation: 0.0,
                 color: [0.0, 1.0, 0.0, 1.0],
                 stroke_color: default_stroke_color(),
-                stroke_width: default_stroke_width(),
+                border_width: default_border_width(),
+                stroke_width: default_line_stroke_width(),
                 selected: false,
                 text: None,
                 image: None,
@@ -940,7 +968,8 @@ mod tests {
                 rotation: 0.0,
                 color: [1.0, 1.0, 1.0, 1.0],
                 stroke_color: default_stroke_color(),
-                stroke_width: default_stroke_width(),
+                border_width: default_border_width(),
+                stroke_width: default_line_stroke_width(),
                 selected: false,
                 text: None,
                 image: Some(ImageData {
@@ -961,7 +990,8 @@ mod tests {
                 rotation: 0.0,
                 color: [1.0, 0.0, 0.0, 1.0],
                 stroke_color: default_stroke_color(),
-                stroke_width: default_stroke_width(),
+                border_width: default_border_width(),
+                stroke_width: default_line_stroke_width(),
                 selected: false,
                 text: None,
                 image: None,
@@ -984,7 +1014,8 @@ mod tests {
                 rotation: 0.0,
                 color: [1.0, 0.0, 0.0, 1.0],
                 stroke_color: default_stroke_color(),
-                stroke_width: default_stroke_width(),
+                border_width: default_border_width(),
+                stroke_width: default_line_stroke_width(),
                 selected: false,
                 text: None,
                 image: None,
@@ -998,7 +1029,8 @@ mod tests {
                 rotation: 0.0,
                 color: [0.0, 1.0, 0.0, 1.0],
                 stroke_color: default_stroke_color(),
-                stroke_width: default_stroke_width(),
+                border_width: default_border_width(),
+                stroke_width: default_line_stroke_width(),
                 selected: false,
                 text: None,
                 image: None,
@@ -1021,7 +1053,8 @@ mod tests {
                 rotation: 0.0,
                 color: [1.0, 1.0, 1.0, 1.0],
                 stroke_color: default_stroke_color(),
-                stroke_width: default_stroke_width(),
+                border_width: default_border_width(),
+                stroke_width: default_line_stroke_width(),
                 selected: false,
                 text: None,
                 image: Some(ImageData {
@@ -1042,7 +1075,8 @@ mod tests {
                 rotation: 0.0,
                 color: [0.0, 0.0, 0.0, 0.0],
                 stroke_color: default_stroke_color(),
-                stroke_width: default_stroke_width(),
+                border_width: default_border_width(),
+                stroke_width: default_line_stroke_width(),
                 selected: false,
                 text: Some(TextData {
                     content: "hello".to_string(),

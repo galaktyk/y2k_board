@@ -71,8 +71,8 @@ impl InstanceData {
         }
     }
 
-    pub fn with_stroke_width(mut self, stroke_width: f32) -> Self {
-        self.stroke_width = stroke_width.round().clamp(1.0, 255.0) as u8;
+    pub fn with_stroke_width(mut self, stroke_width: u8) -> Self {
+        self.stroke_width = stroke_width;
         self
     }
 }

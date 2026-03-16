@@ -22,7 +22,7 @@ void main() {
     // Instance data is packed on the Rust side to keep the vertex format compact.
     float i_alpha = i_pack.x / 255.0;
     float i_shape = i_pack.y;
-    float i_stroke_width = max(i_pack.z, 1.0);
+    float i_stroke_width = i_pack.z;
     vec4 actual_color = i_color / 255.0;
 
     vec2 world_pos;
@@ -50,8 +50,16 @@ void main() {
         v_line_len = len;
         v_uv = a_pos;
     } else {
-        world_pos = i_pos + a_pos * i_size;
+        vec2 draw_pos = i_pos;
+        vec2 draw_size = i_size;
+        if (i_shape > 2.5 && i_shape < 4.5) {
+            float margin = max(i_stroke_width * u_world_per_px, 0.0);
+            draw_pos -= vec2(margin);
+            draw_size += vec2(margin * 2.0);
+        }
+        world_pos = draw_pos + a_pos * draw_size;
         v_uv = a_pos;
+        v_size = draw_size;
     }
 
     vec2 center = i_pos + i_size * 0.5;
@@ -64,7 +72,9 @@ void main() {
     v_color = actual_color;
     v_shape = i_shape;
     v_alpha = i_alpha;
-    v_size = i_size;
+    if (!((i_shape > 2.5 && i_shape < 4.5) || ((i_shape > 1.5 && i_shape < 2.5) || (i_shape > 5.5 && i_shape < 6.5)))) {
+        v_size = i_size;
+    }
     v_stroke_width = i_stroke_width;
 }
 "#;
@@ -146,17 +156,21 @@ void main() {
     } else if (v_shape < 3.5) {
         vec2 dist = min(uv, 1.0 - uv) * v_size;
         float edge = min(dist.x, dist.y);
-        float width = max(v_stroke_width * u_world_per_px, u_world_per_px);
+        float width = max(v_stroke_width * u_world_per_px, 0.0001);
         float aa = max(u_world_per_px * 0.75, 0.0001);
         float a = outline_alpha(edge, width, aa);
         gl_FragColor = vec4(v_color.rgb, alpha * a);
     } else if (v_shape < 4.5) {
         vec2 p = (uv - 0.5) * v_size;
-        vec2 r = abs(v_size) * 0.5;
-        float sd = abs(ellipse_signed_distance(p, r));
-        float width = max(v_stroke_width * u_world_per_px, u_world_per_px);
+        vec2 outer_r = abs(v_size) * 0.5;
+        float width = max(v_stroke_width * u_world_per_px, 0.0001);
         float aa = max(u_world_per_px * 0.75, 0.0001);
-        float a = outline_alpha(sd, width, aa);
+        vec2 inner_r = max(outer_r - vec2(width), vec2(0.0001));
+        float outer_sd = ellipse_signed_distance(p, outer_r);
+        float inner_sd = ellipse_signed_distance(p, inner_r);
+        float outer_alpha = 1.0 - smoothstep(0.0, aa, outer_sd);
+        float inner_fill = 1.0 - smoothstep(0.0, aa, inner_sd);
+        float a = clamp(outer_alpha * (1.0 - inner_fill), 0.0, 1.0);
         gl_FragColor = vec4(v_color.rgb, alpha * a);
     } else if (v_shape < 5.5) {
         vec2 dist = min(uv, 1.0 - uv) * v_size;

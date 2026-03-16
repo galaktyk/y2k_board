@@ -121,7 +121,7 @@ fn push_border_instance(
     color: [f32; 4],
     alpha: f32,
 ) {
-    if color[3] <= 0.0 || element.stroke_width <= 0.0 {
+    if color[3] <= 0.0 || element.border_width == 0 {
         return;
     }
 
@@ -134,7 +134,7 @@ fn push_border_instance(
             shape_type,
             alpha,
         )
-        .with_stroke_width(element.stroke_width),
+        .with_stroke_width(element.border_width),
     );
 }
 

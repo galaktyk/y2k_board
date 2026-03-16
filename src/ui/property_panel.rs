@@ -10,6 +10,7 @@ const PANEL_ACTIVE_COLOR: [f32; 4] = palette::GRAY_2;
 const PANEL_BORDER_HIGHLIGHT: [f32; 4] = [239.0 / 255.0, 239.0 / 255.0, 239.0 / 255.0, 1.0];
 const PANEL_BORDER_SHADOW: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
 const PANEL_TEXT_COLOR: [f32; 4] = palette::BLACK;
+const PANEL_SLIDER_FILL_COLOR: [f32; 4] = palette::BLUE_GRAY;
 const PANEL_OUTER_MARGIN: f32 = 16.0;
 const PANEL_PADDING: f32 = 10.0;
 const PANEL_WIDTH: f32 = 126.0;
@@ -29,6 +30,28 @@ pub enum ColorTarget {
     Stroke,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WidthTarget {
+    Border,
+    Stroke,
+}
+
+impl WidthTarget {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Border => "BORDER",
+            Self::Stroke => "LINE",
+        }
+    }
+
+    pub fn min_width(self) -> u8 {
+        match self {
+            Self::Border => 0,
+            Self::Stroke => 1,
+        }
+    }
+}
+
 impl ColorTarget {
     pub fn label(self) -> &'static str {
         match self {
@@ -45,14 +68,15 @@ pub struct PropertyPanelView {
     pub tabs: [Option<ColorTarget>; 3],
     pub active_target: ColorTarget,
     pub active_color: [f32; 4],
-    pub stroke_width: Option<f32>,
+    pub border_width: Option<u8>,
+    pub stroke_width: Option<u8>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PropertyPanelHit {
     Tab(ColorTarget),
     Swatch(usize),
-    Width(f32),
+    Width(WidthTarget, u8),
 }
 
 #[derive(Clone, Copy)]
@@ -79,7 +103,7 @@ struct PropertyPanelLayout {
     title_rect: Rect,
     tab_rects: Vec<(ColorTarget, Rect)>,
     swatch_rects: Vec<Rect>,
-    slider_track: Option<Rect>,
+    width_tracks: Vec<(WidthTarget, Rect)>,
 }
 
 pub fn first_available_target(tabs: [Option<ColorTarget>; 3]) -> Option<ColorTarget> {
@@ -110,10 +134,13 @@ pub fn hit_test(screen_size: Vec2, view: &PropertyPanelView, x: f32, y: f32) -> 
         }
     }
 
-    layout
-        .slider_track
-        .filter(|rect| rect.contains(point))
-        .map(|rect| PropertyPanelHit::Width(width_from_track(rect, x)))
+    for (target, rect) in &layout.width_tracks {
+        if rect.contains(point) {
+            return Some(PropertyPanelHit::Width(*target, width_from_track(*rect, x, *target)));
+        }
+    }
+
+    None
 }
 
 pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: Vec2) -> Vec<InstanceData> {
@@ -270,9 +297,11 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
         ));
     }
 
-    if let Some(stroke_width) = view.stroke_width {
-        if let Some(track) = layout.slider_track {
-            let is_hovered = matches!(hovered, Some(PropertyPanelHit::Width(_)));
+    for (target, track) in &layout.width_tracks {
+        let Some(width) = width_for(view, *target) else {
+            continue;
+        };
+        let is_hovered = matches!(hovered, Some(PropertyPanelHit::Width(hover_target, _)) if hover_target == *target);
             out.push(InstanceData::new(
                 [track.x, track.y],
                 [track.w, track.h],
@@ -282,12 +311,14 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
                 1.0,
             ));
 
-            let fill = (stroke_width.clamp(1.0, 16.0) - 1.0) / 15.0;
+            let min_width = f32::from(target.min_width());
+            let fill = (f32::from(width.clamp(target.min_width(), 16)) - min_width)
+                / (16.0 - min_width).max(0.0001);
             out.push(InstanceData::new(
                 [track.x, track.y],
                 [track.w * fill, track.h],
                 0.0,
-                view.active_color,
+                PANEL_SLIDER_FILL_COLOR,
                 0.0,
                 1.0,
             ));
@@ -303,7 +334,7 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
                 1.0,
             ));
 
-            let width_label = format!("SIZE {:.0}PX", stroke_width.round());
+            let width_label = format!("{} {}PX", target.label(), width);
             emit_text(
                 &width_label,
                 track.x,
@@ -312,7 +343,6 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
                 PANEL_TEXT_COLOR,
                 &mut out,
             );
-        }
     }
 
     out
@@ -365,16 +395,22 @@ fn layout(screen_size: Vec2, view: &PropertyPanelView) -> PropertyPanelLayout {
     }
     y += rows as f32 * (SWATCH_SIZE + SWATCH_GAP) - SWATCH_GAP;
 
-    let slider_track = view.stroke_width.map(|_| {
-        y += 22.0;
-        Rect {
-            x: PANEL_PADDING,
-            y,
-            w: PANEL_WIDTH - PANEL_PADDING * 2.0,
-            h: SLIDER_TRACK_HEIGHT,
+    let mut width_tracks = Vec::new();
+    for target in [WidthTarget::Border, WidthTarget::Stroke] {
+        if width_for(view, target).is_none() {
+            continue;
         }
-    });
-    if slider_track.is_some() {
+
+        y += 22.0;
+        width_tracks.push((
+            target,
+            Rect {
+                x: PANEL_PADDING,
+                y,
+                w: PANEL_WIDTH - PANEL_PADDING * 2.0,
+                h: SLIDER_TRACK_HEIGHT,
+            },
+        ));
         y += SLIDER_HEIGHT;
     }
 
@@ -393,11 +429,10 @@ fn layout(screen_size: Vec2, view: &PropertyPanelView) -> PropertyPanelLayout {
         rect.y += origin.y;
     }
 
-    let slider_track = slider_track.map(|mut rect| {
+    for (_, rect) in &mut width_tracks {
         rect.x += origin.x;
         rect.y += origin.y;
-        rect
-    });
+    }
 
     PropertyPanelLayout {
         origin,
@@ -410,17 +445,26 @@ fn layout(screen_size: Vec2, view: &PropertyPanelView) -> PropertyPanelLayout {
         },
         tab_rects,
         swatch_rects,
-        slider_track,
+        width_tracks,
     }
 }
 
-fn width_from_track(track: Rect, x: f32) -> f32 {
-    let t = ((x - track.x) / track.w).clamp(0.0, 1.0);
-    1.0 + 15.0 * t
+fn width_for(view: &PropertyPanelView, target: WidthTarget) -> Option<u8> {
+    match target {
+        WidthTarget::Border => view.border_width,
+        WidthTarget::Stroke => view.stroke_width,
+    }
 }
 
-pub fn width_at_x(screen_size: Vec2, view: &PropertyPanelView, x: f32) -> Option<f32> {
+fn width_from_track(track: Rect, x: f32, target: WidthTarget) -> u8 {
+    let t = ((x - track.x) / track.w).clamp(0.0, 1.0);
+    let min_width = f32::from(target.min_width());
+    (min_width + (16.0 - min_width) * t).round().clamp(min_width, 16.0) as u8
+}
+
+pub fn width_at_x(screen_size: Vec2, view: &PropertyPanelView, target: WidthTarget, x: f32) -> Option<u8> {
     layout(screen_size, view)
-        .slider_track
-        .map(|track| width_from_track(track, x))
+        .width_tracks
+        .into_iter()
+        .find_map(|(track_target, track)| (track_target == target).then(|| width_from_track(track, x, target)))
 }

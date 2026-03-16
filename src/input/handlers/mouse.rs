@@ -746,7 +746,8 @@ pub fn on_mouse_move(
             rotation: 0.0,
             color: preview_fill_color(shape, tool_style_defaults),
             stroke_color: preview_stroke_color(shape, tool_style_defaults),
-            stroke_width: preview_stroke_width(shape, tool_style_defaults),
+            border_width: preview_border_width(shape, tool_style_defaults),
+            stroke_width: preview_line_stroke_width(shape, tool_style_defaults),
             selected: false,
             text: if matches!(shape, ShapeType::Rect | ShapeType::Ellipse | ShapeType::Text) {
                 Some(crate::board::TextData {
@@ -783,13 +784,21 @@ fn preview_stroke_color(shape: ShapeType, defaults: &ToolStyleDefaults) -> [f32;
     }
 }
 
-fn preview_stroke_width(shape: ShapeType, defaults: &ToolStyleDefaults) -> f32 {
+fn preview_border_width(shape: ShapeType, defaults: &ToolStyleDefaults) -> u8 {
     match shape {
-        ShapeType::Rect => defaults.rect.stroke_width,
-        ShapeType::Ellipse => defaults.ellipse.stroke_width,
-        ShapeType::Text => defaults.text.stroke_width,
+        ShapeType::Rect => defaults.rect.border_width,
+        ShapeType::Ellipse => defaults.ellipse.border_width,
+        ShapeType::Text => defaults.text.border_width,
+        ShapeType::Line | ShapeType::Image => crate::board::DEFAULT_BORDER_WIDTH,
+    }
+}
+
+fn preview_line_stroke_width(shape: ShapeType, defaults: &ToolStyleDefaults) -> u8 {
+    match shape {
         ShapeType::Line => defaults.line.stroke_width,
-        ShapeType::Image => crate::board::DEFAULT_STROKE_WIDTH,
+        ShapeType::Rect | ShapeType::Ellipse | ShapeType::Text | ShapeType::Image => {
+            crate::board::DEFAULT_LINE_STROKE_WIDTH
+        }
     }
 }
 

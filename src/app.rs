@@ -24,7 +24,7 @@ use crate::spatial::SpatialGrid;
 use crate::text::{PreparedTextDraw, TextEditSession, TextEditSnapshot, TextSystem};
 use crate::tool::Tool;
 use crate::toolbar::{self, Toolbar, ToolbarAction};
-use crate::ui::property_panel::{self, ColorTarget};
+use crate::ui::property_panel::{self, ColorTarget, WidthTarget};
 
 const IMAGE_RAM_FLUSH_INTERVAL: Duration = Duration::from_secs(60);
 const IMAGE_RAM_FLUSH_INTERVAL_SECS: f64 = IMAGE_RAM_FLUSH_INTERVAL.as_secs_f64();
@@ -63,10 +63,20 @@ struct ResolvedPropertyPanel {
 enum WidthDragState {
     Tool {
         tool: Tool,
+        target: WidthTarget,
     },
     Selection {
+        target: WidthTarget,
         before: Vec<(u64, ElementStyleSnapshot)>,
     },
+}
+
+impl WidthDragState {
+    fn target(&self) -> WidthTarget {
+        match self {
+            Self::Tool { target, .. } | Self::Selection { target, .. } => *target,
+        }
+    }
 }
 
 pub struct App {
@@ -343,7 +353,14 @@ impl App {
         let active_target = self.resolve_panel_target(tabs)?;
         let title = panel_title_for_selection(&selected);
         let active_color = panel_color_for_selection(&selected, active_target);
-        let stroke_width = can_stroke.then(|| selected[0].stroke_width.clamp(1.0, 16.0));
+        let border_width = selected
+            .iter()
+            .find(|element| element.uses_border_width())
+            .map(|element| element.border_width.min(16));
+        let stroke_width = selected
+            .iter()
+            .find(|element| element.uses_stroke_width())
+            .map(|element| element.stroke_width.clamp(1, 16));
 
         Some(ResolvedPropertyPanel {
             source: PropertyPanelSource::Selection(ids),
@@ -352,13 +369,14 @@ impl App {
                 tabs,
                 active_target,
                 active_color,
+                border_width,
                 stroke_width,
             },
         })
     }
 
     fn resolve_tool_property_panel(&self) -> Option<ResolvedPropertyPanel> {
-        let (title, tabs, active_color, stroke_width) = match self.toolbar.active_tool {
+        let (title, tabs, active_color, border_width, stroke_width) = match self.toolbar.active_tool {
             Tool::Rect => {
                 let tabs = panel_tabs(true, true, true);
                 let active = self.resolve_panel_target(tabs)?;
@@ -366,7 +384,8 @@ impl App {
                     "RECT",
                     tabs,
                     panel_color_for_box_defaults(self.tool_style_defaults.rect, active),
-                    Some(self.tool_style_defaults.rect.stroke_width.clamp(1.0, 16.0)),
+                    Some(self.tool_style_defaults.rect.border_width.min(16)),
+                    None,
                 )
             }
             Tool::Ellipse => {
@@ -376,7 +395,8 @@ impl App {
                     "ELPS",
                     tabs,
                     panel_color_for_box_defaults(self.tool_style_defaults.ellipse, active),
-                    Some(self.tool_style_defaults.ellipse.stroke_width.clamp(1.0, 16.0)),
+                    Some(self.tool_style_defaults.ellipse.border_width.min(16)),
+                    None,
                 )
             }
             Tool::Text => {
@@ -386,7 +406,8 @@ impl App {
                     "TEXT",
                     tabs,
                     panel_color_for_box_defaults(self.tool_style_defaults.text, active),
-                    Some(self.tool_style_defaults.text.stroke_width.clamp(1.0, 16.0)),
+                    Some(self.tool_style_defaults.text.border_width.min(16)),
+                    None,
                 )
             }
             Tool::Line => {
@@ -395,7 +416,8 @@ impl App {
                     "LINE",
                     tabs,
                     self.tool_style_defaults.line.color,
-                    Some(self.tool_style_defaults.line.stroke_width.clamp(1.0, 16.0)),
+                    None,
+                    Some(self.tool_style_defaults.line.stroke_width.clamp(1, 16)),
                 )
             }
             Tool::Select => return None,
@@ -408,6 +430,7 @@ impl App {
                 tabs,
                 active_target: self.resolve_panel_target(tabs)?,
                 active_color,
+                border_width,
                 stroke_width,
             },
         })
@@ -428,8 +451,8 @@ impl App {
             property_panel::PropertyPanelHit::Swatch(index) => {
                 self.apply_property_panel_color(self.property_panel_target, crate::palette::PALETTE[index]);
             }
-            property_panel::PropertyPanelHit::Width(width) => {
-                self.begin_property_width_drag(width);
+            property_panel::PropertyPanelHit::Width(target, width) => {
+                self.begin_property_width_drag(target, width);
             }
         }
     }
@@ -469,39 +492,40 @@ impl App {
         }
     }
 
-    fn begin_property_width_drag(&mut self, width: f32) {
+    fn begin_property_width_drag(&mut self, target: WidthTarget, width: u8) {
         let Some(panel) = self.resolve_property_panel() else {
             return;
         };
 
         self.property_width_drag = Some(match panel.source.clone() {
-            PropertyPanelSource::Tool(tool) => WidthDragState::Tool { tool },
+            PropertyPanelSource::Tool(tool) => WidthDragState::Tool { tool, target },
             PropertyPanelSource::Selection(ids) => WidthDragState::Selection {
+                target,
                 before: ids
                     .iter()
                     .filter_map(|id| self.board.element(*id).map(|element| (*id, element.style_snapshot())))
                     .collect(),
             },
         });
-        self.preview_property_width(width);
+        self.preview_property_width(target, width);
     }
 
-    fn preview_property_width(&mut self, width: f32) {
-        let width = width.clamp(1.0, 16.0);
+    fn preview_property_width(&mut self, target: WidthTarget, width: u8) {
+        let width = width.clamp(target.min_width(), 16);
         let Some(state) = self.property_width_drag.as_ref() else {
             return;
         };
 
         match state {
-            WidthDragState::Tool { tool } => {
-                self.apply_tool_panel_width(*tool, width);
+            WidthDragState::Tool { tool, .. } => {
+                self.apply_tool_panel_width(*tool, target, width);
                 self.request_redraw();
             }
-            WidthDragState::Selection { before } => {
+            WidthDragState::Selection { before, .. } => {
                 let ids: Vec<u64> = before.iter().map(|(id, _)| *id).collect();
                 for (id, _) in before {
                     if let Some(element) = self.board.element_mut(*id) {
-                        if let Some(after) = updated_style_with_width(element, width) {
+                        if let Some(after) = updated_style_with_width(element, target, width) {
                             element.apply_style_snapshot(after);
                         }
                     }
@@ -520,7 +544,7 @@ impl App {
             WidthDragState::Tool { .. } => {
                 self.request_redraw();
             }
-            WidthDragState::Selection { before } => {
+            WidthDragState::Selection { before, .. } => {
                 let ids: Vec<u64> = before.iter().map(|(id, _)| *id).collect();
                 let changes: Vec<ElementPropertyChange> = before
                     .into_iter()
@@ -557,13 +581,14 @@ impl App {
         }
     }
 
-    fn apply_tool_panel_width(&mut self, tool: Tool, width: f32) {
+    fn apply_tool_panel_width(&mut self, tool: Tool, target: WidthTarget, width: u8) {
         match tool {
-            Tool::Rect => self.tool_style_defaults.rect.stroke_width = width,
-            Tool::Ellipse => self.tool_style_defaults.ellipse.stroke_width = width,
-            Tool::Text => self.tool_style_defaults.text.stroke_width = width,
-            Tool::Line => self.tool_style_defaults.line.stroke_width = width,
+            Tool::Rect if target == WidthTarget::Border => self.tool_style_defaults.rect.border_width = width,
+            Tool::Ellipse if target == WidthTarget::Border => self.tool_style_defaults.ellipse.border_width = width,
+            Tool::Text if target == WidthTarget::Border => self.tool_style_defaults.text.border_width = width,
+            Tool::Line if target == WidthTarget::Stroke => self.tool_style_defaults.line.stroke_width = width,
             Tool::Select => {}
+            _ => {}
         }
     }
 
@@ -795,13 +820,21 @@ fn updated_style_with_color(
     Some(after)
 }
 
-fn updated_style_with_width(element: &Element, width: f32) -> Option<ElementStyleSnapshot> {
-    if !matches!(element.shape, ShapeType::Rect | ShapeType::Ellipse | ShapeType::Line | ShapeType::Text) {
-        return None;
-    }
-
+fn updated_style_with_width(
+    element: &Element,
+    target: WidthTarget,
+    width: u8,
+) -> Option<ElementStyleSnapshot> {
     let mut after = element.style_snapshot();
-    after.stroke_width = width.clamp(1.0, 16.0);
+    match target {
+        WidthTarget::Border if element.uses_border_width() => {
+            after.border_width = Some(width.clamp(0, 16));
+        }
+        WidthTarget::Stroke if element.uses_stroke_width() => {
+            after.stroke_width = Some(width.clamp(1, 16));
+        }
+        _ => return None,
+    }
     Some(after)
 }
 
@@ -938,9 +971,12 @@ impl EventHandler for App {
 
         if self.property_width_drag.is_some() {
             self.input.mouse_pos = mouse_pos;
+            let target = self.property_width_drag.as_ref().map(WidthDragState::target);
             if let Some(panel) = self.resolve_property_panel() {
-                if let Some(width) = property_panel::width_at_x(self.screen_size, &panel.view, x) {
-                    self.preview_property_width(width);
+                if let Some(target) = target {
+                    if let Some(width) = property_panel::width_at_x(self.screen_size, &panel.view, target, x) {
+                        self.preview_property_width(target, width);
+                    }
                 }
             }
             return;
