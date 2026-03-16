@@ -15,7 +15,7 @@ mod spatial;
 mod stats;
 mod text;
 mod tool;
-mod toolbar;
+
 mod ui;
 
 use miniquad::conf;

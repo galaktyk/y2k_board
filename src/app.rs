@@ -23,7 +23,7 @@ use crate::snapshot;
 use crate::spatial::SpatialGrid;
 use crate::text::{PreparedTextDraw, TextEditSession, TextEditSnapshot, TextSystem};
 use crate::tool::Tool;
-use crate::toolbar::{self, Toolbar, ToolbarAction};
+use crate::ui::toolbar::{self, Toolbar, ToolbarAction};
 use crate::ui::property_panel::{self, ColorTarget, WidthTarget};
 
 const IMAGE_RAM_FLUSH_INTERVAL: Duration = Duration::from_secs(60);

@@ -25,14 +25,14 @@ const TOOLBAR_ICON_COLOR: [f32; 4] = palette::BLACK;
 const TOOLBAR_ICON_SIZE: f32 = 32.0;
 const TOOLBAR_LABEL_FONT_SIZE: f32 = 12.0;
 const TOOLBAR_ICON_BYTES: [&[u8]; 8] = [
-    include_bytes!("../assets/toolbar/select.png"),
-    include_bytes!("../assets/toolbar/rect.png"),
-    include_bytes!("../assets/toolbar/ellipse.png"),
-    include_bytes!("../assets/toolbar/line.png"),
-    include_bytes!("../assets/toolbar/text.png"),
-    include_bytes!("../assets/toolbar/image.png"),
-    include_bytes!("../assets/toolbar/load.png"),
-    include_bytes!("../assets/toolbar/save.png"),
+    include_bytes!("../../assets/toolbar/select.png"),
+    include_bytes!("../../assets/toolbar/rect.png"),
+    include_bytes!("../../assets/toolbar/ellipse.png"),
+    include_bytes!("../../assets/toolbar/line.png"),
+    include_bytes!("../../assets/toolbar/text.png"),
+    include_bytes!("../../assets/toolbar/image.png"),
+    include_bytes!("../../assets/toolbar/load.png"),
+    include_bytes!("../../assets/toolbar/save.png"),
 ];
 
 const ICON_SELECT: usize = 0;

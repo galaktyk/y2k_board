@@ -3,6 +3,8 @@ remove text cache
 ---
 
 key shortcut hit tab to reset selecting object(s) rotation to 0 degree
+disable keyboard shortcut when text box is focused (like tab or number keys)
+
 ---
 image not align with real location? try to reproduce
 

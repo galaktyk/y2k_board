@@ -326,7 +326,7 @@ pub fn build_text_specs(screen_size: Vec2, view: &PropertyPanelView) -> Vec<UiTe
     out.push(
         UiTextSpec::top_left(
             view.title,
-            Vec2::new(layout.origin.x + layout.title_rect.x, layout.origin.y + layout.title_rect.y),
+            Vec2::new(layout.title_rect.x, layout.title_rect.y),
             PANEL_TEXT_SIZE,
             PANEL_TEXT_COLOR,
         )
@@ -338,7 +338,7 @@ pub fn build_text_specs(screen_size: Vec2, view: &PropertyPanelView) -> Vec<UiTe
         out.push(
             UiTextSpec::top_center(
                 target.label(),
-                Vec2::new(layout.origin.x + rect.x + rect.w * 0.5, layout.origin.y + rect.y + 6.0),
+                Vec2::new(rect.x + rect.w * 0.5, rect.y + 6.0),
                 PANEL_TEXT_SIZE,
                 PANEL_TEXT_COLOR,
             )
@@ -354,7 +354,7 @@ pub fn build_text_specs(screen_size: Vec2, view: &PropertyPanelView) -> Vec<UiTe
         out.push(
             UiTextSpec::top_left(
                 format!("{} {}PX", target.label(), width),
-                Vec2::new(layout.origin.x + track.x, layout.origin.y + track.y - 14.0),
+                Vec2::new(track.x, track.y - 14.0),
                 PANEL_TEXT_SIZE,
                 PANEL_TEXT_COLOR,
             )
