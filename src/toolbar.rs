@@ -5,8 +5,8 @@ use miniquad::{
 };
 
 use crate::palette;
+use crate::rendering::emit_text;
 use crate::renderer::{ImageInstanceData, InstanceData, PreparedImageDraw};
-use crate::stats::emit_text;
 use crate::tool::Tool;
 
 pub const TOOLBAR_HEIGHT: f32 = 48.0;

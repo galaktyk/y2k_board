@@ -449,7 +449,11 @@ impl App {
                 self.property_panel_target = target;
             }
             property_panel::PropertyPanelHit::Swatch(index) => {
-                self.apply_property_panel_color(self.property_panel_target, crate::palette::PALETTE[index]);
+                let target = self
+                    .resolve_property_panel()
+                    .map(|panel| panel.view.active_target)
+                    .unwrap_or(self.property_panel_target);
+                self.apply_property_panel_color(target, crate::palette::PALETTE[index]);
             }
             property_panel::PropertyPanelHit::Width(target, width) => {
                 self.begin_property_width_drag(target, width);

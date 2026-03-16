@@ -1,7 +1,7 @@
 use glam::Vec2;
 
 use crate::palette;
-use crate::stats::emit_text;
+use crate::rendering::emit_text;
 use crate::renderer::InstanceData;
 
 const PANEL_BG_COLOR: [f32; 4] = palette::GRAY_0;
@@ -55,9 +55,9 @@ impl WidthTarget {
 impl ColorTarget {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Text => "TXT",
-            Self::Fill => "FIL",
-            Self::Stroke => "BRD",
+            Self::Text => "A",
+            Self::Fill => "▨",
+            Self::Stroke => "☐",
         }
     }
 }
@@ -220,8 +220,8 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
 
         let border = if is_active { view.active_color } else { PANEL_BORDER_SHADOW };
         out.push(InstanceData::new(
-            [rect.x, rect.y + rect.h - 2.0],
-            [rect.w, 2.0],
+            [rect.x, rect.y + rect.h - 1.0],
+            [rect.w, 1.0],
             0.0,
             border,
             0.0,
@@ -229,7 +229,7 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
         ));
 
         let label = target.label();
-        let label_w = label.len() as f32 * 8.0 - 2.0;
+        let label_w = (label.len() as f32 * 6.0 - 2.0).max(0.0);
         emit_text(
             label,
             rect.x + (rect.w - label_w) * 0.5,
@@ -338,7 +338,7 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
             emit_text(
                 &width_label,
                 track.x,
-                track.y - 16.0,
+                track.y - 12.0,
                 2.0,
                 PANEL_TEXT_COLOR,
                 &mut out,
