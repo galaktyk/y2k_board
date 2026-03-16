@@ -388,6 +388,12 @@ impl App {
             &self.toolbar_icons,
         );
         let screen_mvp = Renderer::screen_mvp(self.screen_size);
+        let mut ui_text_specs = self.toolbar.build_text_specs(
+            self.screen_size,
+            self.input.mouse_pos,
+            self.board.can_undo(),
+            self.board.can_redo(),
+        );
 
         self.renderer
             .draw_instances(&mut *self.ctx, &tb_inst, screen_mvp, self.screen_size);
@@ -400,13 +406,17 @@ impl App {
                 &panel.view,
                 self.input.mouse_pos,
             );
+            ui_text_specs.extend(crate::ui::property_panel::build_text_specs(
+                self.screen_size,
+                &panel.view,
+            ));
             self.renderer
                 .draw_instances(&mut *self.ctx, &panel_inst, screen_mvp, self.screen_size);
         }
 
         let text_draw = self.cached_text_draw.as_ref().unwrap();
         let char_count = text_draw.mono_instances.len() + text_draw.color_instances.len();
-        let stats_inst = stats::build_stats_instances(
+        let mut stats_text_specs = stats::build_stats_text_specs(
             self.camera.zoom,
             self.board.elements.len(),
             char_count,
@@ -418,9 +428,35 @@ impl App {
             self.image_manager.gpu_capacity_bytes(),
             self.fps,
             self.frame_ms,
-            self.screen_size,
+        );
+        let mut stats_text_size = Vec2::ZERO;
+        for spec in &stats_text_specs {
+            let measured = self.text_system.measure_ui_text(spec);
+            stats_text_size.x = stats_text_size.x.max(spec.pos.x + measured.x);
+            stats_text_size.y = stats_text_size.y.max(spec.pos.y + measured.y);
+        }
+        let stats_layout = stats::build_stats_layout(stats_text_size, self.screen_size);
+        for spec in &mut stats_text_specs {
+            spec.pos += stats_layout.text_origin;
+        }
+        ui_text_specs.extend(stats_text_specs);
+        self.renderer
+            .draw_instances(
+                &mut *self.ctx,
+                &stats::build_stats_background_instances(&stats_layout),
+                screen_mvp,
+                self.screen_size,
+            );
+
+        let ui_text_draw = self.text_system.build_ui_text_instances(
+            &mut *self.ctx,
+            self.renderer.text_atlas(),
+            self.renderer.emoji_atlas(),
+            &ui_text_specs,
         );
         self.renderer
-            .draw_instances(&mut *self.ctx, &stats_inst, screen_mvp, self.screen_size);
+            .draw_text_instances(&mut *self.ctx, &ui_text_draw.mono_instances, screen_mvp);
+        self.renderer
+            .draw_color_text_instances(&mut *self.ctx, &ui_text_draw.color_instances, screen_mvp);
     }
 }

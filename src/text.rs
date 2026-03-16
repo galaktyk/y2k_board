@@ -1,16 +1,17 @@
 mod edit;
 
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::sync::Arc;
 
 use cosmic_text::{
-    Attrs, Buffer, CacheKey, Color, Cursor, Family, FontSystem, Metrics, Motion, Shaping, SwashCache,
-    SwashContent, SwashImage, Wrap,
+    fontdb, Attrs, Buffer, CacheKey, Color, Cursor, Family, FontSystem, Metrics, Motion, Shaping,
+    SwashCache, SwashContent, SwashImage, Wrap,
 };
 use glam::Vec2;
 use miniquad::{RenderingBackend, TextureId};
 
 use crate::board::{Board, Element, TextData};
+use crate::palette;
 use crate::renderer::TextInstanceData;
 
 pub use edit::{TextEditSession, TextEditSnapshot};
@@ -19,9 +20,64 @@ const TEXT_ATLAS_SIZE: usize = 1024;
 const EMOJI_ATLAS_SIZE: usize = 1024;
 const ATLAS_GAP: usize = 2;
 const FALLBACK_GLYPH_SIZE: usize = 8;
+const BUNDLED_UI_FONT_BYTES: &[u8] = include_bytes!("../fonts/W95FA.otf");
+const BUNDLED_UI_FONT_FAMILY_HINT: &str = "W95FA";
 
-const SELECTION_COLOR: [f32; 4] = [0.18, 0.45, 1.0, 0.22];
-const CARET_COLOR: [f32; 4] = [0.06, 0.09, 0.14, 0.95];
+const SELECTION_COLOR: [f32; 4] = palette::TEXT_SELECTION_COLOR;
+const CARET_COLOR: [f32; 4] = palette::GRAY_3;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UiTextAnchor {
+    TopLeft,
+    TopCenter,
+}
+
+#[derive(Clone, Debug)]
+pub struct UiTextSpec {
+    pub content: String,
+    pub pos: Vec2,
+    pub font_size: f32,
+    pub line_height: Option<f32>,
+    pub max_width: Option<f32>,
+    pub color: [f32; 4],
+    pub anchor: UiTextAnchor,
+}
+
+impl UiTextSpec {
+    pub fn top_left(content: impl Into<String>, pos: Vec2, font_size: f32, color: [f32; 4]) -> Self {
+        Self {
+            content: content.into(),
+            pos,
+            font_size,
+            line_height: None,
+            max_width: None,
+            color,
+            anchor: UiTextAnchor::TopLeft,
+        }
+    }
+
+    pub fn top_center(content: impl Into<String>, pos: Vec2, font_size: f32, color: [f32; 4]) -> Self {
+        Self {
+            content: content.into(),
+            pos,
+            font_size,
+            line_height: None,
+            max_width: None,
+            color,
+            anchor: UiTextAnchor::TopCenter,
+        }
+    }
+
+    pub fn with_line_height(mut self, line_height: f32) -> Self {
+        self.line_height = Some(line_height);
+        self
+    }
+
+    pub fn with_max_width(mut self, max_width: f32) -> Self {
+        self.max_width = Some(max_width.max(1.0));
+        self
+    }
+}
 
 #[derive(Clone, Copy)]
 pub struct ActiveTextEdit<'a> {
@@ -72,8 +128,7 @@ pub struct TextSystem {
 impl TextSystem {
     pub fn new() -> Self {
         let mut font_system = FontSystem::new();
-        font_system.db_mut().load_fonts_dir(Path::new("fonts"));
-
+        configure_bundled_font_defaults(&mut font_system);
 
         Self {
             font_system,
@@ -100,17 +155,8 @@ impl TextSystem {
     pub fn measure_text_box(&mut self, content: &str, text: &TextData, max_width: f32) -> Vec2 {
         let padding = Vec2::splat(12.0);
         let usable_width = (max_width - padding.x * 2.0).max(1.0);
-        let metrics = Metrics::new(
-            text.font_size.max(8.0),
-            (text.font_size * 1.35).max(text.font_size + 4.0),
-        );
-        let attrs = Attrs::new()
-            .family(if cfg!(target_os = "windows") {
-                Family::Name("Tahoma")
-            } else {
-                Family::SansSerif
-            })
-            .color(rgba_to_cosmic_color(text.color));
+        let metrics = text_metrics(text.font_size, None);
+        let attrs = default_text_attrs(text.color);
         let mut buffer = Buffer::new(&mut self.font_system, metrics);
         buffer.set_size(&mut self.font_system, Some(usable_width), None);
         buffer.set_wrap(&mut self.font_system, Wrap::WordOrGlyph);
@@ -140,6 +186,138 @@ impl TextSystem {
             (widest_line + padding.x * 2.0).clamp(96.0, max_width.max(96.0)),
             (total_height + padding.y * 2.0).max(text.font_size + padding.y * 2.0 + 4.0),
         )
+    }
+
+    pub fn measure_ui_text(&mut self, spec: &UiTextSpec) -> Vec2 {
+        if spec.content.is_empty() {
+            return Vec2::ZERO;
+        }
+
+        let metrics = text_metrics(spec.font_size, spec.line_height);
+        let mut buffer = Buffer::new(&mut self.font_system, metrics);
+        buffer.set_size(&mut self.font_system, spec.max_width, None);
+        buffer.set_wrap(
+            &mut self.font_system,
+            if spec.max_width.is_some() {
+                Wrap::WordOrGlyph
+            } else {
+                Wrap::None
+            },
+        );
+        let attrs = default_text_attrs(spec.color);
+        buffer.set_text(
+            &mut self.font_system,
+            &spec.content,
+            &attrs,
+            Shaping::Advanced,
+            None,
+        );
+        buffer.shape_until_scroll(&mut self.font_system, true);
+
+        let mut size = Vec2::new(0.0, metrics.line_height);
+        let mut had_runs = false;
+        for run in buffer.layout_runs() {
+            had_runs = true;
+            size.x = size.x.max(run.line_w);
+            size.y = size.y.max(run.line_top + run.line_height);
+        }
+
+        if had_runs {
+            size
+        } else {
+            Vec2::new(0.0, metrics.line_height)
+        }
+    }
+
+    pub fn build_ui_text_instances(
+        &mut self,
+        ctx: &mut dyn RenderingBackend,
+        text_atlas: TextureId,
+        emoji_atlas: TextureId,
+        specs: &[UiTextSpec],
+    ) -> PreparedTextDraw {
+        self.ensure_overlay_pixel(ctx, text_atlas);
+
+        let mut prepared = PreparedTextDraw::default();
+        for spec in specs {
+            if spec.content.is_empty() {
+                continue;
+            }
+
+            let metrics = text_metrics(spec.font_size, spec.line_height);
+            let attrs = default_text_attrs(spec.color);
+            let mut buffer = Buffer::new(&mut self.font_system, metrics);
+            buffer.set_size(&mut self.font_system, spec.max_width, None);
+            buffer.set_wrap(
+                &mut self.font_system,
+                if spec.max_width.is_some() {
+                    Wrap::WordOrGlyph
+                } else {
+                    Wrap::None
+                },
+            );
+            buffer.set_text(
+                &mut self.font_system,
+                &spec.content,
+                &attrs,
+                Shaping::Advanced,
+                None,
+            );
+            buffer.shape_until_scroll(&mut self.font_system, true);
+
+            let glyph_data: Vec<(CacheKey, i32, i32, [f32; 4], f32)> = buffer
+                .layout_runs()
+                .flat_map(|run| {
+                    let line_x = match spec.anchor {
+                        UiTextAnchor::TopLeft => spec.pos.x,
+                        UiTextAnchor::TopCenter => spec.pos.x - run.line_w * 0.5,
+                    };
+                    run.glyphs.iter().map(move |glyph| {
+                        let physical = glyph.physical((0.0, run.line_y), 1.0);
+                        let glyph_color = glyph
+                            .color_opt
+                            .map(cosmic_color_to_rgba)
+                            .unwrap_or(spec.color);
+                        (physical.cache_key, physical.x, physical.y, glyph_color, line_x)
+                    })
+                })
+                .collect();
+
+            for (cache_key, phys_x, phys_y, glyph_color, line_x) in glyph_data {
+                let Some(resolved) = self.resolve_glyph(ctx, text_atlas, emoji_atlas, cache_key) else {
+                    continue;
+                };
+
+                let instance_color = match resolved.kind {
+                    AtlasKind::Mono => glyph_color,
+                    AtlasKind::Color => [1.0, 1.0, 1.0, glyph_color[3]],
+                };
+                let pos = Vec2::new(
+                    line_x + (phys_x + resolved.entry.left) as f32,
+                    spec.pos.y + (phys_y - resolved.entry.top) as f32,
+                );
+                let atlas_size = match resolved.kind {
+                    AtlasKind::Mono => TEXT_ATLAS_SIZE,
+                    AtlasKind::Color => EMOJI_ATLAS_SIZE,
+                };
+                let instance = TextInstanceData::new(
+                    pos.to_array(),
+                    [resolved.entry.width as f32, resolved.entry.height as f32],
+                    spec.pos.to_array(),
+                    0.0,
+                    resolved.entry.uv_min(atlas_size as f32),
+                    resolved.entry.uv_max(atlas_size as f32),
+                    instance_color,
+                );
+
+                match resolved.kind {
+                    AtlasKind::Mono => prepared.mono_instances.push(instance),
+                    AtlasKind::Color => prepared.color_instances.push(instance),
+                }
+            }
+        }
+
+        prepared
     }
 
     pub fn build_text_instances(
@@ -400,17 +578,8 @@ impl TextSystem {
         let width = (world_max.x - world_min.x).max(1.0);
         let height = (world_max.y - world_min.y).max(1.0);
 
-        let metrics = Metrics::new(
-            text.font_size.max(8.0),
-            (text.font_size * 1.35).max(text.font_size + 4.0),
-        );
-        let attrs = Attrs::new()
-            .family(if cfg!(target_os = "windows") {
-                Family::Name("Tahoma")
-            } else {
-                Family::SansSerif
-            })
-            .color(rgba_to_cosmic_color(text.color));
+        let metrics = text_metrics(text.font_size, None);
+        let attrs = default_text_attrs(text.color);
         let mut buffer = Buffer::new(&mut self.font_system, metrics);
         buffer.set_size(&mut self.font_system, Some(width), Some(height));
         buffer.set_wrap(&mut self.font_system, Wrap::WordOrGlyph);
@@ -506,6 +675,37 @@ impl TextSystem {
 
         self.overlay_ready = true;
     }
+}
+
+fn configure_bundled_font_defaults(font_system: &mut FontSystem) {
+    let bundled_family = {
+        let db = font_system.db_mut();
+        let ids = db.load_font_source(fontdb::Source::Binary(Arc::new(BUNDLED_UI_FONT_BYTES.to_vec())));
+        let family = ids
+            .first()
+            .and_then(|id| db.face(*id))
+            .and_then(|face| face.families.first())
+            .map(|(name, _)| name.clone())
+            .unwrap_or_else(|| BUNDLED_UI_FONT_FAMILY_HINT.to_string());
+        db.set_sans_serif_family(family.clone());
+        family
+    };
+
+    debug_assert!(!bundled_family.is_empty());
+}
+
+fn text_metrics(font_size: f32, line_height: Option<f32>) -> Metrics {
+    let font_size = font_size.max(8.0);
+    Metrics::new(
+        font_size,
+        line_height.unwrap_or((font_size * 1.35).max(font_size + 4.0)),
+    )
+}
+
+fn default_text_attrs(color: [f32; 4]) -> Attrs<'static> {
+    Attrs::new()
+        .family(Family::SansSerif)
+        .color(rgba_to_cosmic_color(color))
 }
 
 pub fn cosmic_color_to_rgba(color: Color) -> [f32; 4] {

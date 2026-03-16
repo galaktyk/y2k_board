@@ -1,4 +1,5 @@
 
+#![allow(dead_code)]
 
 /// CC-29 Color Palette
 
@@ -36,8 +37,12 @@ pub const PURPLE_MEDIUM: [f32; 4] = [ 95.0 / 255.0,  85.0 / 255.0, 106.0 / 255.0
 
 pub const PURE_BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0]; // #000000
 pub const PURE_WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0]; // #ffffff
+pub const TEXT_SELECTION_COLOR: [f32; 4] = [0.18, 0.45, 1.0, 0.22]; // semi-transparent light blue
 
 // ── Palette Array ─────────────────────────────────────────────────────────────
+
+
+
 
 pub const PALETTE: [[f32; 4]; 28] = [
     WHITE,         // 00 #f2f0e5

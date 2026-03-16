@@ -1,68 +1,14 @@
 
+remove text cache
+---
+
+key shortcut hit tab to reset selecting object(s) rotation to 0 degree
+---
 image not align with real location? try to reproduce
 
 ---
 remove the text element type and re-use the rectangle element type
 text box now is just rect with transparent fill and 0px border when first created
-
-
-
----
-
-add submenu to the screen right. design similar to current toolbar island but stick to the screen edge
-
-this will show when select creation tools or corresponding object is selected
-
-
-
-### color swatch
-*check palette.rs
-basic color swatch ui like MS paint
-three column grid color squares
-
-since we have many element that can be colored, we can show 1 swatch and reuse it for different element
-with tab ui like this
-|A|▨|☐|
---------
-☐☐☐
-☐☐☐
-☐☐☐
-...
-
-when user select the tab, the swatch will highlight border the color for that element 
-
-
-
-
-
-## rectangle
-- show text, fill, and border color swatch
-- and "border width" slider
-
-## ellipse
-- show text, fill, and border color swatch
-- and "border width" slider
-
-## Line
-- show line color swatch
-- and "line width" slider
-
-
-## select image
-- don't show submenu
-
-
-## select multiple
-- if all the same type, show the corresponding submenu (I want this,  is this possible? )
-- if not, only show what is common between them
-
-
-** IF ANY OF THE ABOVE PERFORMANCE HEAVY PLEASE TELL ME FIRST, I CAN TRY TO OPTIMIZE OR CHANGE THE DESIGN,***
-
-
-**
-if the current code is not ready or missing some feature, also tell me first**
-
 
 
 

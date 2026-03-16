@@ -5,8 +5,8 @@ use miniquad::{
 };
 
 use crate::palette;
-use crate::rendering::emit_text;
 use crate::renderer::{ImageInstanceData, InstanceData, PreparedImageDraw};
+use crate::text::UiTextSpec;
 use crate::tool::Tool;
 
 pub const TOOLBAR_HEIGHT: f32 = 48.0;
@@ -23,6 +23,7 @@ const TOOLBAR_BORDER_HIGHLIGHT: [f32; 4] = [239.0 / 255.0, 239.0 / 255.0, 239.0 
 const TOOLBAR_BORDER_SHADOW: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
 const TOOLBAR_ICON_COLOR: [f32; 4] = palette::BLACK;
 const TOOLBAR_ICON_SIZE: f32 = 32.0;
+const TOOLBAR_LABEL_FONT_SIZE: f32 = 12.0;
 const TOOLBAR_ICON_BYTES: [&[u8]; 8] = [
     include_bytes!("../assets/toolbar/select.png"),
     include_bytes!("../assets/toolbar/rect.png"),
@@ -290,6 +291,34 @@ impl Toolbar {
                 ));
             }
 
+        }
+        out
+    }
+
+    pub fn build_text_specs(
+        &self,
+        screen_size: Vec2,
+        mouse_pos: Vec2,
+        can_undo: bool,
+        can_redo: bool,
+    ) -> Vec<UiTextSpec> {
+        let layout = self.layout(screen_size);
+        let hovered_action = self.hovered_action(screen_size, mouse_pos.x, mouse_pos.y);
+        let mut out = Vec::new();
+
+        for btn in &self.buttons {
+            let label = match btn.kind {
+                BtnKind::Undo => "UNDO",
+                BtnKind::Redo => "REDO",
+                _ => continue,
+            };
+
+            let dimmed = matches!(btn.kind, BtnKind::Undo) && !can_undo
+                || matches!(btn.kind, BtnKind::Redo) && !can_redo;
+            let is_hovered = !dimmed
+                && hovered_action
+                    .map(|action| matches_button_action(btn.kind, action))
+                    .unwrap_or(false);
             let icon_alpha = if dimmed {
                 0.3
             } else if is_hovered {
@@ -297,7 +326,7 @@ impl Toolbar {
             } else {
                 0.9
             };
-            let icon_color = [
+            let color = [
                 TOOLBAR_ICON_COLOR[0],
                 TOOLBAR_ICON_COLOR[1],
                 TOOLBAR_ICON_COLOR[2],
@@ -306,25 +335,12 @@ impl Toolbar {
             let cx = layout.origin.x + btn.x + BTN_W * 0.5;
             let cy = layout.origin.y + BTN_H * 0.5;
 
-            // Text label: 3×5 bitmap font, scale=2 → glyph is 6px wide, 10px tall
-            // stride per char = (3+1)*2 = 8px
-            const SCALE: f32 = 2.0;
-            const CHAR_W: f32 = 3.0 * SCALE; // 6
-            const GAP: f32 = SCALE;           // 2
-            const STRIDE: f32 = CHAR_W + GAP; // 8
-            const GLYPH_H: f32 = 5.0 * SCALE; // 10
-
-            let label = match btn.kind {
-                BtnKind::Undo => "UNDO",
-                BtnKind::Redo => "REDO",
-                _ => continue,
-            };
-
-            let text_w = label.len() as f32 * STRIDE - GAP;
-            let tx = cx - text_w * 0.5;
-            let ty = cy - GLYPH_H * 0.5;
-            emit_text(label, tx, ty, SCALE, icon_color, &mut out);
+            out.push(
+                UiTextSpec::top_center(label, Vec2::new(cx, cy - 6.0), TOOLBAR_LABEL_FONT_SIZE, color)
+                    .with_line_height(TOOLBAR_LABEL_FONT_SIZE),
+            );
         }
+
         out
     }
 

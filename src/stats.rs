@@ -1,11 +1,21 @@
 use glam::Vec2;
-use crate::rendering::emit_text;
 use crate::renderer::{InstanceData, TextInstanceData, MAX_SHAPE_INSTANCES, MAX_TEXT_INSTANCES};
+use crate::text::UiTextSpec;
+
+const STATS_TEXT_SIZE: f32 = 12.0;
+const STATS_LINE_HEIGHT: f32 = 14.0;
+const STATS_PADDING: f32 = 8.0;
+
+pub struct StatsPanelLayout {
+    pub background_origin: Vec2,
+    pub background_size: Vec2,
+    pub text_origin: Vec2,
+}
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/// Build screen-space InstanceData for the stats overlay (bottom-right corner).
-pub fn build_stats_instances(
+/// Build screen-space text specs for the stats overlay.
+pub fn build_stats_text_specs(
     zoom:      f32,
     shapes_count: usize,
     char_count: usize,
@@ -17,14 +27,7 @@ pub fn build_stats_instances(
     image_vram_total_bytes: usize,
     fps:       f32,
     frame_ms:  f32,
-    screen:    Vec2,
-) -> Vec<InstanceData> {
-    const SCALE: f32 = 2.0;
-    let char_h  = 5.0 * SCALE;
-    let stride  = 3.0 * SCALE + SCALE; // char width + gap
-    let line_h  = char_h + SCALE * 2.0; // vertical spacing
-    let pad     = 8.0f32;
-
+) -> Vec<UiTextSpec> {
     let text_color = [0.88f32, 0.92, 0.96, 1.0];
     let frame_label = if frame_ms >= 10.0 {
         format!("FT   {:.1}MS", frame_ms)
@@ -58,32 +61,41 @@ pub fn build_stats_instances(
         frame_label,
     ];
 
-    let max_chars = lines.iter().map(|l| l.chars().count()).max().unwrap_or(1) as f32;
-    let text_w    = max_chars * stride - SCALE; // trim trailing gap
-    let text_h    = lines.len() as f32 * line_h - SCALE * 2.0;
+    let mut text_specs = Vec::with_capacity(lines.len());
+    for (i, line) in lines.iter().enumerate() {
+        text_specs.push(
+            UiTextSpec::top_left(line, Vec2::new(0.0, i as f32 * STATS_LINE_HEIGHT), STATS_TEXT_SIZE, text_color)
+                .with_line_height(STATS_LINE_HEIGHT),
+        );
+    }
 
-    let bg_w = text_w + pad * 2.0;
-    let bg_h = text_h + pad * 2.0;
-    let bg_x = screen.x - bg_w - 6.0;
-    let bg_y = screen.y - bg_h - 6.0;
+    text_specs
+}
 
-    let mut out = Vec::new();
+pub fn build_stats_layout(text_size: Vec2, screen: Vec2) -> StatsPanelLayout {
+    let background_size = Vec2::new(
+        text_size.x + STATS_PADDING * 2.0,
+        text_size.y + STATS_PADDING * 2.0,
+    );
+    let background_origin = Vec2::new(
+        screen.x - background_size.x - 6.0,
+        screen.y - background_size.y - 6.0,
+    );
 
-    // Semi-transparent background panel
-    out.push(InstanceData::new(
-        [bg_x, bg_y],
-        [bg_w, bg_h],
+    StatsPanelLayout {
+        background_origin,
+        background_size,
+        text_origin: background_origin + Vec2::splat(STATS_PADDING),
+    }
+}
+
+pub fn build_stats_background_instances(layout: &StatsPanelLayout) -> Vec<InstanceData> {
+    vec![InstanceData::new(
+        layout.background_origin.to_array(),
+        layout.background_size.to_array(),
         0.0,
         [0.04, 0.05, 0.07, 0.80],
         0.0,
         1.0,
-    ));
-
-    for (i, line) in lines.iter().enumerate() {
-        let tx = bg_x + pad;
-        let ty = bg_y + pad + i as f32 * line_h;
-        emit_text(line, tx, ty, SCALE, text_color, &mut out);
-    }
-
-    out
+    )]
 }

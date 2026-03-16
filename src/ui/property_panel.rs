@@ -1,8 +1,8 @@
 use glam::Vec2;
 
 use crate::palette;
-use crate::rendering::emit_text;
 use crate::renderer::InstanceData;
+use crate::text::UiTextSpec;
 
 const PANEL_BG_COLOR: [f32; 4] = palette::GRAY_0;
 const PANEL_HOVER_COLOR: [f32; 4] = palette::GRAY_1;
@@ -22,6 +22,7 @@ const SWATCH_COLUMNS: usize = 3;
 const SLIDER_HEIGHT: f32 = 26.0;
 const SLIDER_TRACK_HEIGHT: f32 = 6.0;
 const SLIDER_KNOB_SIZE: f32 = 12.0;
+const PANEL_TEXT_SIZE: f32 = 12.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ColorTarget {
@@ -189,15 +190,6 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
         1.0,
     ));
 
-    emit_text(
-        view.title,
-        layout.title_rect.x,
-        layout.title_rect.y,
-        2.0,
-        PANEL_TEXT_COLOR,
-        &mut out,
-    );
-
     for (target, rect) in &layout.tab_rects {
         let is_active = *target == view.active_target;
         let is_hovered = hovered == Some(PropertyPanelHit::Tab(*target));
@@ -227,17 +219,6 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
             0.0,
             1.0,
         ));
-
-        let label = target.label();
-        let label_w = (label.len() as f32 * 6.0 - 2.0).max(0.0);
-        emit_text(
-            label,
-            rect.x + (rect.w - label_w) * 0.5,
-            rect.y + 7.0,
-            2.0,
-            PANEL_TEXT_COLOR,
-            &mut out,
-        );
     }
 
     let selected_color_index = palette::PALETTE
@@ -333,16 +314,52 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
                 0.0,
                 1.0,
             ));
+    }
 
-            let width_label = format!("{} {}PX", target.label(), width);
-            emit_text(
-                &width_label,
-                track.x,
-                track.y - 12.0,
-                2.0,
+    out
+}
+
+pub fn build_text_specs(screen_size: Vec2, view: &PropertyPanelView) -> Vec<UiTextSpec> {
+    let layout = layout(screen_size, view);
+    let mut out = Vec::new();
+
+    out.push(
+        UiTextSpec::top_left(
+            view.title,
+            Vec2::new(layout.origin.x + layout.title_rect.x, layout.origin.y + layout.title_rect.y),
+            PANEL_TEXT_SIZE,
+            PANEL_TEXT_COLOR,
+        )
+        .with_line_height(PANEL_TEXT_SIZE)
+        .with_max_width(layout.title_rect.w),
+    );
+
+    for (target, rect) in &layout.tab_rects {
+        out.push(
+            UiTextSpec::top_center(
+                target.label(),
+                Vec2::new(layout.origin.x + rect.x + rect.w * 0.5, layout.origin.y + rect.y + 6.0),
+                PANEL_TEXT_SIZE,
                 PANEL_TEXT_COLOR,
-                &mut out,
-            );
+            )
+            .with_line_height(PANEL_TEXT_SIZE),
+        );
+    }
+
+    for (target, track) in &layout.width_tracks {
+        let Some(width) = width_for(view, *target) else {
+            continue;
+        };
+
+        out.push(
+            UiTextSpec::top_left(
+                format!("{} {}PX", target.label(), width),
+                Vec2::new(layout.origin.x + track.x, layout.origin.y + track.y - 14.0),
+                PANEL_TEXT_SIZE,
+                PANEL_TEXT_COLOR,
+            )
+            .with_line_height(PANEL_TEXT_SIZE),
+        );
     }
 
     out
