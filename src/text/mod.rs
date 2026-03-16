@@ -90,6 +90,10 @@ pub struct ActiveTextEdit<'a> {
 #[derive(Clone, Debug, Default)]
 pub struct TextElementRange {
     pub element_id: u64,
+    pub generation: u64,
+    pub was_active_edit: bool,
+    pub element_pos: [f32; 2],
+    pub element_rotation: f32,
     pub mono_start: usize,
     pub mono_end: usize,
     pub color_start: usize,
@@ -119,8 +123,8 @@ pub struct TextSystem {
     mono_atlas: Atlas,
     emoji_atlas: Atlas,
     overlay_ready: bool,
-    /// Per-element layout cache, keyed by element id.
-    layout_cache: HashMap<u64, CachedLayout>,
+    /// Single-entry layout cache for the actively-edited element.
+    layout_cache: Option<(u64, CachedLayout)>,
     /// Monotonic counter for active-edit layout invalidation.
     edit_generation: u64,
 }
@@ -136,7 +140,7 @@ impl TextSystem {
             mono_atlas: Atlas::new(TEXT_ATLAS_SIZE, true),
             emoji_atlas: Atlas::new(EMOJI_ATLAS_SIZE, false),
             overlay_ready: false,
-            layout_cache: HashMap::new(),
+            layout_cache: None,
             edit_generation: 0,
         }
     }
@@ -147,9 +151,13 @@ impl TextSystem {
         self.edit_generation = self.edit_generation.wrapping_add(1);
     }
 
-    /// Remove layout cache entries for elements that no longer exist.
+    /// Remove the cached layout if its element no longer exists.
     pub fn evict_stale_layouts(&mut self, live_ids: &HashSet<u64>) {
-        self.layout_cache.retain(|id, _| live_ids.contains(id));
+        if let Some((id, _)) = &self.layout_cache {
+            if !live_ids.contains(id) {
+                self.layout_cache = None;
+            }
+        }
     }
 
     pub fn measure_text_box(&mut self, content: &str, text: &TextData, max_width: f32) -> Vec2 {
@@ -327,6 +335,7 @@ impl TextSystem {
         emoji_atlas: TextureId,
         board: &Board,
         active_edit: Option<ActiveTextEdit<'_>>,
+        previous_draw: Option<&PreparedTextDraw>,
     ) -> PreparedTextDraw {
         self.ensure_overlay_pixel(ctx, text_atlas);
 
@@ -354,6 +363,54 @@ impl TextSystem {
                 .map(|edit| edit.element_id == element.id)
                 .unwrap_or(false);
 
+            // Attempt to reuse from previous draw
+            if !is_active_edit {
+                if let Some(prev) = previous_draw {
+                    if let Some(prev_range) = prev.element_ranges.iter().find(|r| r.element_id == element.id) {
+                        if prev_range.generation == element.text_layout_generation && !prev_range.was_active_edit {
+                            let pos_diff = element.pos - Vec2::from(prev_range.element_pos);
+                            let rot_diff = element.rotation - prev_range.element_rotation;
+                            
+                            let mut mono = prev.mono_instances[prev_range.mono_start..prev_range.mono_end].to_vec();
+                            let mut color = prev.color_instances[prev_range.color_start..prev_range.color_end].to_vec();
+                            
+                            if pos_diff != Vec2::ZERO || rot_diff != 0.0 {
+                                let origin_f32 = (element.pos + element.size * 0.5).to_array();
+                                let origin_i16 = [origin_f32[0] as i16, origin_f32[1] as i16];
+                                for inst in &mut mono {
+                                    inst.pos[0] += pos_diff.x;
+                                    inst.pos[1] += pos_diff.y;
+                                    inst.origin = origin_i16;
+                                    inst.rotation = element.rotation;
+                                }
+                                for inst in &mut color {
+                                    inst.pos[0] += pos_diff.x;
+                                    inst.pos[1] += pos_diff.y;
+                                    inst.origin = origin_i16;
+                                    inst.rotation = element.rotation;
+                                }
+                            }
+
+                            prepared.mono_instances.extend(mono);
+                            prepared.color_instances.extend(color);
+                            
+                            prepared.element_ranges.push(TextElementRange {
+                                element_id: element.id,
+                                generation: element.text_layout_generation,
+                                was_active_edit: false,
+                                element_pos: element.pos.to_array(),
+                                element_rotation: element.rotation,
+                                mono_start,
+                                mono_end: prepared.mono_instances.len(),
+                                color_start,
+                                color_end: prepared.color_instances.len(),
+                            });
+                            continue;
+                        }
+                    }
+                }
+            }
+
             let content = if is_active_edit {
                 active_edit.unwrap().content
             } else {
@@ -364,83 +421,128 @@ impl TextSystem {
                 continue;
             }
 
-            let generation = if is_active_edit {
-                self.edit_generation
-            } else {
-                element.text_layout_generation
-            };
+            let origin = (element.pos + element.size * 0.5).to_array();
 
-            if self.ensure_layout_cached(element, content, generation) {
-                // Collect glyph physical data from the cached buffer first,
-                // so we can drop the immutable borrow before calling resolve_glyph.
-                let cached = self.layout_cache.get(&element.id).unwrap();
-                let world_min = cached.world_min;
-                let default_color = cached.text.color;
-                let origin = (element.pos + element.size * 0.5).to_array();
-
-                let glyph_data: Vec<(CacheKey, i32, i32, [f32; 4])> = cached
-                    .buffer
-                    .layout_runs()
-                    .flat_map(|run| {
-                        run.glyphs.iter().map(move |glyph| {
-                            let physical = glyph.physical((0.0, run.line_y), 1.0);
-                            let glyph_color = glyph
-                                .color_opt
-                                .map(cosmic_color_to_rgba)
-                                .unwrap_or(default_color);
-                            (physical.cache_key, physical.x, physical.y, glyph_color)
+            // Active edit element: use the persistent single-entry layout cache.
+            // Idle elements: shape a temporary buffer and drop it immediately to
+            // avoid keeping a Buffer per element in RAM.
+            let (glyph_data, world_min): (Vec<(CacheKey, i32, i32, [f32; 4])>, Vec2) =
+                if is_active_edit {
+                    let generation = self.edit_generation;
+                    if !self.ensure_layout_cached(element, content, generation) {
+                        continue;
+                    }
+                    let cached = match &self.layout_cache {
+                        Some((id, c)) if *id == element.id => c,
+                        _ => continue,
+                    };
+                    let world_min = cached.world_min;
+                    let default_color = cached.text.color;
+                    let glyph_data = cached
+                        .buffer
+                        .layout_runs()
+                        .flat_map(|run| {
+                            run.glyphs.iter().map(move |glyph| {
+                                let physical = glyph.physical((0.0, run.line_y), 1.0);
+                                let glyph_color = glyph
+                                    .color_opt
+                                    .map(cosmic_color_to_rgba)
+                                    .unwrap_or(default_color);
+                                (physical.cache_key, physical.x, physical.y, glyph_color)
+                            })
                         })
-                    })
-                    .collect();
-                // Drop the immutable borrow on self.layout_cache
-
-                for (cache_key, phys_x, phys_y, glyph_color) in glyph_data {
-                    let resolved =
-                        self.resolve_glyph(ctx, text_atlas, emoji_atlas, cache_key);
-                    let Some(resolved) = resolved else {
+                        .collect();
+                    (glyph_data, world_min)
+                } else {
+                    // Shape a temporary buffer — no cache write.
+                    println!("[text] Compute layout for element id={}", element.id);
+                    let Some((world_min, world_max)) = element.text_bounds() else {
                         continue;
                     };
+                    let default_text = TextData::default();
+                    let text = element.text.as_ref().unwrap_or(&default_text);
+                    let width = (world_max.x - world_min.x).max(1.0);
+                    let height = (world_max.y - world_min.y).max(1.0);
+                    let metrics = text_metrics(text.font_size, None);
+                    let attrs = default_text_attrs(text.color);
+                    let default_color = text.color;
+                    let mut buffer = Buffer::new(&mut self.font_system, metrics);
+                    buffer.set_size(&mut self.font_system, Some(width), Some(height));
+                    buffer.set_wrap(&mut self.font_system, Wrap::WordOrGlyph);
+                    buffer.set_text(
+                        &mut self.font_system,
+                        content,
+                        &attrs,
+                        Shaping::Advanced,
+                        None,
+                    );
+                    buffer.shape_until_scroll(&mut self.font_system, true);
+                    let glyph_data = buffer
+                        .layout_runs()
+                        .flat_map(|run| {
+                            run.glyphs.iter().map(move |glyph| {
+                                let physical = glyph.physical((0.0, run.line_y), 1.0);
+                                let glyph_color = glyph
+                                    .color_opt
+                                    .map(cosmic_color_to_rgba)
+                                    .unwrap_or(default_color);
+                                (physical.cache_key, physical.x, physical.y, glyph_color)
+                            })
+                        })
+                        .collect();
+                    (glyph_data, world_min)
+                };
 
-                    let instance_color = match resolved.kind {
-                        AtlasKind::Mono => glyph_color,
-                        AtlasKind::Color => [1.0, 1.0, 1.0, glyph_color[3]],
-                    };
+            for (cache_key, phys_x, phys_y, glyph_color) in glyph_data {
+                let resolved =
+                    self.resolve_glyph(ctx, text_atlas, emoji_atlas, cache_key);
+                let Some(resolved) = resolved else {
+                    continue;
+                };
 
-                    let pos = world_min
-                        + Vec2::new(
-                            (phys_x + resolved.entry.left) as f32,
-                            (phys_y - resolved.entry.top) as f32,
-                        );
+                let instance_color = match resolved.kind {
+                    AtlasKind::Mono => glyph_color,
+                    AtlasKind::Color => [1.0, 1.0, 1.0, glyph_color[3]],
+                };
 
-                    let atlas_size = match resolved.kind {
-                        AtlasKind::Mono => TEXT_ATLAS_SIZE,
-                        AtlasKind::Color => EMOJI_ATLAS_SIZE,
-                    };
-
-                    let instance = TextInstanceData::new(
-                        pos.to_array(),
-                        [resolved.entry.width as f32, resolved.entry.height as f32],
-                        origin,
-                        element.rotation,
-                        resolved.entry.uv_min(atlas_size as f32),
-                        resolved.entry.uv_max(atlas_size as f32),
-                        instance_color,
+                let pos = world_min
+                    + Vec2::new(
+                        (phys_x + resolved.entry.left) as f32,
+                        (phys_y - resolved.entry.top) as f32,
                     );
 
-                    match resolved.kind {
-                        AtlasKind::Mono => prepared.mono_instances.push(instance),
-                        AtlasKind::Color => prepared.color_instances.push(instance),
-                    }
-                }
+                let atlas_size = match resolved.kind {
+                    AtlasKind::Mono => TEXT_ATLAS_SIZE,
+                    AtlasKind::Color => EMOJI_ATLAS_SIZE,
+                };
 
-                prepared.element_ranges.push(TextElementRange {
-                    element_id: element.id,
-                    mono_start,
-                    mono_end: prepared.mono_instances.len(),
-                    color_start,
-                    color_end: prepared.color_instances.len(),
-                });
+                let instance = TextInstanceData::new(
+                    pos.to_array(),
+                    [resolved.entry.width as f32, resolved.entry.height as f32],
+                    origin,
+                    element.rotation,
+                    resolved.entry.uv_min(atlas_size as f32),
+                    resolved.entry.uv_max(atlas_size as f32),
+                    instance_color,
+                );
+
+                match resolved.kind {
+                    AtlasKind::Mono => prepared.mono_instances.push(instance),
+                    AtlasKind::Color => prepared.color_instances.push(instance),
+                }
             }
+
+            prepared.element_ranges.push(TextElementRange {
+                element_id: element.id,
+                generation: element.text_layout_generation,
+                was_active_edit: is_active_edit,
+                element_pos: element.pos.to_array(),
+                element_rotation: element.rotation,
+                mono_start,
+                mono_end: prepared.mono_instances.len(),
+                color_start,
+                color_end: prepared.color_instances.len(),
+            });
         }
 
         if let Some(edit) = active_edit {
@@ -462,14 +564,19 @@ impl TextSystem {
     pub fn hit_test_cursor(
         &mut self,
         element: &Element,
+        is_active_edit: bool,
         content: &str,
         world_pos: Vec2,
     ) -> Option<usize> {
-        let generation = element.text_layout_generation;
+        let generation = if is_active_edit {
+            self.edit_generation
+        } else {
+            element.text_layout_generation
+        };
         if !self.ensure_layout_cached(element, content, generation) {
             return None;
         }
-        let cached = self.layout_cache.get(&element.id)?;
+        let (_, cached) = self.layout_cache.as_ref()?;
         let local = inverse_rotate_point(element, world_pos) - cached.world_min;
         let cursor = cached.buffer.hit(local.x, local.y)?;
         Some(cursor_to_global_byte(content, cursor))
@@ -483,11 +590,11 @@ impl TextSystem {
         preferred_x: Option<i32>,
         motion: Motion,
     ) -> Option<(usize, Option<i32>)> {
-        let generation = element.text_layout_generation;
+        let generation = self.edit_generation;
         if !self.ensure_layout_cached(element, content, generation) {
             return None;
         }
-        let cached = self.layout_cache.get_mut(&element.id)?;
+        let (_, cached) = self.layout_cache.as_mut()?;
         let cursor = global_byte_to_cursor(content, cursor_byte);
         let (next, next_preferred_x) =
             cached
@@ -514,7 +621,7 @@ impl TextSystem {
         let mut instances = Vec::new();
         let mut caret_pos = None;
 
-        let cached = self.layout_cache.get(&element.id).unwrap();
+        let (_, cached) = self.layout_cache.as_ref().unwrap();
 
         if let Some((start_byte, end_byte)) = selection_range(cursor_byte, selection_anchor_byte) {
             let start = global_byte_to_cursor(content, start_byte);
@@ -557,6 +664,7 @@ impl TextSystem {
 
     /// Ensure a layout is cached for the given element. Returns true if the
     /// cache entry exists (hit or freshly inserted), false if layout failed.
+    /// Overwrites the single cache slot when a miss occurs.
     fn ensure_layout_cached(
         &mut self,
         element: &Element,
@@ -564,13 +672,14 @@ impl TextSystem {
         generation: u64,
     ) -> bool {
         // Check cache hit
-        if let Some(cached) = self.layout_cache.get(&element.id) {
-            if cached.generation == generation {
+        if let Some((id, ref cached)) = self.layout_cache {
+            if id == element.id && cached.generation == generation {
                 return true;
             }
         }
 
         // Cache miss — do full shaping
+        println!("[text] Compute layout for element id={}", element.id);
         let Some((world_min, world_max)) = element.text_bounds() else {
             return false;
         };
@@ -593,13 +702,13 @@ impl TextSystem {
         );
         buffer.shape_until_scroll(&mut self.font_system, true);
 
-        // Store in cache
-        self.layout_cache.insert(element.id, CachedLayout {
+        // Overwrite the single cache slot
+        self.layout_cache = Some((element.id, CachedLayout {
             buffer,
             world_min,
             text,
             generation,
-        });
+        }));
 
         true
     }

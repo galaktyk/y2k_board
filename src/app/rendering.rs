@@ -195,6 +195,7 @@ impl App {
             self.renderer.emoji_atlas(),
             &self.board,
             active_text_edit,
+            self.cached_text_draw.as_ref(),
         );
 
         self.renderer.upload_scene_text_instances(

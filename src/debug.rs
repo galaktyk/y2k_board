@@ -301,7 +301,6 @@ pub fn spawn_debug_images(
         let max_x = (vis_size.x - size.x).max(0.0);
         let max_y = (vis_size.y - size.y).max(0.0);
         let pos = vis_min + Vec2::new(rng(&mut seed) * max_x, rng(&mut seed) * max_y);
-        let rotation = (rng(&mut seed) - 0.5) * 0.5;
         let id = board.next_id();
 
         board.insert_element_untracked(Element {
@@ -309,7 +308,7 @@ pub fn spawn_debug_images(
             shape: ShapeType::Image,
             pos,
             size,
-            rotation,
+            rotation: 0.0,
             color: [1.0, 1.0, 1.0, 1.0],
             stroke_color: default_stroke_color(),
             border_width: default_border_width(),

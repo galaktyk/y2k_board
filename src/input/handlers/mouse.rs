@@ -12,6 +12,7 @@ use crate::ui::tool::Tool;
 
 const MARQUEE_MIN_SIZE: f32 = 4.0;
 const DRAG_START_DISTANCE: f32 = 3.0;
+const COMPUTE_TEXT_LAYOUT_DEBOUNCE: f64 = 0.05;
 
 fn begin_transform_drag(
     state: &mut InputState,
@@ -597,7 +598,6 @@ pub fn on_mouse_move(
                                 let angle_diff = rotation_angle_delta(state.move_start_world, world, center);
                                 element.rotation = orig_rot + angle_diff;
                             }
-                            element.bump_text_generation();
                         }
                         DragMode::ResizingHandle(dir) => {
                             if is_group_transform {
@@ -705,7 +705,12 @@ pub fn on_mouse_move(
                                 element.size = new_size;
                                 element.pos = w_center - new_size * 0.5;
                             }
-                            element.bump_text_generation();
+                            
+                            let now = miniquad::date::now();
+                            if now - state.last_resize_text_bump > COMPUTE_TEXT_LAYOUT_DEBOUNCE {
+                                element.bump_text_generation();
+                                state.last_resize_text_bump = now;
+                            }
                         }
                         DragMode::MoveSelected | DragMode::MarqueeSelect | DragMode::None => {}
                     }

@@ -108,6 +108,7 @@ pub struct InputState {
     pub text_selecting: bool,
     pub last_click_id: Option<u64>,
     pub last_click_at: Option<f64>,
+    pub last_resize_text_bump: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -162,6 +163,7 @@ impl InputState {
             text_selecting: false,
             last_click_id: None,
             last_click_at: None,
+            last_resize_text_bump: 0.0,
         }
     }
 

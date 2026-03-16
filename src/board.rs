@@ -314,16 +314,18 @@ fn rotate_point(point: Vec2, center: Vec2, angle: f32) -> Vec2 {
     )
 }
 
-fn apply_transform(element: &mut Element, transform: ElementTransform) {
-    element.pos = transform.pos;
-    element.size = transform.size;
-    element.rotation = transform.rotation;
-    element.bump_text_generation();
+fn apply_transform(element: &mut Element, before: Option<ElementTransform>, after: ElementTransform) {
+    let size_changed = before.map_or(element.size != after.size, |b| b.size != after.size);
+    element.pos = after.pos;
+    element.size = after.size;
+    element.rotation = after.rotation;
+    if size_changed {
+        element.bump_text_generation();
+    }
 }
 
 fn move_element(element: &mut Element, delta: Vec2) {
     element.pos += delta;
-    element.bump_text_generation();
 }
 
 fn rotate_element(element: &mut Element, center: Vec2, angle: f32) {
@@ -338,7 +340,6 @@ fn rotate_element(element: &mut Element, center: Vec2, angle: f32) {
         element.pos = rotated_center - element.size * 0.5;
         element.rotation += angle;
     }
-    element.bump_text_generation();
 }
 
 #[derive(Clone, Debug)]
@@ -624,18 +625,17 @@ impl Board {
                     if let Some(element) = self.elements.iter_mut().find(|element| element.id == change.id)
                     {
                         element.rotation = change.after;
-                        element.bump_text_generation();
                     }
                 }
             }
             BoardOperation::SetProperty { changes } => {
                 for change in changes {
-                    let after = match &change.patch {
-                        ElementPropertyPatch::Transform { after, .. } => after,
+                    let (before, after) = match &change.patch {
+                        ElementPropertyPatch::Transform { before, after } => (Some(*before), *after),
                         ElementPropertyPatch::Style { .. } | ElementPropertyPatch::Text { .. } => continue,
                     };
                     if let Some(element) = self.elements.iter_mut().find(|e| e.id == change.id) {
-                        apply_transform(element, *after);
+                        apply_transform(element, before, after);
                     }
                 }
                 for change in changes {

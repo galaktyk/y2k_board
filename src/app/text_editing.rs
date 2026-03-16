@@ -59,6 +59,7 @@ impl App {
     pub(super) fn text_cursor_from_screen(&mut self, id: u64, screen_pos: Vec2) -> Option<usize> {
         let world = self.camera.screen_to_world(screen_pos, self.screen_size);
         let element = self.board.element(id)?;
+        let is_active_edit = self.text_edit.as_ref().map_or(false, |edit| edit.element_id() == id);
         let content = self
             .text_edit
             .as_ref()
@@ -66,7 +67,7 @@ impl App {
             .map(TextEditSession::content)
             .or_else(|| element.text.as_ref().map(|text| text.content.as_str()))
             .unwrap_or_default();
-        self.text_system.hit_test_cursor(element, content, world)
+        self.text_system.hit_test_cursor(element, is_active_edit, content, world)
     }
 
     pub(super) fn set_text_cursor(&mut self, cursor_byte: usize, extend_selection: bool) {
