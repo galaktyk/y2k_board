@@ -308,7 +308,13 @@ pub fn on_mouse_down(
                     return order_changed;
                 }
 
-                let is_double_click = state.last_click_id == Some(id)
+                let allows_text_edit = board
+                    .element(id)
+                    .map(|element| element.can_host_text())
+                    .unwrap_or(false);
+
+                let is_double_click = allows_text_edit
+                    && state.last_click_id == Some(id)
                     && state
                         .last_click_at
                         .map(|last| (now - last) <= DOUBLE_CLICK_WINDOW)
@@ -327,19 +333,13 @@ pub fn on_mouse_down(
                 }
 
                 if is_double_click {
-                    if board
+                    state.active_text_id = Some(id);
+                    state.text_cursor = board
                         .element(id)
-                        .map(|element| element.can_host_text())
-                        .unwrap_or(false)
-                    {
-                        state.active_text_id = Some(id);
-                        state.text_cursor = board
-                            .element(id)
-                            .and_then(|element| element.text.as_ref())
-                            .map(|text| text.content.chars().count())
-                            .unwrap_or(0);
-                        state.text_selecting = false;
-                    }
+                        .and_then(|element| element.text.as_ref())
+                        .map(|text| text.content.chars().count())
+                        .unwrap_or(0);
+                    state.text_selecting = false;
                     state.drag_mode = DragMode::None;
                     state.move_origin.clear();
                     return order_changed;

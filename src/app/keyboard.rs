@@ -40,6 +40,10 @@ impl App {
         }
 
         if self.input.active_text_id.is_some() {
+            if keycode == KeyCode::F9 && keymods.alt {
+                self.flush_image_ram_cache(super::ImageRamFlushTrigger::Manual);
+                return;
+            }
             self.handle_text_edit_key_down(keycode, keymods);
             return;
         }
@@ -78,7 +82,6 @@ impl App {
             }
             return;
         }
-
         let mut board_changed = false;
         if matches!(keycode, KeyCode::Delete | KeyCode::Backspace) {
             board_changed = self.board.elements.iter().any(|element| element.selected);

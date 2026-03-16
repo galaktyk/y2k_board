@@ -72,6 +72,12 @@ pub struct ImportedImage {
     pub display_size: [f32; 2],
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ImageRamClearStats {
+    pub entries_cleared: usize,
+    pub bytes_freed: usize,
+}
+
 #[derive(Clone)]
 pub(crate) struct DecodedImage {
     width: u32,
@@ -338,6 +344,17 @@ impl ImageManager {
 
     pub fn gpu_capacity_bytes(&self) -> usize {
         MAX_GPU_BYTES
+    }
+
+    pub fn clear_ram_cache(&mut self) -> ImageRamClearStats {
+        let stats = ImageRamClearStats {
+            entries_cleared: self.ram_cache.len(),
+            bytes_freed: self.ram_used_bytes,
+        };
+        self.ram_cache.clear();
+        self.ram_lru.clear();
+        self.ram_used_bytes = 0;
+        stats
     }
 
     fn clear_runtime_caches(&mut self, ctx: &mut dyn RenderingBackend) {

@@ -7,6 +7,9 @@ use miniquad::*;
 use glam::Vec2;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
 use crate::board::{
     Board,
 };
@@ -20,6 +23,28 @@ use crate::spatial::SpatialGrid;
 use crate::text::{PreparedTextDraw, TextEditSession, TextEditSnapshot, TextSystem};
 use crate::tool::Tool;
 use crate::toolbar::{self, Toolbar, ToolbarAction};
+
+const IMAGE_RAM_FLUSH_INTERVAL: Duration = Duration::from_secs(60);
+const IMAGE_RAM_FLUSH_INTERVAL_SECS: f64 = IMAGE_RAM_FLUSH_INTERVAL.as_secs_f64();
+
+#[derive(Clone, Copy)]
+enum ImageRamFlushTrigger {
+    Auto,
+    Manual,
+}
+
+impl ImageRamFlushTrigger {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Manual => "manual",
+        }
+    }
+
+    fn should_request_redraw(self) -> bool {
+        matches!(self, Self::Manual)
+    }
+}
 
 pub struct App {
     ctx: Box<dyn RenderingBackend>,
@@ -41,6 +66,9 @@ pub struct App {
     dirty_element_ids: HashSet<u64>,
     text_system: TextSystem,
     image_manager: ImageManager,
+    image_ram_flush_stop: Arc<(Mutex<bool>, Condvar)>,
+    image_ram_flush_thread: Option<JoinHandle<()>>,
+    image_ram_flush_deadline: f64,
     text_edit: Option<TextEditSession>,
     // ── text cache ────────────────────────────────────────────────────────
     cached_text_draw: Option<PreparedTextDraw>,
@@ -63,6 +91,8 @@ impl App {
         let asset_root = snapshot::snapshot_root(&snapshot_path);
         let image_manager = ImageManager::new(&mut *ctx, asset_root);
         let (w, h) = window::screen_size();
+        let now = miniquad::date::now();
+        let (image_ram_flush_stop, image_ram_flush_thread) = spawn_image_ram_flush_waker();
         let app = Self {
             ctx,
             renderer,
@@ -83,11 +113,14 @@ impl App {
             dirty_element_ids: HashSet::new(),
             text_system: TextSystem::new(),
             image_manager,
+            image_ram_flush_stop,
+            image_ram_flush_thread: Some(image_ram_flush_thread),
+            image_ram_flush_deadline: now + IMAGE_RAM_FLUSH_INTERVAL_SECS,
             text_edit: None,
             cached_text_draw: None,
             text_dirty: true,
             cached_text_edit_snapshot: None,
-            last_frame:  miniquad::date::now(),
+            last_frame:  now,
             frame_ms:    0.0,
             fps:         0.0,
             fps_accum:   0.0,
@@ -168,6 +201,34 @@ impl App {
 
     fn request_redraw(&self) {
         window::schedule_update();
+    }
+
+    fn flush_image_ram_cache(&mut self, trigger: ImageRamFlushTrigger) {
+        let before_ram = self.image_manager.ram_used_bytes();
+        let gpu_bytes = self.image_manager.gpu_used_bytes();
+        let stats = self.image_manager.clear_ram_cache();
+        let after_ram = self.image_manager.ram_used_bytes();
+        println!(
+            "[image] RAM clear source={} entries={} freed={:.2} MiB ram={:.2} MiB gpu={:.2} MiB",
+            trigger.label(),
+            stats.entries_cleared,
+            mib(stats.bytes_freed),
+            mib(after_ram),
+            mib(gpu_bytes),
+        );
+        if before_ram == 0 && stats.entries_cleared == 0 {
+            println!("[image] RAM clear source={} cache already empty", trigger.label());
+        }
+        self.image_ram_flush_deadline = miniquad::date::now() + IMAGE_RAM_FLUSH_INTERVAL_SECS;
+        if trigger.should_request_redraw() {
+            self.request_redraw();
+        }
+    }
+
+    fn update_image_ram_maintenance(&mut self) {
+        if miniquad::date::now() >= self.image_ram_flush_deadline {
+            self.flush_image_ram_cache(ImageRamFlushTrigger::Auto);
+        }
     }
 
     fn needs_continuous_redraw(&self) -> bool {
@@ -366,7 +427,9 @@ impl App {
 }
 
 impl EventHandler for App {
-    fn update(&mut self) {}
+    fn update(&mut self) {
+        self.update_image_ram_maintenance();
+    }
 
     fn draw(&mut self) {
         self.draw_frame();
@@ -560,7 +623,49 @@ impl EventHandler for App {
 
 impl Drop for App {
     fn drop(&mut self) {
+        stop_image_ram_flush_waker(&self.image_ram_flush_stop, self.image_ram_flush_thread.take());
         self.toolbar_icons.destroy(&mut *self.ctx);
     }
+}
+
+fn spawn_image_ram_flush_waker() -> (Arc<(Mutex<bool>, Condvar)>, JoinHandle<()>) {
+    let stop = Arc::new((Mutex::new(false), Condvar::new()));
+    let stop_clone = Arc::clone(&stop);
+    let thread = thread::Builder::new()
+        .name("image-ram-flush-waker".to_string())
+        .spawn(move || loop {
+            let (lock, condvar) = &*stop_clone;
+            let stopped = lock.lock().unwrap();
+            let (stopped, timeout) = condvar
+                .wait_timeout(stopped, IMAGE_RAM_FLUSH_INTERVAL)
+                .unwrap();
+            if *stopped {
+                break;
+            }
+            drop(stopped);
+            if timeout.timed_out() {
+                window::schedule_update();
+            }
+        })
+        .expect("image RAM flush waker thread should start");
+    (stop, thread)
+}
+
+fn stop_image_ram_flush_waker(
+    stop: &Arc<(Mutex<bool>, Condvar)>,
+    thread: Option<JoinHandle<()>>,
+) {
+    let (lock, condvar) = &**stop;
+    if let Ok(mut stopped) = lock.lock() {
+        *stopped = true;
+        condvar.notify_all();
+    }
+    if let Some(thread) = thread {
+        let _ = thread.join();
+    }
+}
+
+fn mib(bytes: usize) -> f32 {
+    bytes as f32 / (1024.0 * 1024.0)
 }
 
