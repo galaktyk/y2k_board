@@ -11,7 +11,6 @@ pub enum ShapeType {
     Rect,
     Ellipse,
     Line,
-    Text,
     Image,
 }
 
@@ -70,12 +69,10 @@ impl BoxToolStyle {
     }
 
     pub fn text_default() -> Self {
-        let mut stroke_color = DEFAULT_BOX_STROKE_COLOR;
-        stroke_color[3] = 0.0;
         Self {
             fill_color: default_text_box_color(),
-            stroke_color,
-            border_width: DEFAULT_BORDER_WIDTH,
+            stroke_color: palette::TRANSPARENT,
+            border_width: 0,
             text_color: DEFAULT_TEXT_COLOR,
         }
     }
@@ -181,7 +178,7 @@ pub struct Element {
 
 impl Element {
     pub fn uses_border_width(&self) -> bool {
-        matches!(self.shape, ShapeType::Rect | ShapeType::Ellipse | ShapeType::Text)
+        matches!(self.shape, ShapeType::Rect | ShapeType::Ellipse)
     }
 
     pub fn uses_stroke_width(&self) -> bool {
@@ -267,7 +264,7 @@ impl Element {
     }
 
     pub fn can_host_text(&self) -> bool {
-        matches!(self.shape, ShapeType::Rect | ShapeType::Ellipse | ShapeType::Text)
+        matches!(self.shape, ShapeType::Rect | ShapeType::Ellipse)
     }
 
     /// Bump the text layout generation counter, invalidating cached layouts.
@@ -827,7 +824,7 @@ impl Board {
     /// Hit-test a world-space point against elements (last-on-top).
     pub fn hit_test(&self, p: Vec2) -> Option<u64> {
         for element in self.elements.iter().rev() {
-            if element.shape == ShapeType::Text && element_hit(element, p) {
+            if element.shape == ShapeType::Rect && element_hit(element, p) {
                 return Some(element.id);
             }
         }
@@ -839,7 +836,7 @@ impl Board {
         }
 
         for element in self.elements.iter().rev() {
-            if element.shape != ShapeType::Image && element.shape != ShapeType::Text && element_hit(element, p) {
+            if element.shape != ShapeType::Image  && element_hit(element, p) {
                 return Some(element.id);
             }
         }
@@ -866,7 +863,7 @@ fn element_hit(e: &Element, mut p: Vec2) -> bool {
     p.y = center.y - dx * sin_r + dy * cos_r;
 
     match e.shape {
-        ShapeType::Rect | ShapeType::Text | ShapeType::Image => {
+        ShapeType::Rect | ShapeType::Image => {
             let min_x = e.pos.x.min(e.pos.x + e.size.x);
             let max_x = e.pos.x.max(e.pos.x + e.size.x);
             let min_y = e.pos.y.min(e.pos.y + e.size.y);

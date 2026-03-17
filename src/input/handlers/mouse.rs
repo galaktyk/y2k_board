@@ -494,7 +494,7 @@ pub fn on_mouse_up(
                 let _ = screen_size;
                 let new_id = board.next_id();
                 element.id = new_id;
-                if element.shape == ShapeType::Text && element.text.is_none() {
+                if false {
                     element.text = Some(crate::board::TextData {
                         content: String::new(),
                         font_size: 24.0,
@@ -731,7 +731,7 @@ pub fn on_mouse_move(
             Tool::Rect => ShapeType::Rect,
             Tool::Ellipse => ShapeType::Ellipse,
             Tool::Line => ShapeType::Line,
-            Tool::Text => ShapeType::Text,
+            Tool::Text => ShapeType::Rect,
             Tool::Select => return,
         };
 
@@ -749,16 +749,16 @@ pub fn on_mouse_move(
             pos,
             size,
             rotation: 0.0,
-            color: preview_fill_color(shape, tool_style_defaults),
-            stroke_color: preview_stroke_color(shape, tool_style_defaults),
-            border_width: preview_border_width(shape, tool_style_defaults),
-            stroke_width: preview_line_stroke_width(shape, tool_style_defaults),
+            color: preview_fill_color(&active_tool, tool_style_defaults),
+            stroke_color: preview_stroke_color(&active_tool, tool_style_defaults),
+            border_width: preview_border_width(&active_tool, tool_style_defaults),
+            stroke_width: preview_line_stroke_width(&active_tool, tool_style_defaults),
             selected: false,
-            text: if matches!(shape, ShapeType::Rect | ShapeType::Ellipse | ShapeType::Text) {
+            text: if matches!(shape, ShapeType::Rect | ShapeType::Ellipse) {
                 Some(crate::board::TextData {
                     content: String::new(),
                     font_size: 24.0,
-                    color: preview_text_color(shape, tool_style_defaults),
+                    color: preview_text_color(&active_tool, tool_style_defaults),
                 })
             } else {
                 None
@@ -769,49 +769,47 @@ pub fn on_mouse_move(
     }
 }
 
-fn preview_fill_color(shape: ShapeType, defaults: &ToolStyleDefaults) -> [f32; 4] {
-    match shape {
-        ShapeType::Rect => defaults.rect.fill_color,
-        ShapeType::Ellipse => defaults.ellipse.fill_color,
-        ShapeType::Text => defaults.text.fill_color,
-        ShapeType::Line => defaults.line.color,
-        ShapeType::Image => crate::palette::PURE_BLACK,
+fn preview_fill_color(tool: &Tool, defaults: &ToolStyleDefaults) -> [f32; 4] {
+    match tool {
+        Tool::Rect => defaults.rect.fill_color,
+        Tool::Ellipse => defaults.ellipse.fill_color,
+        Tool::Text => defaults.text.fill_color,
+        Tool::Line => defaults.line.color,
+        _ => crate::palette::PURE_BLACK,
     }
 }
 
-fn preview_stroke_color(shape: ShapeType, defaults: &ToolStyleDefaults) -> [f32; 4] {
-    match shape {
-        ShapeType::Rect => defaults.rect.stroke_color,
-        ShapeType::Ellipse => defaults.ellipse.stroke_color,
-        ShapeType::Text => defaults.text.stroke_color,
-        ShapeType::Line => defaults.line.color,
-        ShapeType::Image => crate::board::DEFAULT_STROKE_COLOR,
+fn preview_stroke_color(tool: &Tool, defaults: &ToolStyleDefaults) -> [f32; 4] {
+    match tool {
+        Tool::Rect => defaults.rect.stroke_color,
+        Tool::Ellipse => defaults.ellipse.stroke_color,
+        Tool::Text => defaults.text.stroke_color,
+        Tool::Line => defaults.line.color,
+        _ => crate::board::DEFAULT_STROKE_COLOR,
     }
 }
 
-fn preview_border_width(shape: ShapeType, defaults: &ToolStyleDefaults) -> u8 {
-    match shape {
-        ShapeType::Rect => defaults.rect.border_width,
-        ShapeType::Ellipse => defaults.ellipse.border_width,
-        ShapeType::Text => defaults.text.border_width,
-        ShapeType::Line | ShapeType::Image => crate::board::DEFAULT_BORDER_WIDTH,
+fn preview_border_width(tool: &Tool, defaults: &ToolStyleDefaults) -> u8 {
+    match tool {
+        Tool::Rect => defaults.rect.border_width,
+        Tool::Ellipse => defaults.ellipse.border_width,
+        Tool::Text => defaults.text.border_width,
+        _ => crate::board::DEFAULT_BORDER_WIDTH,
     }
 }
 
-fn preview_line_stroke_width(shape: ShapeType, defaults: &ToolStyleDefaults) -> u8 {
-    match shape {
-        ShapeType::Line => defaults.line.stroke_width,
-        ShapeType::Rect | ShapeType::Ellipse | ShapeType::Text | ShapeType::Image => {
-            crate::board::DEFAULT_LINE_STROKE_WIDTH
-        }
+fn preview_line_stroke_width(tool: &Tool, defaults: &ToolStyleDefaults) -> u8 {
+    match tool {
+        Tool::Line => defaults.line.stroke_width,
+        _ => crate::board::DEFAULT_LINE_STROKE_WIDTH,
     }
 }
 
-fn preview_text_color(shape: ShapeType, defaults: &ToolStyleDefaults) -> [f32; 4] {
-    match shape {
-        ShapeType::Rect => defaults.rect.text_color,
-        ShapeType::Ellipse => defaults.ellipse.text_color,
-        ShapeType::Text => defaults.text.text_color,
-        ShapeType::Line | ShapeType::Image => crate::board::DEFAULT_TEXT_COLOR,
+fn preview_text_color(tool: &Tool, defaults: &ToolStyleDefaults) -> [f32; 4] {
+    match tool {
+        Tool::Rect => defaults.rect.text_color,
+        Tool::Ellipse => defaults.ellipse.text_color,
+        Tool::Text => defaults.text.text_color,
+        _ => crate::board::DEFAULT_TEXT_COLOR,
     }
 }

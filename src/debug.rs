@@ -262,7 +262,7 @@ pub fn spawn_debug_shapes(board: &mut Board, camera: &Camera, screen_size: Vec2)
     for _ in 0..100 { spawn(ShapeType::Rect, false); }
     for _ in 0..100 { spawn(ShapeType::Ellipse, false); }
     for _ in 0..100 { spawn(ShapeType::Line, false); }
-    for _ in 0..100 { spawn(ShapeType::Text, true); }
+    for _ in 0..100 { spawn(ShapeType::Rect, true); }
 
     println!(
         "Alt+Ctrl+B: spawned 100 rect, 100 ellipse, 100 lines, 100 text | total elements: {}",

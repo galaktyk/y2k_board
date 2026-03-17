@@ -1,22 +1,15 @@
 
-compute text runs when change border size
-please check for other thing that might happen CAREFULLY
-
----
-
-remove text cache
----
-
-key shortcut hit tab to reset selecting object(s) rotation to 0 degree
-disable keyboard shortcut when text box is focused (like tab or number keys)
-
+nit: when select multiple items and use TAB key to reset rotation to 0, item rotate but the multi select border is not rotate back
 ---
 image not align with real location? try to reproduce
 
 ---
-remove the text element type and re-use the rectangle element type
+
+big refactor
+remove the text element type internally and re-use the rectangle element type
 text box now is just rect with transparent fill and 0px border when first created
 
+text tool in the toolbar now create rect with transparent fill and 0px border
 
 
 

@@ -75,10 +75,7 @@ pub fn element_to_instances(element: &Element, alpha: f32) -> Vec<InstanceData> 
                 );
             }
         }
-        ShapeType::Text => {
-            push_fill_instance(&mut out, element, 0.0, element.color, alpha);
-            push_border_instance(&mut out, element, 3.0, element.effective_stroke_color(), alpha);
-        }
+
         ShapeType::Image => {
             out.push(InstanceData::new(
                 element.pos.to_array(),
@@ -149,7 +146,7 @@ fn selection_outline_instance(
 ) -> InstanceData {
     let expand = 1.0 / zoom.max(0.0001);
     let shape_type = match element.shape {
-        ShapeType::Rect | ShapeType::Text | ShapeType::Image => FIXED_SCREEN_OUTLINE_SHAPE_TYPE,
+        ShapeType::Rect | ShapeType::Image => FIXED_SCREEN_OUTLINE_SHAPE_TYPE,
         ShapeType::Ellipse => FIXED_SCREEN_OUTLINE_SHAPE_TYPE,
         ShapeType::Line => FIXED_SCREEN_LINE_OUTLINE_SHAPE_TYPE,
     };

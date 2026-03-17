@@ -341,10 +341,10 @@ impl App {
         let ids: Vec<u64> = selected.iter().map(|element| element.id).collect();
         let can_fill = selected
             .iter()
-            .all(|element| matches!(element.shape, ShapeType::Rect | ShapeType::Ellipse | ShapeType::Text));
+            .all(|element| matches!(element.shape, ShapeType::Rect | ShapeType::Ellipse));
         let can_text = selected.iter().all(|element| element.can_host_text());
         let can_stroke = selected.iter().all(|element| {
-            matches!(element.shape, ShapeType::Rect | ShapeType::Ellipse | ShapeType::Line | ShapeType::Text)
+            matches!(element.shape, ShapeType::Rect | ShapeType::Ellipse | ShapeType::Line)
         });
 
         if !can_fill && !can_text && !can_stroke {
@@ -766,7 +766,7 @@ fn panel_title_for_selection(selected: &[&Element]) -> &'static str {
             Some(ShapeType::Rect) => "RECT",
             Some(ShapeType::Ellipse) => "ELPS",
             Some(ShapeType::Line) => "LINE",
-            Some(ShapeType::Text) => "TEXT",
+            
             Some(ShapeType::Image) | None => "MIX",
         }
     } else {
@@ -810,11 +810,11 @@ fn updated_style_with_color(
     let mut after = element.style_snapshot();
     match target {
         ColorTarget::Text if element.can_host_text() => after.text_color = Some(color),
-        ColorTarget::Fill if matches!(element.shape, ShapeType::Rect | ShapeType::Ellipse | ShapeType::Text) => {
+        ColorTarget::Fill if matches!(element.shape, ShapeType::Rect | ShapeType::Ellipse) => {
             after.fill_color = color;
         }
         ColorTarget::Stroke
-            if matches!(element.shape, ShapeType::Rect | ShapeType::Ellipse | ShapeType::Line | ShapeType::Text) =>
+            if matches!(element.shape, ShapeType::Rect | ShapeType::Ellipse | ShapeType::Line) =>
         {
             after.stroke_color = color;
             if element.shape == ShapeType::Line {

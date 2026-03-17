@@ -154,7 +154,7 @@ impl App {
 
         self.board.apply_operation(BoardOperation::AddElement(Element {
             id: new_id,
-            shape: ShapeType::Text,
+            shape: ShapeType::Rect,
             pos: anchor - size * 0.5,
             size,
             rotation: 0.0,

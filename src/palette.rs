@@ -38,13 +38,15 @@ pub const PURPLE_MEDIUM: [f32; 4] = [ 95.0 / 255.0,  85.0 / 255.0, 106.0 / 255.0
 pub const PURE_BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0]; // #000000
 pub const PURE_WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0]; // #ffffff
 pub const TEXT_SELECTION_COLOR: [f32; 4] = [0.18, 0.45, 1.0, 0.22]; // semi-transparent light blue
+pub const TRANSPARENT: [f32; 4] = [0.0, 0.0, 0.0, 0.0]; // fully transparent
 
 // ── Palette Array ─────────────────────────────────────────────────────────────
 
 
 
 
-pub const PALETTE: [[f32; 4]; 28] = [
+pub const PALETTE: [[f32; 4]; 29] = [
+    TRANSPARENT,   // Transparent
     WHITE,         // 00 #f2f0e5
     GRAY_1,        // 02 #868188
     GRAY_2,        // 03 #646365
