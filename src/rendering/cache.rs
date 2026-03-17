@@ -98,13 +98,6 @@ impl BoardRenderCache {
         &self.all_instances
     }
 
-    pub fn element_range(&self, board_index: usize) -> Range<usize> {
-        self.element_ranges
-            .get(board_index)
-            .cloned()
-            .unwrap_or(0..0)
-    }
-
     pub fn element_count(&self) -> usize {
         self.id_by_index.len()
     }

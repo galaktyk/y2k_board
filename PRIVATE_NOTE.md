@@ -1,4 +1,3 @@
-when select something and switch tool, deselet
 
 ---
 reuse old image from hash
@@ -10,7 +9,8 @@ ro sprite player
 
 
 
-
+---
+add frame tool
 
 ---
 thumbnail swtitch with zoom level is not reliable,

@@ -44,7 +44,7 @@ fn finalize_pan_glide(state: &mut InputState, zoom: f32) {
         .pan_velocity_sample_time
         .map(|last_motion| miniquad::date::now() - last_motion)
         .unwrap_or(f64::INFINITY);
-    let mut launch_speed_screen = state.pan_velocity.length() * zoom;
+    let launch_speed_screen = state.pan_velocity.length() * zoom;
     if idle_before_release > PAN_GLIDE_MAX_IDLE_BEFORE_RELEASE_SECS
         || launch_speed_screen < PAN_GLIDE_MIN_LAUNCH_SPEED_SCREEN
     {
