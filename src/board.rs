@@ -905,7 +905,7 @@ mod tests {
     fn text_bounds_keep_inner_box_centered() {
         let element = Element {
             id: 1,
-            shape: ShapeType::Text,
+            shape: ShapeType::Rect,
             pos: Vec2::new(100.0, 50.0),
             size: Vec2::new(200.0, 120.0),
             rotation: 0.4,
@@ -1102,7 +1102,7 @@ mod tests {
             },
             Element {
                 id: 2,
-                shape: ShapeType::Text,
+                shape: ShapeType::Rect,
                 pos: Vec2::ZERO,
                 size: Vec2::splat(20.0),
                 rotation: 0.0,

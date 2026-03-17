@@ -207,6 +207,7 @@ impl App {
         }
 
         self.board.apply_operation(BoardOperation::SetElementRotations { changes });
+        self.input.selection_bounds = None;
         self.mark_elements_dirty(ids);
         true
     }

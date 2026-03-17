@@ -1,15 +1,5 @@
 
 nit: when select multiple items and use TAB key to reset rotation to 0, item rotate but the multi select border is not rotate back
----
-image not align with real location? try to reproduce
-
----
-
-big refactor
-remove the text element type internally and re-use the rectangle element type
-text box now is just rect with transparent fill and 0px border when first created
-
-text tool in the toolbar now create rect with transparent fill and 0px border
 
 
 
