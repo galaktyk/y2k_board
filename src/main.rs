@@ -43,7 +43,7 @@ fn window_icon() -> conf::Icon {
 
 fn main() {
     let conf = conf::Conf {
-        window_title: "Quadboard".to_string(),
+        window_title: "miniGalaktyk".to_string(),
         window_width: 1280,
         window_height: 800,
         high_dpi: true,

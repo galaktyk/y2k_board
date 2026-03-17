@@ -1,8 +1,4 @@
 
-nit: when select multiple items and use TAB key to reset rotation to 0, item rotate but the multi select border is not rotate back
-
-
-
 ---
 
 ro sprite player
@@ -19,4 +15,6 @@ I'm considering threshold on image size on screen like hires switch but doing th
 
 
 --- 
+for collab
 500ms debounce ops
+need binary packer?

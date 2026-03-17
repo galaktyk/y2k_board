@@ -188,7 +188,7 @@ impl App {
             .unwrap_or("snapshot.bin");
 
         rfd::FileDialog::new()
-            .add_filter("Quadboard Snapshots", &["bin"])
+            .add_filter("miniGalaktyk Snapshots", &["bin"])
             .set_directory(snapshot::snapshot_root(&self.snapshot_path))
             .set_file_name(default_name)
             .save_file()
@@ -197,7 +197,7 @@ impl App {
     #[cfg(not(target_arch = "wasm32"))]
     fn pick_snapshot_load_path(&self) -> Option<PathBuf> {
         rfd::FileDialog::new()
-            .add_filter("Quadboard Snapshots", &["bin"])
+            .add_filter("miniGalaktyk Snapshots", &["bin"])
             .set_directory(snapshot::snapshot_root(&self.snapshot_path))
             .pick_file()
     }
