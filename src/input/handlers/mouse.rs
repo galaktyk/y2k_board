@@ -174,6 +174,30 @@ fn scale_point_from_anchor(point: Vec2, anchor: Vec2, scale_x: f32, scale_y: f32
     anchor + Vec2::new((point.x - anchor.x) * scale_x, (point.y - anchor.y) * scale_y)
 }
 
+fn rotate_vector(vector: Vec2, angle: f32) -> Vec2 {
+    let cos_a = angle.cos();
+    let sin_a = angle.sin();
+    Vec2::new(
+        vector.x * cos_a - vector.y * sin_a,
+        vector.x * sin_a + vector.y * cos_a,
+    )
+}
+
+fn inverse_rotate_vector(vector: Vec2, angle: f32) -> Vec2 {
+    let cos_a = angle.cos();
+    let sin_a = angle.sin();
+    Vec2::new(
+        vector.x * cos_a + vector.y * sin_a,
+        -vector.x * sin_a + vector.y * cos_a,
+    )
+}
+
+fn scale_vector_in_frame(vector: Vec2, frame_rotation: f32, scale_x: f32, scale_y: f32) -> Vec2 {
+    let local_vector = inverse_rotate_vector(vector, frame_rotation);
+    let scaled_local = Vec2::new(local_vector.x * scale_x, local_vector.y * scale_y);
+    rotate_vector(scaled_local, frame_rotation)
+}
+
 fn scale_point_from_anchor_in_frame(
     point: Vec2,
     anchor: Vec2,
@@ -186,6 +210,100 @@ fn scale_point_from_anchor_in_frame(
     let local_anchor = inverse_rotate_point(anchor, frame_center, frame_rotation);
     let scaled_local = scale_point_from_anchor(local_point, local_anchor, scale_x, scale_y);
     rotate_point(scaled_local, frame_center, frame_rotation)
+}
+
+fn resize_rotated_element_in_frame(
+    element: &mut Element,
+    orig_pos: Vec2,
+    orig_size: Vec2,
+    orig_rot: f32,
+    anchor: Vec2,
+    scale_x: f32,
+    scale_y: f32,
+    frame_bounds: SelectionBounds,
+) {
+    let original_center = orig_pos + orig_size * 0.5;
+    let scaled_center = scale_point_from_anchor_in_frame(
+        original_center,
+        anchor,
+        scale_x,
+        scale_y,
+        frame_bounds.center(),
+        frame_bounds.rotation,
+    );
+
+    let half_width_axis = rotate_vector(Vec2::new(orig_size.x * 0.5, 0.0), orig_rot);
+    let half_height_axis = rotate_vector(Vec2::new(0.0, orig_size.y * 0.5), orig_rot);
+    let scaled_width_axis =
+        scale_vector_in_frame(half_width_axis, frame_bounds.rotation, scale_x, scale_y);
+    let scaled_height_axis =
+        scale_vector_in_frame(half_height_axis, frame_bounds.rotation, scale_x, scale_y);
+
+    let width = (scaled_width_axis.length() * 2.0).max(1.0);
+    let height = (scaled_height_axis.length() * 2.0).max(1.0);
+    let rotation = if scaled_width_axis.length_squared() > 0.0001 {
+        scaled_width_axis.y.atan2(scaled_width_axis.x)
+    } else if scaled_height_axis.length_squared() > 0.0001 {
+        scaled_height_axis.y.atan2(scaled_height_axis.x) - std::f32::consts::FRAC_PI_2
+    } else {
+        orig_rot
+    };
+
+    element.rotation = rotation;
+    element.size = Vec2::new(width, height);
+    element.pos = scaled_center - element.size * 0.5;
+}
+
+fn element_corners(element: &Element) -> Vec<Vec2> {
+    if element.shape == ShapeType::Line {
+        return vec![element.pos, element.pos + element.size];
+    }
+
+    let center = element.pos + element.size * 0.5;
+    let half_size = element.size * 0.5;
+    vec![
+        rotate_point(center + Vec2::new(-half_size.x, -half_size.y), center, element.rotation),
+        rotate_point(center + Vec2::new(half_size.x, -half_size.y), center, element.rotation),
+        rotate_point(center + Vec2::new(half_size.x, half_size.y), center, element.rotation),
+        rotate_point(center + Vec2::new(-half_size.x, half_size.y), center, element.rotation),
+    ]
+}
+
+fn selection_bounds_from_selected_elements_in_frame(
+    board: &Board,
+    frame_rotation: f32,
+) -> Option<SelectionBounds> {
+    let mut local_min: Option<Vec2> = None;
+    let mut local_max: Option<Vec2> = None;
+
+    for element in board.elements.iter().filter(|element| element.selected) {
+        for corner in element_corners(element) {
+            let local_corner = inverse_rotate_vector(corner, frame_rotation);
+            local_min = Some(match local_min {
+                Some(current) => current.min(local_corner),
+                None => local_corner,
+            });
+            local_max = Some(match local_max {
+                Some(current) => current.max(local_corner),
+                None => local_corner,
+            });
+        }
+    }
+
+    let (local_min, local_max) = match (local_min, local_max) {
+        (Some(local_min), Some(local_max)) => (local_min, local_max),
+        _ => return None,
+    };
+
+    let size = (local_max - local_min).max(Vec2::splat(1.0));
+    let local_center = (local_min + local_max) * 0.5;
+    let world_center = rotate_vector(local_center, frame_rotation);
+
+    Some(SelectionBounds {
+        pos: world_center - size * 0.5,
+        size,
+        rotation: frame_rotation,
+    })
 }
 
 fn resized_selection_bounds(bounds: SelectionBounds, dir: HandleDir, world: Vec2) -> Option<SelectionBounds> {
@@ -610,8 +728,6 @@ pub fn on_mouse_move(
                                     continue;
                                 };
 
-                                state.drag_selection_bounds = resized_selection_bounds(bounds, dir, world);
-
                                 if element.shape == ShapeType::Line {
                                     let start = scale_point_from_anchor_in_frame(
                                         orig_pos,
@@ -632,22 +748,16 @@ pub fn on_mouse_move(
                                     element.pos = start;
                                     element.size = end - start;
                                 } else {
-                                    let original_center = orig_pos + orig_size * 0.5;
-                                    let scaled_center = scale_point_from_anchor_in_frame(
-                                        original_center,
+                                    resize_rotated_element_in_frame(
+                                        element,
+                                        orig_pos,
+                                        orig_size,
+                                        orig_rot,
                                         anchor,
                                         scale_x,
                                         scale_y,
-                                        bounds.center(),
-                                        bounds.rotation,
+                                        bounds,
                                     );
-                                    let new_size = Vec2::new(
-                                        orig_size.x * scale_x.abs(),
-                                        orig_size.y * scale_y.abs(),
-                                    )
-                                    .max(Vec2::splat(1.0));
-                                    element.pos = scaled_center - new_size * 0.5;
-                                    element.size = new_size;
                                 }
                             } else if element.shape == ShapeType::Line {
                                 match dir {
@@ -717,7 +827,17 @@ pub fn on_mouse_move(
                 }
             }
         }
-        if !is_group_transform {
+        if is_group_transform {
+            if let DragMode::ResizingHandle(dir) = state.drag_mode {
+                if let Some(bounds) = state.transform_bounds_origin {
+                    state.drag_selection_bounds = selection_bounds_from_selected_elements_in_frame(
+                        board,
+                        bounds.rotation,
+                    )
+                    .or_else(|| resized_selection_bounds(bounds, dir, world));
+                }
+            }
+        } else {
             state.drag_selection_bounds = None;
         }
         return;
