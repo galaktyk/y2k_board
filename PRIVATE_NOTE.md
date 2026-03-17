@@ -2,10 +2,6 @@
 compute text runs when change border size
 please check for other thing that might happen CAREFULLY
 
-----
-after your previous change,
-text render goes wrong
-when 
 ---
 
 remove text cache

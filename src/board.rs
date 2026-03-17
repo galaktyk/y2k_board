@@ -242,8 +242,6 @@ impl Element {
                 }
             }
         }
-
-        self.bump_text_generation();
     }
 
     /// Axis-aligned bounding box for spatial queries.

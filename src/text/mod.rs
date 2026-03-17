@@ -375,31 +375,37 @@ impl TextSystem {
                             let mut color = prev.color_instances[prev_range.color_start..prev_range.color_end].to_vec();
                             
                             let new_selected = if element.selected { 1 } else { 0 };
+                            let text_color = element.text.as_ref().map(|t| t.color).unwrap_or(palette::BLACK);
+                            let new_color_u8 = [
+                                (text_color[0] * 255.0) as u8,
+                                (text_color[1] * 255.0) as u8,
+                                (text_color[2] * 255.0) as u8,
+                                (text_color[3] * 255.0) as u8,
+                            ];
 
-                            if pos_diff != Vec2::ZERO || rot_diff != 0.0 {
-                                let origin_f32 = (element.pos + element.size * 0.5).to_array();
-                                let origin_i16 = [origin_f32[0] as i16, origin_f32[1] as i16];
-                                for inst in &mut mono {
+                            let origin_f32 = (element.pos + element.size * 0.5).to_array();
+                            let origin_i16 = [origin_f32[0] as i16, origin_f32[1] as i16];
+
+                            for inst in &mut mono {
+                                if pos_diff != Vec2::ZERO || rot_diff != 0.0 {
                                     inst.pos[0] += pos_diff.x;
                                     inst.pos[1] += pos_diff.y;
                                     inst.origin = origin_i16;
                                     inst.rotation = element.rotation;
-                                    inst.selected = new_selected;
                                 }
-                                for inst in &mut color {
+                                inst.selected = new_selected;
+                                inst.color = new_color_u8;
+                            }
+                            
+                            for inst in &mut color {
+                                if pos_diff != Vec2::ZERO || rot_diff != 0.0 {
                                     inst.pos[0] += pos_diff.x;
                                     inst.pos[1] += pos_diff.y;
                                     inst.origin = origin_i16;
                                     inst.rotation = element.rotation;
-                                    inst.selected = new_selected;
                                 }
-                            } else {
-                                for inst in &mut mono {
-                                    inst.selected = new_selected;
-                                }
-                                for inst in &mut color {
-                                    inst.selected = new_selected;
-                                }
+                                inst.selected = new_selected;
+                                inst.color[3] = new_color_u8[3];
                             }
 
                             prepared.mono_instances.extend(mono);
@@ -466,7 +472,7 @@ impl TextSystem {
                     (glyph_data, world_min)
                 } else {
                     // Shape a temporary buffer — no cache write.
-                    println!("[text] Compute layout for element id={}", element.id);
+                    println!("[text] Case 1 Compute layout for element id={}", element.id);
                     let Some((world_min, world_max)) = element.text_bounds() else {
                         continue;
                     };
@@ -690,7 +696,7 @@ impl TextSystem {
         }
 
         // Cache miss — do full shaping
-        println!("[text] Compute layout for element id={}", element.id);
+        println!("[text] Case 2 Compute layout for element id={}", element.id);
         let Some((world_min, world_max)) = element.text_bounds() else {
             return false;
         };
