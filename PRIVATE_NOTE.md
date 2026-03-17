@@ -1,8 +1,7 @@
-change render order 
+when select something and switch tool, deselet
 
-image should be below shapes, lines, text, etc.
-
-also make sure the hit test logic not break
+---
+reuse old image from hash
 
 
 ---

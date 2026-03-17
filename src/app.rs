@@ -320,8 +320,18 @@ impl App {
     }
 
     fn set_active_tool(&mut self, tool: ui::tool::Tool) {
-        self.toolbar.active_tool = tool;
-        self.request_redraw();
+        if self.toolbar.active_tool != tool {
+            if self.input.active_text_id.is_some() {
+                self.finish_text_edit(true);
+            }
+            let selected_before = self.board.selected_ids();
+            self.board.deselect_all();
+            if !selected_before.is_empty() {
+                self.mark_elements_dirty(selected_before);
+            }
+            self.toolbar.active_tool = tool;
+            self.request_redraw();
+        }
     }
 
     fn resolve_property_panel(&self) -> Option<ResolvedPropertyPanel> {
