@@ -824,19 +824,13 @@ impl Board {
     /// Hit-test a world-space point against elements (last-on-top).
     pub fn hit_test(&self, p: Vec2) -> Option<u64> {
         for element in self.elements.iter().rev() {
-            if element.shape == ShapeType::Rect && element_hit(element, p) {
+            if element.shape != ShapeType::Image && element_hit(element, p) {
                 return Some(element.id);
             }
         }
 
         for element in self.elements.iter().rev() {
             if element.shape == ShapeType::Image && element_hit(element, p) {
-                return Some(element.id);
-            }
-        }
-
-        for element in self.elements.iter().rev() {
-            if element.shape != ShapeType::Image  && element_hit(element, p) {
                 return Some(element.id);
             }
         }
@@ -990,7 +984,7 @@ mod tests {
     }
 
     #[test]
-    fn hit_test_prioritizes_images_over_shape_layer() {
+    fn hit_test_prioritizes_shape_layer_over_images() {
         let mut board = Board::new();
         board.elements = vec![
             Element {
@@ -1032,7 +1026,7 @@ mod tests {
             },
         ];
 
-        assert_eq!(board.hit_test(Vec2::new(10.0, 10.0)), Some(1));
+        assert_eq!(board.hit_test(Vec2::new(10.0, 10.0)), Some(2));
     }
 
     #[test]

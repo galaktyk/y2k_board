@@ -1,3 +1,9 @@
+change render order 
+
+image should be below shapes, lines, text, etc.
+
+also make sure the hit test logic not break
+
 
 ---
 

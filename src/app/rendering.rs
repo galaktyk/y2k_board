@@ -83,6 +83,9 @@ impl App {
         rotate_drag_preview: Option<(f32, Vec2)>,
         image_draws: &[crate::rendering::renderer::PreparedImageDraw],
     ) {
+        self.renderer
+            .draw_image_draws(&mut *self.ctx, image_draws, board_mvp, move_drag_offset, rotate_drag_preview);
+
         self.renderer.draw_scene_instances(
             &mut *self.ctx,
             board_mvp,
@@ -90,9 +93,6 @@ impl App {
             move_drag_offset,
             rotate_drag_preview,
         );
-
-        self.renderer
-            .draw_image_draws(&mut *self.ctx, image_draws, board_mvp, move_drag_offset, rotate_drag_preview);
     }
 
     fn draw_text_layers(
