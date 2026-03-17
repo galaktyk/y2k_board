@@ -69,6 +69,7 @@ pub fn element_to_instances(element: &Element, alpha: f32) -> Vec<InstanceData> 
                         color,
                         2.0,
                         alpha,
+                        element.selected,
                     )
                     .with_stroke_width(element.stroke_width),
                 );
@@ -86,6 +87,7 @@ pub fn element_to_instances(element: &Element, alpha: f32) -> Vec<InstanceData> 
                 element.color,
                 255.0,
                 alpha,
+                element.selected,
             ));
         }
     }
@@ -111,6 +113,7 @@ fn push_fill_instance(
         color,
         shape_type,
         alpha,
+        element.selected,
     ));
 }
 
@@ -133,6 +136,7 @@ fn push_border_instance(
             color,
             shape_type,
             alpha,
+            element.selected,
         )
         .with_stroke_width(element.border_width),
     );
@@ -157,6 +161,7 @@ fn selection_outline_instance(
         CREATION_OUTLINE_COLOR,
         shape_type,
         alpha,
+        false,
     )
 }
 
@@ -174,5 +179,6 @@ fn bounds_outline_instance(
         color,
         FIXED_SCREEN_OUTLINE_SHAPE_TYPE,
         alpha,
+        false,
     )
 }

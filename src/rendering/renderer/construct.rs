@@ -116,6 +116,9 @@ impl Renderer {
                         uniforms: vec![
                             UniformDesc::new("u_mvp", UniformType::Mat4),
                             UniformDesc::new("u_world_per_px", UniformType::Float1),
+                            UniformDesc::new("u_move_offset", UniformType::Float2),
+                            UniformDesc::new("u_rotate_center", UniformType::Float2),
+                            UniformDesc::new("u_rotate_angle", UniformType::Float1),
                         ],
                     },
                     images: vec![],
@@ -174,7 +177,12 @@ impl Renderer {
                 },
                 ShaderMeta {
                     uniforms: UniformBlockLayout {
-                        uniforms: vec![UniformDesc::new("u_mvp", UniformType::Mat4)],
+                        uniforms: vec![
+                            UniformDesc::new("u_mvp", UniformType::Mat4),
+                            UniformDesc::new("u_move_offset", UniformType::Float2),
+                            UniformDesc::new("u_rotate_center", UniformType::Float2),
+                            UniformDesc::new("u_rotate_angle", UniformType::Float1),
+                        ],
                     },
                     images: vec!["u_text_atlas".to_string()],
                 },
@@ -201,7 +209,12 @@ impl Renderer {
                 },
                 ShaderMeta {
                     uniforms: UniformBlockLayout {
-                        uniforms: vec![UniformDesc::new("u_mvp", UniformType::Mat4)],
+                        uniforms: vec![
+                            UniformDesc::new("u_mvp", UniformType::Mat4),
+                            UniformDesc::new("u_move_offset", UniformType::Float2),
+                            UniformDesc::new("u_rotate_center", UniformType::Float2),
+                            UniformDesc::new("u_rotate_angle", UniformType::Float1),
+                        ],
                     },
                     images: vec!["u_color_atlas".to_string()],
                 },
@@ -228,7 +241,12 @@ impl Renderer {
                 },
                 ShaderMeta {
                     uniforms: UniformBlockLayout {
-                        uniforms: vec![UniformDesc::new("u_mvp", UniformType::Mat4)],
+                        uniforms: vec![
+                            UniformDesc::new("u_mvp", UniformType::Mat4),
+                            UniformDesc::new("u_move_offset", UniformType::Float2),
+                            UniformDesc::new("u_rotate_center", UniformType::Float2),
+                            UniformDesc::new("u_rotate_angle", UniformType::Float1),
+                        ],
                     },
                     images: vec!["u_image_texture".to_string()],
                 },
@@ -352,6 +370,7 @@ impl Renderer {
                 VertexAttribute::with_buffer("i_origin", VertexFormat::Short2, 1),
                 VertexAttribute::with_buffer("i_color", VertexFormat::Byte4, 1),
                 VertexAttribute::with_buffer("i_rotation", VertexFormat::Float1, 1),
+                VertexAttribute::with_buffer("i_pack", VertexFormat::Byte4, 1),
             ],
             shader,
             PipelineParams {

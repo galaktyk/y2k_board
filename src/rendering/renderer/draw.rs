@@ -64,6 +64,9 @@ impl Renderer {
         ctx.apply_uniforms(UniformsSource::table(&ShapeUniforms {
             u_mvp: mvp.to_cols_array_2d(),
             u_world_per_px: world_per_px,
+            u_move_offset: [0.0, 0.0],
+            u_rotate_center: [0.0, 0.0],
+            u_rotate_angle: 0.0,
         }));
         ctx.draw(0, 6, instances.len() as i32);
     }
@@ -82,17 +85,33 @@ impl Renderer {
         ctx: &mut dyn RenderingBackend,
         mvp: glam::Mat4,
         screen_size: Vec2,
+        move_drag_offset: Option<Vec2>,
+        rotate_drag_preview: Option<(f32, Vec2)>,
     ) {
         if self.scene_shape_count == 0 {
             return;
         }
 
         let world_per_px = Self::world_per_px(mvp, screen_size);
+        let mut u_move_offset = [0.0, 0.0];
+        let mut u_rotate_center = [0.0, 0.0];
+        let mut u_rotate_angle = 0.0;
+        
+        if let Some(offset) = move_drag_offset {
+            u_move_offset = offset.to_array();
+        } else if let Some((angle, center)) = rotate_drag_preview {
+            u_rotate_center = center.to_array();
+            u_rotate_angle = angle;
+        }
+
         ctx.apply_pipeline(&self.shape_pipeline);
         ctx.apply_bindings(&self.scene_shape_bindings);
         ctx.apply_uniforms(UniformsSource::table(&ShapeUniforms {
             u_mvp: mvp.to_cols_array_2d(),
             u_world_per_px: world_per_px,
+            u_move_offset,
+            u_rotate_center,
+            u_rotate_angle,
         }));
         ctx.draw(0, 6, self.scene_shape_count as i32);
     }
@@ -112,6 +131,9 @@ impl Renderer {
         ctx.apply_bindings(&self.text_bindings);
         ctx.apply_uniforms(UniformsSource::table(&TextUniforms {
             u_mvp: mvp.to_cols_array_2d(),
+            u_move_offset: [0.0, 0.0],
+            u_rotate_center: [0.0, 0.0],
+            u_rotate_angle: 0.0,
         }));
         ctx.draw(0, 6, instances.len() as i32);
     }
@@ -137,15 +159,31 @@ impl Renderer {
         &mut self,
         ctx: &mut dyn RenderingBackend,
         mvp: glam::Mat4,
+        move_drag_offset: Option<Vec2>,
+        rotate_drag_preview: Option<(f32, Vec2)>,
     ) {
         if self.scene_mono_text_count == 0 {
             return;
+        }
+
+        let mut u_move_offset = [0.0, 0.0];
+        let mut u_rotate_center = [0.0, 0.0];
+        let mut u_rotate_angle = 0.0;
+        
+        if let Some(offset) = move_drag_offset {
+            u_move_offset = offset.to_array();
+        } else if let Some((angle, center)) = rotate_drag_preview {
+            u_rotate_center = center.to_array();
+            u_rotate_angle = angle;
         }
 
         ctx.apply_pipeline(&self.text_pipeline);
         ctx.apply_bindings(&self.scene_text_bindings);
         ctx.apply_uniforms(UniformsSource::table(&TextUniforms {
             u_mvp: mvp.to_cols_array_2d(),
+            u_move_offset,
+            u_rotate_center,
+            u_rotate_angle,
         }));
         ctx.draw(0, 6, self.scene_mono_text_count as i32);
     }
@@ -165,6 +203,9 @@ impl Renderer {
         ctx.apply_bindings(&self.color_text_bindings);
         ctx.apply_uniforms(UniformsSource::table(&TextUniforms {
             u_mvp: mvp.to_cols_array_2d(),
+            u_move_offset: [0.0, 0.0],
+            u_rotate_center: [0.0, 0.0],
+            u_rotate_angle: 0.0,
         }));
         ctx.draw(0, 6, instances.len() as i32);
     }
@@ -173,15 +214,31 @@ impl Renderer {
         &mut self,
         ctx: &mut dyn RenderingBackend,
         mvp: glam::Mat4,
+        move_drag_offset: Option<Vec2>,
+        rotate_drag_preview: Option<(f32, Vec2)>,
     ) {
         if self.scene_color_text_count == 0 {
             return;
+        }
+
+        let mut u_move_offset = [0.0, 0.0];
+        let mut u_rotate_center = [0.0, 0.0];
+        let mut u_rotate_angle = 0.0;
+        
+        if let Some(offset) = move_drag_offset {
+            u_move_offset = offset.to_array();
+        } else if let Some((angle, center)) = rotate_drag_preview {
+            u_rotate_center = center.to_array();
+            u_rotate_angle = angle;
         }
 
         ctx.apply_pipeline(&self.color_text_pipeline);
         ctx.apply_bindings(&self.scene_color_text_bindings);
         ctx.apply_uniforms(UniformsSource::table(&TextUniforms {
             u_mvp: mvp.to_cols_array_2d(),
+            u_move_offset,
+            u_rotate_center,
+            u_rotate_angle,
         }));
         ctx.draw(0, 6, self.scene_color_text_count as i32);
     }
@@ -191,9 +248,22 @@ impl Renderer {
         ctx: &mut dyn RenderingBackend,
         draws: &[PreparedImageDraw],
         mvp: glam::Mat4,
+        move_drag_offset: Option<Vec2>,
+        rotate_drag_preview: Option<(f32, Vec2)>,
     ) {
         if draws.is_empty() {
             return;
+        }
+
+        let mut u_move_offset = [0.0, 0.0];
+        let mut u_rotate_center = [0.0, 0.0];
+        let mut u_rotate_angle = 0.0;
+
+        if let Some(offset) = move_drag_offset {
+            u_move_offset = offset.to_array();
+        } else if let Some((angle, center)) = rotate_drag_preview {
+            u_rotate_center = center.to_array();
+            u_rotate_angle = angle;
         }
 
         let mut start = 0usize;
@@ -214,6 +284,9 @@ impl Renderer {
             ctx.apply_bindings(&self.image_bindings);
             ctx.apply_uniforms(UniformsSource::table(&TextUniforms {
                 u_mvp: mvp.to_cols_array_2d(),
+                u_move_offset,
+                u_rotate_center,
+                u_rotate_angle,
             }));
             ctx.draw(0, 6, batch.len() as i32);
 

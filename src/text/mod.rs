@@ -315,7 +315,7 @@ impl TextSystem {
                     0.0,
                     resolved.entry.uv_min(atlas_size as f32),
                     resolved.entry.uv_max(atlas_size as f32),
-                    instance_color,
+                    instance_color, false,
                 );
 
                 match resolved.kind {
@@ -374,6 +374,8 @@ impl TextSystem {
                             let mut mono = prev.mono_instances[prev_range.mono_start..prev_range.mono_end].to_vec();
                             let mut color = prev.color_instances[prev_range.color_start..prev_range.color_end].to_vec();
                             
+                            let new_selected = if element.selected { 1 } else { 0 };
+
                             if pos_diff != Vec2::ZERO || rot_diff != 0.0 {
                                 let origin_f32 = (element.pos + element.size * 0.5).to_array();
                                 let origin_i16 = [origin_f32[0] as i16, origin_f32[1] as i16];
@@ -382,12 +384,21 @@ impl TextSystem {
                                     inst.pos[1] += pos_diff.y;
                                     inst.origin = origin_i16;
                                     inst.rotation = element.rotation;
+                                    inst.selected = new_selected;
                                 }
                                 for inst in &mut color {
                                     inst.pos[0] += pos_diff.x;
                                     inst.pos[1] += pos_diff.y;
                                     inst.origin = origin_i16;
                                     inst.rotation = element.rotation;
+                                    inst.selected = new_selected;
+                                }
+                            } else {
+                                for inst in &mut mono {
+                                    inst.selected = new_selected;
+                                }
+                                for inst in &mut color {
+                                    inst.selected = new_selected;
                                 }
                             }
 
@@ -523,7 +534,7 @@ impl TextSystem {
                     element.rotation,
                     resolved.entry.uv_min(atlas_size as f32),
                     resolved.entry.uv_max(atlas_size as f32),
-                    instance_color,
+                    instance_color, element.selected,
                 );
 
                 match resolved.kind {
@@ -638,7 +649,7 @@ impl TextSystem {
                         element.rotation,
                         uv_min,
                         uv_max,
-                        SELECTION_COLOR,
+                        SELECTION_COLOR, element.selected,
                     ));
                 }
             }
@@ -654,7 +665,7 @@ impl TextSystem {
                 element.rotation,
                 uv_min,
                 uv_max,
-                CARET_COLOR,
+                CARET_COLOR, element.selected,
             ));
             caret_pos = Some(world_pos);
         }

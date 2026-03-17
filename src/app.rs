@@ -881,6 +881,8 @@ impl EventHandler for App {
         }
 
         let previous_active = self.input.active_text_id;
+        let selected_before: std::collections::HashSet<u64> = self.board.selected_ids().into_iter().collect();
+
         let order_changed = input::on_mouse_down(
             &mut self.input,
             &mut self.board,
@@ -891,6 +893,12 @@ impl EventHandler for App {
             y,
             button,
         );
+
+        let selected_after: std::collections::HashSet<u64> = self.board.selected_ids().into_iter().collect();
+        let changed_ids: Vec<u64> = selected_before.symmetric_difference(&selected_after).copied().collect();
+        if !changed_ids.is_empty() {
+            self.mark_elements_dirty(changed_ids);
+        }
 
         if order_changed {
             self.mark_board_order_dirty();
@@ -929,6 +937,8 @@ impl EventHandler for App {
         let had_drag = drag_mode_before_up != DragMode::None;
         let had_preview = self.input.preview.is_some();
         let active_before_up = self.input.active_text_id;
+        let selected_before: std::collections::HashSet<u64> = self.board.selected_ids().into_iter().collect();
+
         if let Some(tool) = input::on_mouse_up(
             &mut self.input,
             &mut self.board,
@@ -941,6 +951,13 @@ impl EventHandler for App {
         ) {
             self.toolbar.active_tool = tool;
         }
+
+        let selected_after: std::collections::HashSet<u64> = self.board.selected_ids().into_iter().collect();
+        let changed_ids: Vec<u64> = selected_before.symmetric_difference(&selected_after).copied().collect();
+        if !changed_ids.is_empty() {
+            self.mark_elements_dirty(changed_ids);
+        }
+
         self.input.text_selecting = false;
         let active_after_up = self.input.active_text_id;
         if active_before_up != active_after_up {
@@ -1001,6 +1018,7 @@ impl EventHandler for App {
 
         let was_panning = self.input.panning;
         let was_dragging_tool = self.input.dragging_tool;
+        let selected_before: std::collections::HashSet<u64> = self.board.selected_ids().into_iter().collect();
 
         input::on_mouse_move(
             &mut self.input,
@@ -1012,6 +1030,12 @@ impl EventHandler for App {
             x,
             y,
         );
+
+        let selected_after: std::collections::HashSet<u64> = self.board.selected_ids().into_iter().collect();
+        let changed_ids: Vec<u64> = selected_before.symmetric_difference(&selected_after).copied().collect();
+        if !changed_ids.is_empty() {
+            self.mark_elements_dirty(changed_ids);
+        }
 
         let current_hover = self
             .toolbar

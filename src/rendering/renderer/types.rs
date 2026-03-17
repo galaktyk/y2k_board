@@ -12,7 +12,7 @@ pub struct InstanceData {
     pub alpha: u8,
     pub shape_type: u8,
     pub stroke_width: u8,
-    pub _pad: u8,
+    pub selected: u8,
 }
 
 #[repr(C)]
@@ -25,6 +25,8 @@ pub struct TextInstanceData {
     pub origin: [i16; 2],
     pub color: [u8; 4],
     pub rotation: f32,
+    pub selected: u8,
+    pub _pad: [u8; 3],
 }
 
 #[repr(C)]
@@ -37,6 +39,8 @@ pub struct ImageInstanceData {
     pub origin: [i16; 2],
     pub color: [u8; 4],
     pub rotation: f32,
+    pub selected: u8,
+    pub _pad: [u8; 3],
 }
 
 #[derive(Clone, Copy)]
@@ -53,6 +57,7 @@ impl InstanceData {
         color_f32: [f32; 4],
         shape_type: f32,
         alpha_f32: f32,
+        selected: bool,
     ) -> Self {
         Self {
             pos,
@@ -67,7 +72,7 @@ impl InstanceData {
             alpha: (alpha_f32 * 255.0) as u8,
             shape_type: shape_type as u8,
             stroke_width: 1,
-            _pad: 0,
+            selected: if selected { 1 } else { 0 },
         }
     }
 
@@ -86,6 +91,7 @@ impl TextInstanceData {
         uv_min: [f32; 2],
         uv_max: [f32; 2],
         color_f32: [f32; 4],
+        selected: bool,
     ) -> Self {
         Self {
             pos,
@@ -100,6 +106,8 @@ impl TextInstanceData {
                 (color_f32[3] * 255.0) as u8,
             ],
             rotation,
+            selected: if selected { 1 } else { 0 },
+            _pad: [0; 3],
         }
     }
 }
@@ -113,6 +121,7 @@ impl ImageInstanceData {
         uv_min: [f32; 2],
         uv_max: [f32; 2],
         color_f32: [f32; 4],
+        selected: bool,
     ) -> Self {
         Self {
             pos,
@@ -127,6 +136,8 @@ impl ImageInstanceData {
                 (color_f32[3] * 255.0) as u8,
             ],
             rotation,
+            selected: if selected { 1 } else { 0 },
+            _pad: [0; 3],
         }
     }
 }

@@ -8,6 +8,9 @@ attribute vec4 i_pack;
 
 uniform mat4 u_mvp;
 uniform float u_world_per_px;
+uniform vec2 u_move_offset;
+uniform vec2 u_rotate_center;
+uniform float u_rotate_angle;
 
 varying vec2 v_uv;
 varying vec4 v_color;
@@ -67,6 +70,14 @@ void main() {
     float s = sin(i_rotation);
     mat2 rot = mat2(c, s, -s, c);
     world_pos = center + rot * (world_pos - center);
+
+    if (i_pack.w > 0.0) {
+        float sel_c = cos(u_rotate_angle);
+        float sel_s = sin(u_rotate_angle);
+        mat2 sel_rot = mat2(sel_c, sel_s, -sel_s, sel_c);
+        world_pos += u_move_offset;
+        world_pos = u_rotate_center + sel_rot * (world_pos - u_rotate_center);
+    }
 
     gl_Position = u_mvp * vec4(world_pos, 0.0, 1.0);
     v_color = actual_color;
@@ -203,8 +214,12 @@ attribute float i_rotation;
 attribute vec2 i_uv_min;
 attribute vec2 i_uv_max;
 attribute vec4 i_color;
+attribute vec4 i_pack;
 
 uniform mat4 u_mvp;
+uniform vec2 u_move_offset;
+uniform vec2 u_rotate_center;
+uniform float u_rotate_angle;
 
 varying vec2 v_uv;
 varying vec4 v_color;
@@ -223,6 +238,14 @@ void main() {
     float s = sin(i_rotation);
     mat2 rot = mat2(c, s, -s, c);
     world_pos = actual_origin + rot * (world_pos - actual_origin);
+
+    if (i_pack.x > 0.0) {
+        float sel_c = cos(u_rotate_angle);
+        float sel_s = sin(u_rotate_angle);
+        mat2 sel_rot = mat2(sel_c, sel_s, -sel_s, sel_c);
+        world_pos += u_move_offset;
+        world_pos = u_rotate_center + sel_rot * (world_pos - u_rotate_center); 
+    }
 
     v_uv = mix(actual_uv_min, actual_uv_max, a_pos);
     v_color = actual_color;

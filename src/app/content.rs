@@ -11,7 +11,6 @@ use crate::clipboard::{self, ClipboardPaste};
 use crate::images::{ImageImportError, ImportedImage};
 use crate::rendering::renderer::PreparedImageDraw;
 use crate::rendering::cache::element_in_expanded_view;
-use crate::rendering::transform::preview_rect_transform;
 
 use super::App;
 
@@ -243,10 +242,8 @@ impl App {
 
     pub(super) fn build_image_draws(
         &mut self,
-        move_drag_offset: Option<Vec2>,
-        rotate_drag_preview: Option<(f32, Vec2)>,
     ) -> Vec<PreparedImageDraw> {
-        let pending: Vec<(crate::board::ImageData, Vec2, Vec2, f32)> = self
+        let pending: Vec<(crate::board::ImageData, Vec2, Vec2, f32, bool)> = self
             .board
             .elements
             .iter()
@@ -256,25 +253,24 @@ impl App {
                 }
 
                 let image = element.image.clone()?;
-                let (pos, size, rotation) =
-                    preview_rect_transform(element, move_drag_offset, rotate_drag_preview);
-                let mut preview_element = element.clone();
-                preview_element.pos = pos;
-                preview_element.size = size;
-                preview_element.rotation = rotation;
-                element_in_expanded_view(&self.camera, self.screen_size, &preview_element)
-                    .then_some((image, pos, size, rotation))
+                let pos = element.pos;
+                let size = element.size;
+                let rotation = element.rotation;
+                let selected = element.selected;
+
+                element_in_expanded_view(&self.camera, self.screen_size, element)
+                    .then_some((image, pos, size, rotation, selected))
             })
             .collect();
 
-        for (image, _, _, _) in &pending {
+        for (image, _, _, _, _) in &pending {
             self.image_manager
                 .preload_thumb(&mut *self.ctx, &image.asset_path);
         }
 
         pending
             .into_iter()
-            .map(|(image, pos, size, rotation)| {
+            .map(|(image, pos, size, rotation, selected)| {
                 self.image_manager.prepare_draw(
                     &mut *self.ctx,
                     &image,
@@ -284,6 +280,7 @@ impl App {
                     self.camera.zoom,
                     [size.x * self.camera.zoom, size.y * self.camera.zoom],
                     self.screen_size.to_array(),
+                    selected,
                 )
             })
             .collect()

@@ -257,6 +257,7 @@ impl ImageManager {
         zoom: f32,
         screen_extent: [f32; 2],
         viewport_size: [f32; 2],
+        selected: bool,
     ) -> PreparedImageDraw {
         if zoom < THUMB_ZOOM_THRESHOLD {
             if let Some(entry) = self.ensure_thumb_entry(ctx, &image.asset_path) {
@@ -269,7 +270,7 @@ impl ImageManager {
                         rotation,
                         entry.uv_min,
                         entry.uv_max,
-                        [1.0, 1.0, 1.0, 1.0],
+                        [1.0, 1.0, 1.0, 1.0], selected,
                     ),
                 };
             }
@@ -283,7 +284,7 @@ impl ImageManager {
                     rotation,
                     [0.0, 0.0],
                     [1.0, 1.0],
-                    [1.0, 1.0, 1.0, 1.0],
+                    [1.0, 1.0, 1.0, 1.0], selected,
                 ),
             };
         }
@@ -313,7 +314,7 @@ impl ImageManager {
                 rotation,
                 [0.0, 0.0],
                 [1.0, 1.0],
-                [1.0, 1.0, 1.0, 1.0],
+                [1.0, 1.0, 1.0, 1.0], selected,
             ),
         }
     }

@@ -155,7 +155,7 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
         0.0,
         PANEL_BG_COLOR,
         0.0,
-        1.0,
+        1.0, false,
     ));
     out.push(InstanceData::new(
         layout.origin.to_array(),
@@ -163,7 +163,7 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
         0.0,
         PANEL_BORDER_HIGHLIGHT,
         0.0,
-        1.0,
+        1.0, false,
     ));
     out.push(InstanceData::new(
         layout.origin.to_array(),
@@ -171,7 +171,7 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
         0.0,
         PANEL_BORDER_HIGHLIGHT,
         0.0,
-        1.0,
+        1.0, false,
     ));
     out.push(InstanceData::new(
         [layout.origin.x, layout.origin.y + layout.size.y - 1.0],
@@ -179,7 +179,7 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
         0.0,
         PANEL_BORDER_SHADOW,
         0.0,
-        1.0,
+        1.0, false,
     ));
     out.push(InstanceData::new(
         [layout.origin.x + layout.size.x - 1.0, layout.origin.y],
@@ -187,7 +187,7 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
         0.0,
         PANEL_BORDER_SHADOW,
         0.0,
-        1.0,
+        1.0, false,
     ));
 
     for (target, rect) in &layout.tab_rects {
@@ -207,7 +207,7 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
             0.0,
             background,
             0.0,
-            1.0,
+            1.0, false,
         ));
 
         let border = if is_active { view.active_color } else { PANEL_BORDER_SHADOW };
@@ -217,7 +217,7 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
             0.0,
             border,
             0.0,
-            1.0,
+            1.0, false,
         ));
     }
 
@@ -234,7 +234,7 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
             0.0,
             color,
             0.0,
-            1.0,
+            1.0, false,
         ));
 
         let border = if Some(index) == selected_color_index {
@@ -250,7 +250,7 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
             0.0,
             border,
             0.0,
-            1.0,
+            1.0, false,
         ));
         out.push(InstanceData::new(
             [rect.x - 1.0, rect.y + rect.h],
@@ -258,7 +258,7 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
             0.0,
             border,
             0.0,
-            1.0,
+            1.0, false,
         ));
         out.push(InstanceData::new(
             [rect.x - 1.0, rect.y - 1.0],
@@ -266,7 +266,7 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
             0.0,
             border,
             0.0,
-            1.0,
+            1.0, false,
         ));
         out.push(InstanceData::new(
             [rect.x + rect.w, rect.y - 1.0],
@@ -274,7 +274,7 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
             0.0,
             border,
             0.0,
-            1.0,
+            1.0, false,
         ));
     }
 
@@ -289,7 +289,7 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
                 0.0,
                 PANEL_ACTIVE_COLOR,
                 0.0,
-                1.0,
+                1.0, false,
             ));
 
             let min_width = f32::from(target.min_width());
@@ -301,7 +301,7 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
                 0.0,
                 PANEL_SLIDER_FILL_COLOR,
                 0.0,
-                1.0,
+                1.0, false,
             ));
 
             let knob_x = track.x + track.w * fill - SLIDER_KNOB_SIZE * 0.5;
@@ -312,7 +312,7 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
                 0.0,
                 knob_color,
                 0.0,
-                1.0,
+                1.0, false,
             ));
     }
 

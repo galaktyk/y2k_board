@@ -212,7 +212,7 @@ impl Toolbar {
             0.0,
             TOOLBAR_BG_COLOR,
             0.0,
-            1.0,
+            1.0, false,
         ));
         out.push(InstanceData::new(
             layout.origin.to_array(),
@@ -220,7 +220,7 @@ impl Toolbar {
             0.0,
             TOOLBAR_BORDER_HIGHLIGHT,
             0.0,
-            1.0,
+            1.0, false,
         ));
         out.push(InstanceData::new(
             layout.origin.to_array(),
@@ -228,7 +228,7 @@ impl Toolbar {
             0.0,
             TOOLBAR_BORDER_HIGHLIGHT,
             0.0,
-            1.0,
+            1.0, false,
         ));
         out.push(InstanceData::new(
             [layout.origin.x, layout.origin.y + layout.size.y - 1.0],
@@ -236,7 +236,7 @@ impl Toolbar {
             0.0,
             TOOLBAR_BORDER_SHADOW,
             0.0,
-            1.0,
+            1.0, false,
         ));
         out.push(InstanceData::new(
             [layout.origin.x + layout.size.x - 1.0, layout.origin.y],
@@ -244,7 +244,7 @@ impl Toolbar {
             0.0,
             TOOLBAR_BORDER_SHADOW,
             0.0,
-            1.0,
+            1.0, false,
         ));
 
         for btn in &self.buttons {
@@ -287,7 +287,7 @@ impl Toolbar {
                     0.0,
                     button_color,
                     0.0,
-                    1.0,
+                    1.0, false,
                 ));
             }
 
@@ -388,7 +388,7 @@ impl Toolbar {
                     0.0,
                     uv_min,
                     uv_max,
-                    tint,
+                    tint, false,
                 ),
             });
         }

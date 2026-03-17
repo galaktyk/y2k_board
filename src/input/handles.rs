@@ -71,7 +71,7 @@ pub fn handles_to_instances(e: &Element, zoom: f32) -> Vec<InstanceData> {
                 0.0,
                 [1.0, 1.0, 1.0, 1.0],
                 1.0,
-                1.0,
+                1.0, false,
             ));
         }
         return out;
@@ -93,7 +93,7 @@ pub fn handles_to_instances(e: &Element, zoom: f32) -> Vec<InstanceData> {
         e.rotation,
         [1.0, 1.0, 1.0, 0.9],
         0.0,
-        1.0,
+        1.0, false,
     ));
 
     for pt in handles {
@@ -103,7 +103,7 @@ pub fn handles_to_instances(e: &Element, zoom: f32) -> Vec<InstanceData> {
             0.0,
             [1.0, 1.0, 1.0, 1.0],
             1.0,
-            1.0,
+            1.0, false,
         ));
     }
 
@@ -127,7 +127,7 @@ pub fn selection_bounds_handles_to_instances(bounds: SelectionBounds, zoom: f32)
         bounds.rotation,
         [1.0, 1.0, 1.0, 0.9],
         0.0,
-        1.0,
+        1.0, false,
     ));
 
     for pt in handles {
@@ -137,7 +137,7 @@ pub fn selection_bounds_handles_to_instances(bounds: SelectionBounds, zoom: f32)
             0.0,
             [1.0, 1.0, 1.0, 1.0],
             1.0,
-            1.0,
+            1.0, false,
         ));
     }
 

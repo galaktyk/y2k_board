@@ -4,7 +4,8 @@ use miniquad::PassAction;
 use crate::input::DragMode;
 use crate::rendering::renderer::{Renderer, TextInstanceData};
 use crate::rendering::transform::{
-    offset_instance, offset_text_instance, rotate_instance, rotate_point, rotate_text_instance,
+    offset_instance, rotate_instance,
+    rotate_point,
 };
 use crate::stats;
 use crate::text::{PreparedTextDraw, TextEditSession, TextEditSnapshot};
@@ -26,7 +27,7 @@ impl App {
             .then_some(self.input.rotate_delta)
             .filter(|angle| angle.abs() > 0.0)
             .zip(self.input.transform_bounds_origin.map(|bounds| bounds.center()));
-        let image_draws = self.build_image_draws(move_drag_offset, rotate_drag_preview);
+        let image_draws = self.build_image_draws();
 
         self.ctx.begin_default_pass(PassAction::clear_color(
             139.0 / 255.0,
@@ -82,51 +83,16 @@ impl App {
         rotate_drag_preview: Option<(f32, Vec2)>,
         image_draws: &[crate::rendering::renderer::PreparedImageDraw],
     ) {
-        if let Some(transformed) = self.transformed_shape_instances(move_drag_offset, rotate_drag_preview)
-        {
-            self.renderer
-                .draw_instances(&mut *self.ctx, &transformed, board_mvp, self.screen_size);
-        } else {
-            self.renderer
-                .draw_scene_instances(&mut *self.ctx, board_mvp, self.screen_size);
-        }
+        self.renderer.draw_scene_instances(
+            &mut *self.ctx,
+            board_mvp,
+            self.screen_size,
+            move_drag_offset,
+            rotate_drag_preview,
+        );
 
         self.renderer
-            .draw_image_draws(&mut *self.ctx, image_draws, board_mvp);
-    }
-
-    fn transformed_shape_instances(
-        &self,
-        move_drag_offset: Option<Vec2>,
-        rotate_drag_preview: Option<(f32, Vec2)>,
-    ) -> Option<Vec<crate::rendering::renderer::InstanceData>> {
-        if let Some((angle, center)) = rotate_drag_preview {
-            let mut transformed = self.board_render_cache.all_instances().to_vec();
-            for (board_index, element) in self.board.elements.iter().enumerate() {
-                if !element.selected {
-                    continue;
-                }
-
-                for instance in &mut transformed[self.board_render_cache.element_range(board_index)] {
-                    *instance = rotate_instance(*instance, center, angle);
-                }
-            }
-            return Some(transformed);
-        }
-
-        move_drag_offset.map(|offset| {
-            let mut transformed = self.board_render_cache.all_instances().to_vec();
-            for (board_index, element) in self.board.elements.iter().enumerate() {
-                if !element.selected {
-                    continue;
-                }
-
-                for instance in &mut transformed[self.board_render_cache.element_range(board_index)] {
-                    *instance = offset_instance(*instance, offset);
-                }
-            }
-            transformed
-        })
+            .draw_image_draws(&mut *self.ctx, image_draws, board_mvp, move_drag_offset, rotate_drag_preview);
     }
 
     fn draw_text_layers(
@@ -138,35 +104,18 @@ impl App {
         self.refresh_text_cache_if_needed();
         let text_draw = self.cached_text_draw.as_ref().unwrap();
 
-        let mono_instances = self.transformed_text_instances(
-            &text_draw.mono_instances,
-            text_draw,
-            true,
+        self.renderer.draw_scene_text_instances(
+            &mut *self.ctx,
+            board_mvp,
             move_drag_offset,
             rotate_drag_preview,
         );
-        let color_instances = self.transformed_text_instances(
-            &text_draw.color_instances,
-            text_draw,
-            false,
+        self.renderer.draw_scene_color_text_instances(
+            &mut *self.ctx,
+            board_mvp,
             move_drag_offset,
             rotate_drag_preview,
         );
-
-        match (&mono_instances, &color_instances) {
-            (Some(mono), Some(color)) => {
-                self.renderer
-                    .draw_text_instances(&mut *self.ctx, mono, board_mvp);
-                self.renderer
-                    .draw_color_text_instances(&mut *self.ctx, color, board_mvp);
-            }
-            _ => {
-                self.renderer
-                    .draw_scene_text_instances(&mut *self.ctx, board_mvp);
-                self.renderer
-                    .draw_scene_color_text_instances(&mut *self.ctx, board_mvp);
-            }
-        }
 
         let moved_caret_pos = self.transformed_caret_position(text_draw, move_drag_offset, rotate_drag_preview);
         if let Some(world_caret) = moved_caret_pos {
@@ -206,55 +155,6 @@ impl App {
         self.cached_text_draw = Some(prepared);
         self.cached_text_edit_snapshot = current_edit_snapshot;
         self.text_dirty = false;
-    }
-
-    fn transformed_text_instances(
-        &self,
-        instances: &[TextInstanceData],
-        text_draw: &PreparedTextDraw,
-        use_mono_ranges: bool,
-        move_drag_offset: Option<Vec2>,
-        rotate_drag_preview: Option<(f32, Vec2)>,
-    ) -> Option<Vec<TextInstanceData>> {
-        if let Some((angle, center)) = rotate_drag_preview {
-            return Some(
-                self.transform_text_ranges(instances, text_draw, use_mono_ranges, |instance| {
-                    rotate_text_instance(instance, center, angle)
-                }),
-            );
-        }
-
-        move_drag_offset.map(|offset| {
-            self.transform_text_ranges(instances, text_draw, use_mono_ranges, |instance| {
-                offset_text_instance(instance, offset)
-            })
-        })
-    }
-
-    fn transform_text_ranges(
-        &self,
-        instances: &[TextInstanceData],
-        text_draw: &PreparedTextDraw,
-        use_mono_ranges: bool,
-        mut transform: impl FnMut(TextInstanceData) -> TextInstanceData,
-    ) -> Vec<TextInstanceData> {
-        let mut updated = instances.to_vec();
-        for range in &text_draw.element_ranges {
-            if !self.board.is_selected(range.element_id) {
-                continue;
-            }
-
-            let (start, end) = if use_mono_ranges {
-                (range.mono_start, range.mono_end)
-            } else {
-                (range.color_start, range.color_end)
-            };
-
-            for instance in &mut updated[start..end] {
-                *instance = transform(*instance);
-            }
-        }
-        updated
     }
 
     fn transformed_caret_position(
@@ -399,7 +299,7 @@ impl App {
         self.renderer
             .draw_instances(&mut *self.ctx, &tb_inst, screen_mvp, self.screen_size);
         self.renderer
-            .draw_image_draws(&mut *self.ctx, &tb_icon_draws, screen_mvp);
+            .draw_image_draws(&mut *self.ctx, &tb_icon_draws, screen_mvp, None, None);
 
         if let Some(panel) = self.resolve_property_panel() {
             let panel_inst = crate::ui::property_panel::build_instances(

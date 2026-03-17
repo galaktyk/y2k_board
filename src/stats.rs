@@ -96,6 +96,6 @@ pub fn build_stats_background_instances(layout: &StatsPanelLayout) -> Vec<Instan
         0.0,
         [0.04, 0.05, 0.07, 0.80],
         0.0,
-        1.0,
+        1.0, false,
     )]
 }
