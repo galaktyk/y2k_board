@@ -2,7 +2,7 @@ use glam::Vec2;
 use miniquad::PassAction;
 
 use crate::input::DragMode;
-use crate::rendering::renderer::{Renderer, TextInstanceData};
+use crate::rendering::renderer::Renderer;
 use crate::rendering::transform::{
     offset_instance, rotate_instance,
     rotate_point,
@@ -13,9 +13,21 @@ use crate::ui::overlay;
 
 use super::App;
 
+
+// The pan glide friction coefficient, in world units per second per world unit of velocity.
+const PAN_GLIDE_FRICTION_PER_SECOND: f32 = 5.0;
+
+// When the pan velocity (in world units per second) multiplied by the zoom level is below this threshold, 
+// we stop panning to prevent imperceptibly slow movement and drifting.
+const PAN_GLIDE_STOP_SPEED_SCREEN: f32 = 8.0;
+
+// Maximum delta time to apply pan glide, to prevent large jumps after long frames or when resuming from a paused state.
+const PAN_GLIDE_MAX_DT_SECS: f32 = 1.0 / 50.0;
+
 impl App {
     pub(super) fn draw_frame(&mut self) {
         self.update_frame_timing();
+        self.apply_pan_glide();
         self.sync_board_render_cache();
         self.upload_scene_shapes_if_needed();
 
@@ -73,6 +85,27 @@ impl App {
             self.renderer
                 .upload_scene_instances(&mut *self.ctx, self.board_render_cache.all_instances());
             self.board_scene_dirty = false;
+        }
+    }
+
+    fn apply_pan_glide(&mut self) {
+        if self.input.panning || !self.input.has_pan_glide() {
+            return;
+        }
+
+        let dt = (self.frame_ms / 1000.0).clamp(0.0, PAN_GLIDE_MAX_DT_SECS);
+        if dt <= 0.0 {
+            return;
+        }
+
+        self.camera.pan += self.input.pan_velocity * dt;
+
+        let damping = (-PAN_GLIDE_FRICTION_PER_SECOND * dt).exp();
+        self.input.pan_velocity *= damping;
+
+        let screen_speed = self.input.pan_velocity.length() * self.camera.zoom;
+        if screen_speed < PAN_GLIDE_STOP_SPEED_SCREEN {
+            self.input.pan_velocity = Vec2::ZERO;
         }
     }
 

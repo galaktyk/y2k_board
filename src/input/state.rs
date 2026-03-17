@@ -88,6 +88,8 @@ pub struct InputState {
     pub panning: bool,
     pub pan_start_screen: Vec2,
     pub pan_start_world: Vec2,
+    pub pan_velocity: Vec2,
+    pub pan_velocity_sample_time: Option<f64>,
     pub dragging_tool: bool,
     pub drag_start_world: Vec2,
     pub drag_mode: DragMode,
@@ -143,6 +145,8 @@ impl InputState {
             panning: false,
             pan_start_screen: Vec2::ZERO,
             pan_start_world: Vec2::ZERO,
+            pan_velocity: Vec2::ZERO,
+            pan_velocity_sample_time: None,
             dragging_tool: false,
             drag_start_world: Vec2::ZERO,
             drag_mode: DragMode::None,
@@ -169,5 +173,9 @@ impl InputState {
 
     pub fn want_pan(&self) -> bool {
         self.space_held || self.mouse_down_middle
+    }
+
+    pub fn has_pan_glide(&self) -> bool {
+        self.pan_velocity.length_squared() > 0.0
     }
 }

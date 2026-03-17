@@ -274,6 +274,7 @@ impl App {
 
     fn needs_continuous_redraw(&self) -> bool {
         self.input.panning
+            || self.input.has_pan_glide()
             || self.input.drag_mode != DragMode::None
             || self.input.dragging_tool
     }

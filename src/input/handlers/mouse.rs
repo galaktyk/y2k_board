@@ -14,6 +14,47 @@ const MARQUEE_MIN_SIZE: f32 = 4.0;
 const DRAG_START_DISTANCE: f32 = 3.0;
 const COMPUTE_TEXT_LAYOUT_DEBOUNCE: f64 = 0.05;
 
+// The pan velocity smoothing factor, between 0 and 1. 
+// Higher values make the velocity change more smoothly but also more slowly.
+const PAN_VELOCITY_SMOOTHING: f32 = 0.45;
+
+// Minimum initial pan velocity (in screen pixels per second) required to trigger pan glide on mouse release.
+const PAN_GLIDE_MIN_LAUNCH_SPEED_SCREEN: f32 = 120.0;
+
+const PAN_GLIDE_MAX_LAUNCH_SPEED_SCREEN: f32 = 4000.0;
+
+// If the user releases the mouse after panning but has been idle for more than this duration, we won't trigger pan glide.
+const PAN_GLIDE_MAX_IDLE_BEFORE_RELEASE_SECS: f64 = 0.075;
+
+fn cancel_pan_glide(state: &mut InputState) {
+    state.pan_velocity = Vec2::ZERO;
+    state.pan_velocity_sample_time = None;
+}
+
+fn begin_pan(state: &mut InputState, camera: &Camera) {
+    cancel_pan_glide(state);
+    state.panning = true;
+    state.pan_start_screen = state.mouse_pos;
+    state.pan_start_world = camera.pan;
+    state.pan_velocity_sample_time = Some(miniquad::date::now());
+}
+
+fn finalize_pan_glide(state: &mut InputState, zoom: f32) {
+    let idle_before_release = state
+        .pan_velocity_sample_time
+        .map(|last_motion| miniquad::date::now() - last_motion)
+        .unwrap_or(f64::INFINITY);
+    let mut launch_speed_screen = state.pan_velocity.length() * zoom;
+    if idle_before_release > PAN_GLIDE_MAX_IDLE_BEFORE_RELEASE_SECS
+        || launch_speed_screen < PAN_GLIDE_MIN_LAUNCH_SPEED_SCREEN
+    {
+        state.pan_velocity = Vec2::ZERO;
+    } else if launch_speed_screen > PAN_GLIDE_MAX_LAUNCH_SPEED_SCREEN {
+        state.pan_velocity = state.pan_velocity.normalize() * (PAN_GLIDE_MAX_LAUNCH_SPEED_SCREEN / zoom);
+    }
+    state.pan_velocity_sample_time = None;
+}
+
 fn begin_transform_drag(
     state: &mut InputState,
     board: &Board,
@@ -366,9 +407,7 @@ pub fn on_mouse_down(
         miniquad::MouseButton::Right => state.mouse_down_right = true,
         miniquad::MouseButton::Middle => {
             state.mouse_down_middle = true;
-            state.panning = true;
-            state.pan_start_screen = state.mouse_pos;
-            state.pan_start_world = camera.pan;
+            begin_pan(state, camera);
         }
         _ => {}
     }
@@ -378,9 +417,7 @@ pub fn on_mouse_down(
     }
 
     if state.want_pan() {
-        state.panning = true;
-        state.pan_start_screen = state.mouse_pos;
-        state.pan_start_world = camera.pan;
+        begin_pan(state, camera);
         return false;
     }
 
@@ -499,6 +536,7 @@ pub fn on_mouse_up(
     y: f32,
     btn: miniquad::MouseButton,
 ) -> Option<Tool> {
+    let was_panning = state.panning;
     state.mouse_pos = Vec2::new(x, y);
 
     match btn {
@@ -512,6 +550,9 @@ pub fn on_mouse_up(
     }
 
     if btn != miniquad::MouseButton::Left {
+        if was_panning && !state.panning {
+            finalize_pan_glide(state, camera.zoom);
+        }
         return None;
     }
 
@@ -635,6 +676,10 @@ pub fn on_mouse_up(
         state.panning = false;
     }
 
+    if was_panning && !state.panning {
+        finalize_pan_glide(state, camera.zoom);
+    }
+
     None
 }
 
@@ -653,7 +698,26 @@ pub fn on_mouse_move(
     let delta_screen = state.mouse_pos - prev;
 
     if state.panning {
-        camera.pan -= delta_screen / camera.zoom;
+        let pan_delta = -delta_screen / camera.zoom;
+        camera.pan += pan_delta;
+
+        if pan_delta.length_squared() == 0.0 {
+            return;
+        }
+
+        let now = miniquad::date::now();
+        if let Some(last_sample_time) = state.pan_velocity_sample_time {
+            let dt = (now - last_sample_time) as f32;
+            if dt > 0.0 {
+                let instant_velocity = pan_delta / dt;
+                state.pan_velocity = if state.pan_velocity.length_squared() > 0.0 {
+                    state.pan_velocity.lerp(instant_velocity, PAN_VELOCITY_SMOOTHING)
+                } else {
+                    instant_velocity
+                };
+            }
+        }
+        state.pan_velocity_sample_time = Some(now);
         return;
     }
 
