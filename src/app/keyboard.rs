@@ -47,6 +47,28 @@ impl App {
                     self.set_active_tool(crate::ui::tool::Tool::Text);
                     return;
                 }
+                KeyCode::PageUp => {
+                    let mut order_changed = false;
+                    let selected: Vec<_> = self.board.selected_ids().into_iter().collect();
+                    for id in selected {
+                        order_changed |= self.board.bring_to_front(id);
+                    }
+                    if order_changed {
+                        self.mark_board_order_dirty();
+                    }
+                    return;
+                }
+                KeyCode::PageDown => {
+                    let mut order_changed = false;
+                    let selected: Vec<_> = self.board.selected_ids().into_iter().collect();
+                    for id in selected.into_iter().rev() {
+                        order_changed |= self.board.send_to_back(id);
+                    }
+                    if order_changed {
+                        self.mark_board_order_dirty();
+                    }
+                    return;
+                }
                 KeyCode::Tab => {
                     if self.reset_selected_rotation() {
                         return;

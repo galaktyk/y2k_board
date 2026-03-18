@@ -398,7 +398,7 @@ pub fn on_mouse_down(
     btn: miniquad::MouseButton,
 ) -> bool {
     const DOUBLE_CLICK_WINDOW: f64 = 0.4;
-    let mut order_changed = false;
+    let order_changed = false;
 
     state.mouse_pos = Vec2::new(x, y);
 
@@ -455,9 +455,6 @@ pub fn on_mouse_down(
                     state.last_click_at = None;
                     state.text_selecting = false;
                     board.toggle_selected(id);
-                    if board.is_selected(id) {
-                        order_changed = board.bring_shape_to_front(id);
-                    }
                     sync_multi_selection_bounds(state, board);
                     state.drag_selection_bounds = state.selection_bounds;
                     return order_changed;
@@ -484,7 +481,6 @@ pub fn on_mouse_down(
                     board.deselect_all();
                     board.select_only(id);
                     state.selection_bounds = None;
-                    order_changed = board.bring_shape_to_front(id);
                 }
 
                 if is_double_click {

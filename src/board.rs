@@ -725,38 +725,29 @@ impl Board {
         }
     }
 
-    pub fn bring_shape_to_front(&mut self, id: u64) -> bool {
-        let Some(index) = self.elements.iter().position(|element| element.id == id) else {
-            return false;
-        };
-
-        if self.elements[index].shape == ShapeType::Image {
-            return false;
+    pub fn bring_to_front(&mut self, id: u64) -> bool {
+        if let Some(index) = self.elements.iter().position(|element| element.id == id) {
+            if index < self.elements.len() - 1 {
+                let element = self.elements.remove(index);
+                self.elements.push(element);
+                return true;
+            }
         }
-
-        let mut current_index = index;
-        let mut changed = false;
-
-        while let Some(next_shape_index) = self
-            .elements
-            .iter()
-            .enumerate()
-            .skip(current_index + 1)
-            .find_map(|(candidate_index, element)| {
-                (element.shape != ShapeType::Image).then_some(candidate_index)
-            })
-        {
-            self.elements.swap(current_index, next_shape_index);
-            current_index = next_shape_index;
-            changed = true;
-        }
-
-        if !changed {
-            return false;
-        }
-
-        true
+        false
     }
+
+    pub fn send_to_back(&mut self, id: u64) -> bool {
+        if let Some(index) = self.elements.iter().position(|element| element.id == id) {
+            if index > 0 {
+                let element = self.elements.remove(index);
+                self.elements.insert(0, element);
+                return true;
+            }
+        }
+        false
+    }
+
+    // Keep the old one for compatibility just in case, or replace it if not used elsewhere.
 
     pub fn selected_bounds(&self) -> Option<SelectionBounds> {
         let mut bounds: Option<(Vec2, Vec2)> = None;
@@ -922,7 +913,7 @@ mod tests {
     }
 
     #[test]
-    fn bring_shape_to_front_keeps_images_after_shapes() {
+    fn bring_to_front_works() {
         let mut board = Board::new();
         board.elements = vec![
             Element {
@@ -979,8 +970,8 @@ mod tests {
             },
         ];
 
-        assert!(board.bring_shape_to_front(1));
-        assert_eq!(board.elements.iter().map(|element| element.id).collect::<Vec<_>>(), vec![3, 2, 1]);
+        assert!(board.bring_to_front(1));
+        assert_eq!(board.elements.iter().map(|element| element.id).collect::<Vec<_>>(), vec![2, 3, 1]);
     }
 
     #[test]
