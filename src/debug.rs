@@ -248,10 +248,10 @@ pub fn spawn_debug_shapes(board: &mut Board, camera: &Camera, screen_size: Vec2)
             stroke_color: if shape == ShapeType::Line {
                 border_color
             } else {
-                default_stroke_color()
+                palette::BLACK
             },
-            border_width: default_border_width(),
-            stroke_width: default_line_stroke_width(),
+            border_width: 1,
+            stroke_width: 1,
             selected: false,
             text,
             image: None,
