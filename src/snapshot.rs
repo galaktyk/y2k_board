@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::board::{Board, Element};
+use crate::board::{Board, Element, LineEndpoints};
 use crate::platform::snapshot::{PlatformSnapshotAdapter, SnapshotPersistenceAdapter};
 
 const SNAPSHOT_FILENAME: &str = "snapshot.bin";
@@ -18,6 +18,8 @@ pub struct LoadedSnapshot {
 pub struct SnapshotData {
     pub elements: Vec<Element>,
     pub next_id: u64,
+    #[serde(default)]
+    pub line_attachments: std::collections::HashMap<u64, LineEndpoints>,
 }
 
 #[derive(Debug)]
@@ -79,6 +81,7 @@ pub fn snapshot_from_board(board: &Board) -> SnapshotData {
             })
             .collect(),
         next_id: board.next_available_id(),
+        line_attachments: board.line_attachments.clone(),
     }
 }
 

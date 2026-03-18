@@ -1,46 +1,48 @@
 ﻿const fs = require('fs');
-let r = fs.readFileSync('src/renderer.rs', 'utf8');
+let code = fs.readFileSync('src/input/handlers/mouse.rs', 'utf8');
 
-// 1. SHADER UPDATES
-// shape vertex
-r = r.replace('attribute vec2 i_pos;\nattribute vec2 i_size;\nattribute float i_rotation;\nattribute vec4 i_color;\nattribute float i_shape;\nattribute float i_alpha;',
-ttribute vec2 i_pos;
-attribute vec2 i_size;
-attribute vec4 i_color;
-attribute float i_rotation;
-attribute vec4 i_pack;);
+// replace the hit tests!
+code = code.replace(
+    /let hit_target_start = board\.hit_test\(start_pos\)\.filter\(\|\&h_id\| h_id \!\= id\);/g,
+    'let hit_target_start = board.hit_test_all(start_pos).into_iter().find(|&h_id| h_id != id && board.element(h_id).map(|e| e.shape != ShapeType::Line).unwrap_or(false));'
+);
+code = code.replace(
+    /let hit_target_end = board\.hit_test\(end_pos\)\.filter\(\|\&h_id\| h_id \!\= id\);/g,
+    'let hit_target_end = board.hit_test_all(end_pos).into_iter().find(|&h_id| h_id != id && board.element(h_id).map(|e| e.shape != ShapeType::Line).unwrap_or(false));'
+);
 
-r = r.replace(/vec2 world_pos;\n\s*if \(i_shape > 1\.5[\s\S]*?else/m,
-    vec4 actual_color = i_color / 255.0;
-    float i_alpha = i_pack.x / 255.0;
-    float i_shape = i_pack.y;
+code = code.replace(
+    /let hit_target_start = board\.hit_test\(start_pos\)\.filter\(\|\&h_id\| h_id \!\= new_id\);/g,
+    'let hit_target_start = board.hit_test_all(start_pos).into_iter().find(|&h_id| h_id != new_id && board.element(h_id).map(|e| e.shape != ShapeType::Line).unwrap_or(false));'
+);
+code = code.replace(
+    /let hit_target_end = board\.hit_test\(end_pos\)\.filter\(\|\&h_id\| h_id \!\= new_id\);/g,
+    'let hit_target_end = board.hit_test_all(end_pos).into_iter().find(|&h_id| h_id != new_id && board.element(h_id).map(|e| e.shape != ShapeType::Line).unwrap_or(false));'
+);
 
-    vec2 world_pos;
-    if (i_shape > 1.5 && i_shape < 2.5) {
-        // Line
-        vec2 dir = i_size;
-        float len = length(dir);
-        if (len < 0.0001) { len = 0.0001; }
-        vec2 u = dir / len;
-        vec2 v = vec2(-u.y, u.x);
-        
-        float margin = 8.0; // half-thickness + antialiasing
-        
-        vec2 p = vec2(
-            mix(-margin, len + margin, a_pos.x),
-            mix(-margin, margin, a_pos.y)
-        );
-        world_pos = i_pos + p.x * u + p.y * v;
-        
-        v_line_p = p;
-        v_line_len = len;
-        v_uv = a_pos;
-    } else);
+let blockStartMatch = code.indexOf('if matches!(state.drag_mode, DragMode::ResizingHandle(_) | DragMode::MoveSelected) {');
+let lines = code.split('\n');
+let blockStartLine = lines.findIndex(l => l.includes('if matches!(state.drag_mode, DragMode::ResizingHandle(_) | DragMode::MoveSelected) {'));
 
-r = r.replace('v_color = i_color;', 'v_color = actual_color;');
-r = r.replace('v_shape = i_shape;', 'v_shape = i_shape;');
-r = r.replace('v_alpha = i_alpha;', 'v_alpha = i_alpha;');
+// find closing brace of that if matches! block.
+let openBraces = 0;
+let blockEndLine = -1;
+let started = false;
+for (let i = blockStartLine; i < lines.length; i++) {
+    if (!started && lines[i].includes('{')) {
+        started = true;
+    }
+    openBraces += (lines[i].match(/\{/g) || []).length;
+    openBraces -= (lines[i].match(/\}/g) || []).length;
+    if (started && openBraces === 0) {
+        blockEndLine = i;
+        break;
+    }
+}
 
-// text vertex
-r = r.replace('attribute vec4 i_color;', 'attribute vec4 i_color;\nattribute vec2 i_origin;\n'); // wait, let's just make it exact
-fs.writeFileSync('src/renderer.rs', r);
+let extractedBlock = lines.slice(blockStartLine, blockEndLine + 1).join('\n');
+code = code.replace(extractedBlock, '');
+
+code = code.replace('state.drag_mode = DragMode::None;', extractedBlock + '\n    state.drag_mode = DragMode::None;');
+
+fs.writeFileSync('src/input/handlers/mouse.rs', code);

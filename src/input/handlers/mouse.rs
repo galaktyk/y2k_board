@@ -2,8 +2,8 @@ use glam::Vec2;
 
 
 use crate::board::{
-    Board, BoardOperation, Element, ElementPropertyChange, ElementPropertyPatch, ElementTransform,
-    ShapeType, ToolStyleDefaults,
+    world_to_local_norm, Board, BoardOperation, Element, LineAnchor, LineConnectionChange,
+    LineEndpoints, ShapeType, ToolStyleDefaults,
 };
 use crate::camera::Camera;
 use crate::input::handles::{get_element_handles, get_selection_bounds_handles, handle_hit_radius};
@@ -111,21 +111,6 @@ fn sync_multi_selection_bounds(state: &mut InputState, board: &Board) {
     } else {
         None
     };
-}
-
-fn move_changes_from_delta(state: &InputState) -> Vec<ElementPropertyChange> {
-    state
-        .move_origin
-        .iter()
-        .filter_map(|&(id, pos, size, rotation)| {
-            let before = ElementTransform::new(pos, size, rotation);
-            let after = ElementTransform::new(pos + state.move_delta, size, rotation);
-            (before != after).then_some(ElementPropertyChange {
-                id,
-                patch: ElementPropertyPatch::Transform { before, after },
-            })
-        })
-        .collect()
 }
 
 fn transform_ids(state: &InputState) -> Vec<u64> {
@@ -347,6 +332,131 @@ fn selection_bounds_from_selected_elements_in_frame(
     })
 }
 
+fn rect_edge_anchor(norm_pos: Vec2) -> Vec2 {
+    let mut snapped = norm_pos.clamp(Vec2::ZERO, Vec2::ONE);
+    let dist_left = snapped.x;
+    let dist_right = 1.0 - snapped.x;
+    let dist_top = snapped.y;
+    let dist_bottom = 1.0 - snapped.y;
+
+    let min_x = dist_left.min(dist_right);
+    let min_y = dist_top.min(dist_bottom);
+
+    if min_x <= min_y {
+        snapped.x = if dist_left <= dist_right { 0.0 } else { 1.0 };
+    } else {
+        snapped.y = if dist_top <= dist_bottom { 0.0 } else { 1.0 };
+    }
+
+    snapped
+}
+
+fn ellipse_edge_anchor(norm_pos: Vec2) -> Vec2 {
+    let centered = norm_pos * 2.0 - Vec2::ONE;
+    if centered.length_squared() <= 0.0001 {
+        return Vec2::new(1.0, 0.5);
+    }
+
+    let boundary = centered.normalize();
+    (boundary + Vec2::ONE) * 0.5
+}
+
+fn line_anchor_from_drop(target: &Element, world: Vec2) -> Option<LineAnchor> {
+    let norm_pos = match target.shape {
+        ShapeType::Rect | ShapeType::Image => rect_edge_anchor(world_to_local_norm(world, target)),
+        ShapeType::Ellipse => ellipse_edge_anchor(world_to_local_norm(world, target)),
+        ShapeType::Line => return None,
+    };
+
+    Some(LineAnchor {
+        target_id: target.id,
+        norm_pos,
+    })
+}
+
+fn find_line_anchor(board: &Board, line_id: u64, world: Vec2) -> Option<LineAnchor> {
+    board
+        .hit_test_all(world)
+        .into_iter()
+        .filter(|&target_id| target_id != line_id)
+        .find_map(|target_id| {
+            let target = board.element(target_id)?;
+            line_anchor_from_drop(target, world)
+        })
+}
+
+fn resolved_line_endpoints(board: &Board, line_id: u64) -> Option<LineEndpoints> {
+    let line = board.element(line_id)?;
+    if line.shape != ShapeType::Line {
+        return None;
+    }
+
+    Some(LineEndpoints {
+        start: find_line_anchor(board, line_id, line.pos),
+        end: find_line_anchor(board, line_id, line.pos + line.size),
+    })
+}
+
+fn line_connection_change_for_handle_release(
+    board: &Board,
+    line_id: u64,
+    dir: HandleDir,
+) -> Option<LineConnectionChange> {
+    let line = board.element(line_id)?;
+    if line.shape != ShapeType::Line {
+        return None;
+    }
+
+    let before = board
+        .line_attachments
+        .get(&line_id)
+        .cloned()
+        .unwrap_or_default();
+    let mut after = before.clone();
+    let start_world = line.pos;
+    let end_world = line.pos + line.size;
+
+    match dir {
+        HandleDir::LineStart => after.start = find_line_anchor(board, line_id, start_world),
+        HandleDir::LineEnd => after.end = find_line_anchor(board, line_id, end_world),
+        _ => return None,
+    }
+
+    (after != before).then_some(LineConnectionChange {
+        id: line_id,
+        before,
+        after,
+    })
+}
+
+fn line_connection_change_for_move_release(
+    board: &Board,
+    line_id: u64,
+) -> Option<LineConnectionChange> {
+    let before = board
+        .line_attachments
+        .get(&line_id)
+        .cloned()
+        .unwrap_or_default();
+    let after = resolved_line_endpoints(board, line_id)?;
+
+    (after != before).then_some(LineConnectionChange {
+        id: line_id,
+        before,
+        after,
+    })
+}
+
+fn new_line_connections(board: &Board, line_id: u64) -> Option<LineConnectionChange> {
+    let after = resolved_line_endpoints(board, line_id)?;
+
+    (!matches!(after, LineEndpoints { start: None, end: None })).then_some(LineConnectionChange {
+        id: line_id,
+        before: LineEndpoints::default(),
+        after,
+    })
+}
+
 fn resized_selection_bounds(bounds: SelectionBounds, dir: HandleDir, world: Vec2) -> Option<SelectionBounds> {
     let center = bounds.center();
     let local_world = inverse_rotate_point(world, center, bounds.rotation);
@@ -533,6 +643,7 @@ pub fn on_mouse_up(
     btn: miniquad::MouseButton,
 ) -> Option<Tool> {
     let was_panning = state.panning;
+    let completed_drag_mode = state.drag_mode;
     state.mouse_pos = Vec2::new(x, y);
 
     match btn {
@@ -579,22 +690,25 @@ pub fn on_mouse_up(
                 }
             }
             DragMode::MoveSelected => {
-                if state.move_origin.len() > 1 {
-                    let ids = transform_ids(state);
-                    if !ids.is_empty() && state.move_delta != Vec2::ZERO {
-                        board.apply_operation(BoardOperation::MoveElements {
-                            ids,
-                            delta: state.move_delta,
-                        });
-                    }
-                } else {
-                    let changes = move_changes_from_delta(state);
-                    if !changes.is_empty() {
-                        board.apply_operation(BoardOperation::SetProperty { changes });
-                    }
+                let changes = board.selected_transform_changes(&state.move_origin);
+                if !changes.is_empty() {
+                    board.apply_operation(BoardOperation::SetProperty { changes });
                 }
+
+                let line_connection_changes: Vec<LineConnectionChange> = state
+                    .move_origin
+                    .iter()
+                    .map(|&(id, _, _, _)| id)
+                    .filter_map(|id| line_connection_change_for_move_release(board, id))
+                    .collect();
+                if !line_connection_changes.is_empty() {
+                    board.apply_operation(BoardOperation::SetLineConnections {
+                        changes: line_connection_changes,
+                    });
+                }
+
                 if state.move_origin.len() > 1 {
-                    state.selection_bounds = state.drag_selection_bounds;
+                    state.selection_bounds = board.selected_bounds();
                 }
             }
             DragMode::Rotating if state.move_origin.len() > 1 => {
@@ -617,6 +731,19 @@ pub fn on_mouse_up(
                 }
                 if state.move_origin.len() > 1 {
                     state.selection_bounds = state.drag_selection_bounds;
+                }
+            }
+        }
+
+        if state.move_origin.len() == 1 {
+            if let DragMode::ResizingHandle(dir @ (HandleDir::LineStart | HandleDir::LineEnd)) =
+                completed_drag_mode
+            {
+                let line_id = state.move_origin[0].0;
+                if let Some(change) = line_connection_change_for_handle_release(board, line_id, dir) {
+                    board.apply_operation(BoardOperation::SetLineConnections {
+                        changes: vec![change],
+                    });
                 }
             }
         }
@@ -659,6 +786,11 @@ pub fn on_mouse_up(
                 board.apply_operation(BoardOperation::AddElement(element));
                 board.deselect_all();
                 board.select_only(new_id);
+                if let Some(change) = new_line_connections(board, new_id) {
+                    board.apply_operation(BoardOperation::SetLineConnections {
+                        changes: vec![change],
+                    });
+                }
                 if matches!(active_tool, Tool::Text) {
                     state.active_text_id = Some(new_id);
                     state.text_cursor = 0;
@@ -745,9 +877,22 @@ pub fn on_mouse_move(
         state.move_delta = world - state.move_start_world;
         state.rotate_delta = 0.0;
         if state.drag_mode == DragMode::MoveSelected {
-            state.drag_selection_bounds = state
-                .transform_bounds_origin
-                .map(|bounds| bounds.with_rotation(bounds.rotation).with_position(bounds.pos + state.move_delta));
+            let moving_ids = transform_ids(state);
+
+            for &(id, orig_pos, orig_size, orig_rot) in &state.move_origin {
+                if let Some(element) = board.element_mut(id) {
+                    element.pos = orig_pos + state.move_delta;
+                    element.size = orig_size;
+                    element.rotation = orig_rot;
+                }
+            }
+
+            board.update_connected_lines_for_targets(moving_ids);
+            state.drag_selection_bounds = if state.move_origin.len() > 1 {
+                board.selected_bounds()
+            } else {
+                None
+            };
             return;
         }
 

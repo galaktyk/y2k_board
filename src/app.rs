@@ -713,7 +713,7 @@ impl App {
                 let asset_root = snapshot::snapshot_root(&self.snapshot_path);
                 self.image_manager.set_asset_root(&mut *self.ctx, asset_root);
                 self.board
-                    .restore_snapshot(loaded.data.elements, loaded.data.next_id);
+                    .restore_snapshot(loaded.data);
                 self.camera = Camera::new();
                 self.input = InputState::new();
                 self.toolbar = Toolbar::new();
@@ -1064,7 +1064,18 @@ impl EventHandler for App {
             return;
         }
 
-        if matches!(self.input.drag_mode, DragMode::MarqueeSelect | DragMode::MoveSelected)
+        if self.input.drag_mode == DragMode::MoveSelected {
+            let moving_ids = self
+                .input
+                .move_origin
+                .iter()
+                .map(|&(id, _, _, _)| id)
+                .collect::<Vec<_>>();
+            self.mark_elements_dirty(self.board.transform_related_ids(moving_ids));
+            return;
+        }
+
+        if self.input.drag_mode == DragMode::MarqueeSelect
             || (self.input.drag_mode == DragMode::Rotating && self.input.move_origin.len() > 1)
         {
             self.request_redraw();

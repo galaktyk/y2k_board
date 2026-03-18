@@ -149,6 +149,18 @@ impl Default for TextData {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LineAnchor {
+    pub target_id: u64,
+    pub norm_pos: Vec2,
+}
+
+#[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LineEndpoints {
+    pub start: Option<LineAnchor>,
+    pub end: Option<LineAnchor>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Element {
     pub id: u64,
@@ -299,7 +311,7 @@ impl ElementTransform {
     }
 }
 
-fn rotate_point(point: Vec2, center: Vec2, angle: f32) -> Vec2 {
+pub fn rotate_point(point: Vec2, center: Vec2, angle: f32) -> Vec2 {
     let offset = point - center;
     let cos_a = angle.cos();
     let sin_a = angle.sin();
@@ -307,6 +319,12 @@ fn rotate_point(point: Vec2, center: Vec2, angle: f32) -> Vec2 {
         offset.x * cos_a - offset.y * sin_a,
         offset.x * sin_a + offset.y * cos_a,
     )
+}
+
+pub fn world_to_local_norm(world: Vec2, target: &Element) -> Vec2 {
+    let origin = target.pos + target.size * 0.5;
+    let local = rotate_point(world, origin, -target.rotation);
+    (local - target.pos) / target.size
 }
 
 fn apply_transform(element: &mut Element, before: Option<ElementTransform>, after: ElementTransform) {
@@ -367,6 +385,13 @@ pub struct ElementRotationChange {
 }
 
 #[derive(Clone, Debug)]
+pub struct LineConnectionChange {
+    pub id: u64,
+    pub before: LineEndpoints,
+    pub after: LineEndpoints,
+}
+
+#[derive(Clone, Debug)]
 pub enum BoardOperation {
     AddElement(Element),
     DeleteElement(Element),
@@ -374,6 +399,7 @@ pub enum BoardOperation {
     RotateElements { ids: Vec<u64>, center: Vec2, angle: f32 },
     SetElementRotations { changes: Vec<ElementRotationChange> },
     SetProperty { changes: Vec<ElementPropertyChange> },
+    SetLineConnections { changes: Vec<LineConnectionChange> },
 }
 
 #[derive(Clone, Debug)]
@@ -428,6 +454,16 @@ fn inverse(op: &BoardOperation) -> BoardOperation {
                             after: before.clone(),
                         },
                     },
+                })
+                .collect(),
+        },
+        BoardOperation::SetLineConnections { changes } => BoardOperation::SetLineConnections {
+            changes: changes
+                .iter()
+                .map(|change| LineConnectionChange {
+                    id: change.id,
+                    before: change.after.clone(),
+                    after: change.before.clone(),
                 })
                 .collect(),
         },
@@ -525,6 +561,19 @@ fn log_operation(op: &BoardOperation) {
                 }
             }
         }
+        BoardOperation::SetLineConnections { changes } => {
+            println!("[ops] SET_LINE_CONNECTIONS count={}", changes.len());
+            for change in changes {
+                println!(
+                    "[ops]   id={} start: id={:?} -> {:?} end: id={:?} -> {:?}",
+                    change.id,
+                    change.before.start.as_ref().map(|s| s.target_id),
+                    change.after.start.as_ref().map(|s| s.target_id),
+                    change.before.end.as_ref().map(|e| e.target_id),
+                    change.after.end.as_ref().map(|e| e.target_id),
+                );
+            }
+        }
     }
 }
 
@@ -532,6 +581,8 @@ fn log_operation(op: &BoardOperation) {
 
 pub struct Board {
     pub elements: Vec<Element>,
+    pub line_attachments: std::collections::HashMap<u64, LineEndpoints>,
+    connected_lines: std::collections::HashMap<u64, Vec<u64>>,
     undo_stack: Vec<HistoryEntry>,
     redo_stack: Vec<HistoryEntry>,
     emitted_ops: Vec<BoardOperation>,
@@ -542,6 +593,8 @@ impl Board {
     pub fn new() -> Self {
         Self {
             elements: Vec::new(),
+            line_attachments: std::collections::HashMap::new(),
+            connected_lines: std::collections::HashMap::new(),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             emitted_ops: Vec::new(),
@@ -575,15 +628,98 @@ impl Board {
         self.execute(&BoardOperation::AddElement(element));
     }
 
-    pub fn restore_snapshot(&mut self, mut elements: Vec<Element>, next_id: u64) {
+    pub fn restore_snapshot(&mut self, data: crate::snapshot::SnapshotData) {
+        let mut elements = data.elements;
         for element in &mut elements {
             element.selected = false;
         }
         self.elements = elements;
-        self.next_id = next_id.max(1);
+        self.line_attachments = data.line_attachments;
+        
+        let mut connected_lines = std::collections::HashMap::new();
+        for (line_id, endpoints) in &self.line_attachments {
+            if let Some(start) = &endpoints.start {
+                connected_lines.entry(start.target_id).or_insert_with(Vec::new).push(*line_id);
+            }
+            if let Some(end) = &endpoints.end {
+                connected_lines.entry(end.target_id).or_insert_with(Vec::new).push(*line_id);
+            }
+        }
+        self.connected_lines = connected_lines;
+        
+        self.next_id = data.next_id.max(1);
         self.undo_stack.clear();
         self.redo_stack.clear();
         self.emitted_ops.clear();
+    }
+
+    pub fn update_connected_lines(&mut self, target_id: u64) {
+        let (target_pos, target_size, target_rotation) = if let Some(target) = self.element(target_id) {
+            (target.pos, target.size, target.rotation)
+        } else {
+            return;
+        };
+
+        let line_ids = self.connected_lines.get(&target_id).cloned().unwrap_or_default();
+
+        for line_id in line_ids {
+            let endpoints = self.line_attachments.get(&line_id).cloned();
+            if let Some(endpoints) = endpoints {
+                if let Some(line) = self.element_mut(line_id) {
+                    let mut start_pos = line.pos;
+                    let mut end_pos = line.pos + line.size;
+
+                    let origin = target_pos + target_size * 0.5;
+
+                    if let Some(start) = &endpoints.start {
+                        if start.target_id == target_id {
+                            let local = (start.norm_pos - Vec2::splat(0.5)) * target_size;
+                            start_pos = rotate_point(origin + local, origin, target_rotation);
+                        }
+                    }
+                    if let Some(end) = &endpoints.end {
+                        if end.target_id == target_id {
+                            let local = (end.norm_pos - Vec2::splat(0.5)) * target_size;
+                            end_pos = rotate_point(origin + local, origin, target_rotation);
+                        }
+                    }
+
+                    line.pos = start_pos;
+                    line.size = end_pos - start_pos;
+                }
+            }
+        }
+    }
+
+    pub fn update_connected_lines_for_targets<I>(&mut self, target_ids: I)
+    where
+        I: IntoIterator<Item = u64>,
+    {
+        let mut unique_ids: Vec<u64> = target_ids.into_iter().collect();
+        unique_ids.sort_unstable();
+        unique_ids.dedup();
+
+        for target_id in unique_ids {
+            self.update_connected_lines(target_id);
+        }
+    }
+
+    pub fn transform_related_ids<I>(&self, ids: I) -> Vec<u64>
+    where
+        I: IntoIterator<Item = u64>,
+    {
+        let mut related = std::collections::HashSet::new();
+
+        for id in ids {
+            related.insert(id);
+            if let Some(line_ids) = self.connected_lines.get(&id) {
+                related.extend(line_ids.iter().copied());
+            }
+        }
+
+        let mut related: Vec<u64> = related.into_iter().collect();
+        related.sort_unstable();
+        related
     }
 
     #[allow(dead_code)]
@@ -606,6 +742,7 @@ impl Board {
                     if let Some(element) = self.elements.iter_mut().find(|element| &element.id == id) {
                         move_element(element, *delta);
                     }
+                    self.update_connected_lines(*id);
                 }
             }
             BoardOperation::RotateElements { ids, center, angle } => {
@@ -613,6 +750,7 @@ impl Board {
                     if let Some(element) = self.elements.iter_mut().find(|element| &element.id == id) {
                         rotate_element(element, *center, *angle);
                     }
+                    self.update_connected_lines(*id);
                 }
             }
             BoardOperation::SetElementRotations { changes } => {
@@ -621,6 +759,7 @@ impl Board {
                     {
                         element.rotation = change.after;
                     }
+                    self.update_connected_lines(change.id);
                 }
             }
             BoardOperation::SetProperty { changes } => {
@@ -632,6 +771,7 @@ impl Board {
                     if let Some(element) = self.elements.iter_mut().find(|e| e.id == change.id) {
                         apply_transform(element, before, after);
                     }
+                    self.update_connected_lines(change.id);
                 }
                 for change in changes {
                     let after = match &change.patch {
@@ -652,6 +792,52 @@ impl Board {
                         element.bump_text_generation();
                     }
                 }
+            }
+            BoardOperation::SetLineConnections { changes } => {
+                let mut affected_targets = Vec::new();
+                for change in changes {
+                    if let Some(before_start) = &change.before.start {
+                        affected_targets.push(before_start.target_id);
+                        if let Some(lines) = self.connected_lines.get_mut(&before_start.target_id) {
+                            lines.retain(|id| *id != change.id);
+                        }
+                    }
+                    if let Some(before_end) = &change.before.end {
+                        affected_targets.push(before_end.target_id);
+                        if let Some(lines) = self.connected_lines.get_mut(&before_end.target_id) {
+                            lines.retain(|id| *id != change.id);
+                        }
+                    }
+
+                    if let Some(after_start) = &change.after.start {
+                        affected_targets.push(after_start.target_id);
+                        let lines = self
+                            .connected_lines
+                            .entry(after_start.target_id)
+                            .or_insert_with(Vec::new);
+                        if !lines.contains(&change.id) {
+                            lines.push(change.id);
+                        }
+                    }
+                    if let Some(after_end) = &change.after.end {
+                        affected_targets.push(after_end.target_id);
+                        let lines = self
+                            .connected_lines
+                            .entry(after_end.target_id)
+                            .or_insert_with(Vec::new);
+                        if !lines.contains(&change.id) {
+                            lines.push(change.id);
+                        }
+                    }
+
+                    if change.after.start.is_none() && change.after.end.is_none() {
+                        self.line_attachments.remove(&change.id);
+                    } else {
+                        self.line_attachments.insert(change.id, change.after.clone());
+                    }
+                }
+
+                self.update_connected_lines_for_targets(affected_targets);
             }
         }
     }
@@ -680,6 +866,46 @@ impl Board {
 
     pub fn delete_selected(&mut self) {
         let selected: Vec<Element> = self.elements.iter().filter(|e| e.selected).cloned().collect();
+        if selected.is_empty() {
+            return;
+        }
+
+        let deleted_ids: std::collections::HashSet<u64> = selected.iter().map(|e| e.id).collect();
+        let mut conn_changes = Vec::new();
+
+        for (line_id, endpoints) in &self.line_attachments {
+            let mut after = endpoints.clone();
+            let is_line_deleted = deleted_ids.contains(line_id);
+
+            if is_line_deleted {
+                after.start = None;
+                after.end = None;
+            } else {
+                if let Some(start) = &after.start {
+                    if deleted_ids.contains(&start.target_id) {
+                        after.start = None;
+                    }
+                }
+                if let Some(end) = &after.end {
+                    if deleted_ids.contains(&end.target_id) {
+                        after.end = None;
+                    }
+                }
+            }
+
+            if after != *endpoints {
+                conn_changes.push(LineConnectionChange {
+                    id: *line_id,
+                    before: endpoints.clone(),
+                    after,
+                });
+            }
+        }
+
+        if !conn_changes.is_empty() {
+            self.apply_operation(BoardOperation::SetLineConnections { changes: conn_changes });
+        }
+
         for element in selected {
             self.apply_operation(BoardOperation::DeleteElement(element));
         }
@@ -827,6 +1053,25 @@ impl Board {
         }
 
         None
+    }
+
+    /// Hit-test a world-space point against elements, returning all hits in top-to-bottom order.
+    pub fn hit_test_all(&self, p: Vec2) -> Vec<u64> {
+        let mut hits = Vec::new();
+        
+        for element in self.elements.iter().rev() {
+            if element.shape != ShapeType::Image && element_hit(element, p) {
+                hits.push(element.id);
+            }
+        }
+
+        for element in self.elements.iter().rev() {
+            if element.shape == ShapeType::Image && element_hit(element, p) {
+                hits.push(element.id);
+            }
+        }
+
+        hits
     }
 
     pub fn element(&self, id: u64) -> Option<&Element> {
