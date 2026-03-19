@@ -842,6 +842,7 @@ pub fn on_mouse_up(
 pub fn on_mouse_move(
     state: &mut InputState,
     board: &mut Board,
+    preview_visible_ids: Option<&std::collections::HashSet<u64>>,
     camera: &mut Camera,
     tool_style_defaults: &ToolStyleDefaults,
     active_tool: Tool,
@@ -916,7 +917,7 @@ pub fn on_mouse_move(
                     }
                 }
 
-                board.update_connected_lines_for_targets(moving_ids);
+                board.update_connected_lines_for_targets_filtered(moving_ids, preview_visible_ids);
                 state.drag_selection_bounds = None;
             } else {
                 state.drag_selection_bounds = state

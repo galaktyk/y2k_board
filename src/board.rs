@@ -668,6 +668,14 @@ impl Board {
     }
 
     pub fn update_connected_lines(&mut self, target_id: u64) {
+        self.update_connected_lines_filtered(target_id, None);
+    }
+
+    pub fn update_connected_lines_filtered(
+        &mut self,
+        target_id: u64,
+        visible_ids: Option<&std::collections::HashSet<u64>>,
+    ) {
         let (target_pos, target_size, target_rotation) = if let Some(target) = self.element(target_id) {
             (target.pos, target.size, target.rotation)
         } else {
@@ -677,6 +685,9 @@ impl Board {
         let line_ids = self.connected_lines.get(&target_id).cloned().unwrap_or_default();
 
         for line_id in line_ids {
+            if visible_ids.is_some_and(|visible| !visible.contains(&line_id)) {
+                continue;
+            }
             let endpoints = self.line_attachments.get(&line_id).cloned();
             if let Some(endpoints) = endpoints {
                 if let Some(line) = self.element_mut(line_id) {
@@ -709,16 +720,39 @@ impl Board {
     where
         I: IntoIterator<Item = u64>,
     {
+        self.update_connected_lines_for_targets_filtered(target_ids, None);
+    }
+
+    pub fn update_connected_lines_for_targets_filtered<I>(
+        &mut self,
+        target_ids: I,
+        visible_ids: Option<&std::collections::HashSet<u64>>,
+    )
+    where
+        I: IntoIterator<Item = u64>,
+    {
         let mut unique_ids: Vec<u64> = target_ids.into_iter().collect();
         unique_ids.sort_unstable();
         unique_ids.dedup();
 
         for target_id in unique_ids {
-            self.update_connected_lines(target_id);
+            self.update_connected_lines_filtered(target_id, visible_ids);
         }
     }
 
+    #[allow(dead_code)]
     pub fn transform_related_ids<I>(&self, ids: I) -> Vec<u64>
+    where
+        I: IntoIterator<Item = u64>,
+    {
+        self.transform_related_ids_filtered(ids, None)
+    }
+
+    pub fn transform_related_ids_filtered<I>(
+        &self,
+        ids: I,
+        visible_ids: Option<&std::collections::HashSet<u64>>,
+    ) -> Vec<u64>
     where
         I: IntoIterator<Item = u64>,
     {
@@ -727,7 +761,12 @@ impl Board {
         for id in ids {
             related.insert(id);
             if let Some(line_ids) = self.connected_lines.get(&id) {
-                related.extend(line_ids.iter().copied());
+                related.extend(
+                    line_ids
+                        .iter()
+                        .copied()
+                        .filter(|line_id| visible_ids.is_none_or(|visible| visible.contains(line_id))),
+                );
             }
         }
 
@@ -1436,5 +1475,19 @@ mod tests {
         let line = board.element(2).unwrap();
         assert_eq!(line.pos, Vec2::new(20.0, 10.0));
         assert_eq!(line.size, Vec2::new(40.0, 0.0));
+    }
+
+    #[test]
+    fn transform_related_ids_can_filter_connected_lines_by_visibility() {
+        let mut board = Board::new();
+        board.connected_lines.insert(10, vec![20, 21]);
+
+        let visible_ids = std::collections::HashSet::from([21_u64]);
+
+        assert_eq!(board.transform_related_ids([10]), vec![10, 20, 21]);
+        assert_eq!(
+            board.transform_related_ids_filtered([10], Some(&visible_ids)),
+            vec![10, 21]
+        );
     }
 }
