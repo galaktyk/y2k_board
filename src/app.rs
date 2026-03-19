@@ -1035,7 +1035,6 @@ impl EventHandler for App {
 
         let was_panning = self.input.panning;
         let was_dragging_tool = self.input.dragging_tool;
-        let selected_before: std::collections::HashSet<u64> = self.board.selected_ids().into_iter().collect();
 
         input::on_mouse_move(
             &mut self.input,
@@ -1047,12 +1046,6 @@ impl EventHandler for App {
             x,
             y,
         );
-
-        let selected_after: std::collections::HashSet<u64> = self.board.selected_ids().into_iter().collect();
-        let changed_ids: Vec<u64> = selected_before.symmetric_difference(&selected_after).copied().collect();
-        if !changed_ids.is_empty() {
-            self.mark_elements_dirty(changed_ids);
-        }
 
         let current_hover = self
             .toolbar
@@ -1071,13 +1064,17 @@ impl EventHandler for App {
         }
 
         if self.input.drag_mode == DragMode::MoveSelected {
-            let moving_ids = self
-                .input
-                .move_origin
-                .iter()
-                .map(|&(id, _, _, _)| id)
-                .collect::<Vec<_>>();
-            self.mark_elements_dirty(self.board.transform_related_ids(moving_ids));
+            if self.input.move_origin.len() > 1 {
+                self.request_redraw();
+            } else {
+                let moving_ids = self
+                    .input
+                    .move_origin
+                    .iter()
+                    .map(|&(id, _, _, _)| id)
+                    .collect::<Vec<_>>();
+                self.mark_elements_dirty(self.board.transform_related_ids(moving_ids));
+            }
             return;
         }
 
