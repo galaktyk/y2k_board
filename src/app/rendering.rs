@@ -81,12 +81,18 @@ impl App {
         }
     }
 
+    /// Called every render frame (not on mouse-move events) to keep connected-line
+    /// positions visually correct while a MoveSelected drag is in progress.
+    /// `sync_board_render_cache` runs first and may rebuild instances from the true
+    /// board state; this then patches the in-memory buffer with preview positions,
+    /// and `upload_scene_shapes_if_needed` does **one** GPU upload per frame.
     fn preview_connected_lines_for_drag(&mut self) {
         if self.input.drag_mode != DragMode::MoveSelected {
             return;
         }
         let delta = self.input.move_delta;
         if delta.length_squared() == 0.0 {
+            // No displacement yet — board state is already correct in the buffer.
             return;
         }
         let selected_ids: std::collections::HashSet<u64> =
@@ -94,6 +100,7 @@ impl App {
         let patches = self.board.compute_drag_line_previews(&selected_ids, delta);
         if !patches.is_empty() {
             self.board_render_cache.patch_element_positions(&patches);
+            // Force a GPU re-upload this frame so the patched positions reach the shader.
             self.board_scene_dirty = true;
         }
     }
