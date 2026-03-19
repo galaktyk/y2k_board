@@ -30,8 +30,6 @@ use crate::ui::property_panel::{self, ColorTarget, WidthTarget};
 
 const IMAGE_RAM_FLUSH_INTERVAL: Duration = Duration::from_secs(60);
 const IMAGE_RAM_FLUSH_INTERVAL_SECS: f64 = IMAGE_RAM_FLUSH_INTERVAL.as_secs_f64();
-const DRAG_PREVIEW_CULL_MARGIN: f32 = 128.0;
-
 #[derive(Clone, Copy)]
 enum ImageRamFlushTrigger {
     Auto,
@@ -178,17 +176,6 @@ impl App {
             let (min, max) = e.aabb();
             self.spatial.insert(e.id, min, max);
         }
-    }
-
-    fn drag_preview_visible_ids(&mut self) -> HashSet<u64> {
-        if self.spatial_dirty {
-            self.rebuild_spatial();
-            self.spatial_dirty = false;
-        }
-
-        let (min, max) = self.camera.visible_rect(self.screen_size);
-        let margin = Vec2::splat(DRAG_PREVIEW_CULL_MARGIN);
-        self.spatial.query(min - margin, max + margin)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1047,20 +1034,10 @@ impl EventHandler for App {
 
         let was_panning = self.input.panning;
         let was_dragging_tool = self.input.dragging_tool;
-        let mut preview_visible_ids = if (self.input.drag_mode == DragMode::MoveSelected
-            && self.input.move_origin.len() <= 1)
-            || (self.input.pending_drag_mode == DragMode::MoveSelected
-                && self.board.selected_count() <= 1)
-        {
-            Some(self.drag_preview_visible_ids())
-        } else {
-            None
-        };
 
         input::on_mouse_move(
             &mut self.input,
             &mut self.board,
-            preview_visible_ids.as_ref(),
             &mut self.camera,
             &self.tool_style_defaults,
             self.toolbar.active_tool,
@@ -1075,12 +1052,6 @@ impl EventHandler for App {
         let current_panel_hover = self
             .resolve_property_panel()
             .and_then(|panel| property_panel::hit_test(self.screen_size, &panel.view, self.input.mouse_pos.x, self.input.mouse_pos.y));
-        if preview_visible_ids.is_none()
-            && self.input.drag_mode == DragMode::MoveSelected
-            && self.input.move_origin.len() <= 1
-        {
-            preview_visible_ids = Some(self.drag_preview_visible_ids());
-        }
         if previous_hover != current_hover || previous_panel_hover != current_panel_hover {
             self.request_redraw();
             return;
@@ -1092,20 +1063,7 @@ impl EventHandler for App {
         }
 
         if self.input.drag_mode == DragMode::MoveSelected {
-            if self.input.move_origin.len() > 1 {
-                self.request_redraw();
-            } else {
-                let moving_ids = self
-                    .input
-                    .move_origin
-                    .iter()
-                    .map(|&(id, _, _, _)| id)
-                    .collect::<Vec<_>>();
-                self.mark_elements_dirty(
-                    self.board
-                        .transform_related_ids_filtered(moving_ids, preview_visible_ids.as_ref()),
-                );
-            }
+            self.request_redraw();
             return;
         }
 

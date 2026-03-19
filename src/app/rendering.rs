@@ -31,8 +31,7 @@ impl App {
         self.sync_board_render_cache();
         self.upload_scene_shapes_if_needed();
 
-        let move_drag_offset = (self.input.drag_mode == DragMode::MoveSelected
-            && self.input.move_origin.len() > 1)
+        let move_drag_offset = (self.input.drag_mode == DragMode::MoveSelected)
             .then_some(self.input.move_delta)
             .filter(|delta| delta.length_squared() > 0.0);
         let rotate_drag_preview = (self.input.drag_mode == DragMode::Rotating
@@ -213,7 +212,20 @@ impl App {
         }
 
         move_drag_offset
-            .map(|offset| text_draw.caret_pos.map(|pos| pos + offset))
+            .map(|offset| {
+                text_draw.caret_pos.map(|pos| {
+                    if self
+                        .input
+                        .active_text_id
+                        .map(|id| self.board.is_selected(id))
+                        .unwrap_or(false)
+                    {
+                        pos + offset
+                    } else {
+                        pos
+                    }
+                })
+            })
             .unwrap_or(text_draw.caret_pos)
     }
 

@@ -706,11 +706,7 @@ pub fn on_mouse_up(
                 }
             }
             DragMode::MoveSelected => {
-                let changes = if state.move_origin.len() > 1 {
-                    move_transform_changes(state)
-                } else {
-                    board.selected_transform_changes(&state.move_origin)
-                };
+                let changes = move_transform_changes(state);
                 if !changes.is_empty() {
                     board.apply_operation(BoardOperation::SetProperty {
                         changes,
@@ -842,7 +838,6 @@ pub fn on_mouse_up(
 pub fn on_mouse_move(
     state: &mut InputState,
     board: &mut Board,
-    preview_visible_ids: Option<&std::collections::HashSet<u64>>,
     camera: &mut Camera,
     tool_style_defaults: &ToolStyleDefaults,
     active_tool: Tool,
@@ -906,23 +901,12 @@ pub fn on_mouse_move(
         state.move_delta = world - state.move_start_world;
         state.rotate_delta = 0.0;
         if state.drag_mode == DragMode::MoveSelected {
-            if state.move_origin.len() <= 1 {
-                let moving_ids = transform_ids(state);
-
-                for &(id, orig_pos, orig_size, orig_rot) in &state.move_origin {
-                    if let Some(element) = board.element_mut(id) {
-                        element.pos = orig_pos + state.move_delta;
-                        element.size = orig_size;
-                        element.rotation = orig_rot;
-                    }
-                }
-
-                board.update_connected_lines_for_targets_filtered(moving_ids, preview_visible_ids);
-                state.drag_selection_bounds = None;
-            } else {
+            if state.move_origin.len() > 1 {
                 state.drag_selection_bounds = state
                     .transform_bounds_origin
                     .map(|bounds| bounds.with_position(bounds.pos + state.move_delta));
+            } else {
+                state.drag_selection_bounds = None;
             }
             return;
         }

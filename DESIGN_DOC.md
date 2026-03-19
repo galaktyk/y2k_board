@@ -16,7 +16,9 @@ Performance target:
 
 # Core Architecture
 
-Unlike Bevy, **Miniquad has no ECS**, so the architecture becomes:
+We save all the shapes in both CPU and GPU memory.
+and minimize the CPU-GPU communication.
+
 
 ```
 App State (CPU)

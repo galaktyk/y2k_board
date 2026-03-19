@@ -1,5 +1,10 @@
+this file is too large,
+move function to proper file, dir or create new file if needed
+also add code comment for better readability and maintainability
 
-use culling for line hook logic hit test
+if any function is using high CPU usage, add comment about it so other developers can be aware of it 
+
+
 ---
 
 copy paste
