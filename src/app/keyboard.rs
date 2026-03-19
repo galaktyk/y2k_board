@@ -93,6 +93,14 @@ impl App {
             self.copy_selected_to_clipboard();
             return;
         }
+        if keymods.ctrl && keycode == KeyCode::X {
+            self.copy_selected_to_clipboard();
+            if self.board.selected_count() > 0 {
+                self.board.delete_selected();
+                self.mark_board_structure_dirty();
+            }
+            return;
+        }
         if keymods.ctrl && keycode == KeyCode::V && self.handle_board_paste() {
             return;
         }
