@@ -1,6 +1,8 @@
 mod content;
 mod keyboard;
 mod rendering;
+mod snapshot;
+mod style;
 mod text_editing;
 
 
@@ -21,7 +23,7 @@ use crate::images::ImageManager;
 use crate::input::{self, DragMode, InputState};
 use crate::rendering::renderer::Renderer;
 use crate::rendering::cache::BoardRenderCache;
-use crate::{snapshot, ui};
+use crate::{snapshot as snapshot_io, ui};
 use crate::spatial::SpatialGrid;
 use crate::text::{PreparedTextDraw, TextEditSession, TextEditSnapshot, TextSystem};
 
@@ -124,8 +126,8 @@ impl App {
         let mut ctx = window::new_rendering_backend();
         let renderer = Renderer::new(&mut *ctx);
         let toolbar_icons = toolbar::ToolbarIcons::new(&mut *ctx);
-        let snapshot_path = snapshot::default_snapshot_path();
-        let asset_root = snapshot::snapshot_root(&snapshot_path);
+        let snapshot_path = snapshot_io::default_snapshot_path();
+        let asset_root = snapshot_io::snapshot_root(&snapshot_path);
         let image_manager = ImageManager::new(&mut *ctx, asset_root);
         let (w, h) = window::screen_size();
         let now = miniquad::date::now();
@@ -170,7 +172,11 @@ impl App {
         app
     }
 
+    /// Rebuilds the spatial grid for hit testing.
+    /// This is O(N) where N is the number of elements on the board.
+    /// Called when board structure changes or after drag-and-drop.
     fn rebuild_spatial(&mut self) {
+        println!("[HOT] Rebuilding spatial grid");
         self.spatial.clear();
         for e in &self.board.elements {
             let (min, max) = e.aabb();
@@ -180,63 +186,17 @@ impl App {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn pick_snapshot_save_path(&self) -> Option<PathBuf> {
-        let default_name = self
-            .snapshot_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("snapshot.bin");
-
-        rfd::FileDialog::new()
-            .add_filter("miniGalaktyk Snapshots", &["bin"])
-            .set_directory(snapshot::snapshot_root(&self.snapshot_path))
-            .set_file_name(default_name)
-            .save_file()
+        snapshot::pick_save_path(&self.snapshot_path)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     fn pick_snapshot_load_path(&self) -> Option<PathBuf> {
-        rfd::FileDialog::new()
-            .add_filter("miniGalaktyk Snapshots", &["bin"])
-            .set_directory(snapshot::snapshot_root(&self.snapshot_path))
-            .pick_file()
+        snapshot::pick_load_path(&self.snapshot_path)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     fn copy_snapshot_assets(&self, source_root: &Path, target_root: &Path) -> std::io::Result<()> {
-        if source_root == target_root {
-            return Ok(());
-        }
-
-        let mut copied_paths = HashSet::new();
-        for element in &self.board.elements {
-            let Some(image) = element.image.as_ref() else {
-                continue;
-            };
-
-            for relative_path in std::iter::once(image.asset_path.as_str())
-                .chain(image.hires_asset_path.iter().map(String::as_str))
-            {
-                if !copied_paths.insert(relative_path.to_string()) {
-                    continue;
-                }
-
-                let source_path = source_root.join(relative_path);
-                let target_path = target_root.join(relative_path);
-                if source_path == target_path {
-                    continue;
-                }
-
-                if let Some(parent) = target_path.parent() {
-                    if !parent.as_os_str().is_empty() {
-                        std::fs::create_dir_all(parent)?;
-                    }
-                }
-
-                std::fs::copy(&source_path, &target_path)?;
-            }
-        }
-
-        Ok(())
+        snapshot::copy_assets(&self.board.elements, source_root, target_root)
     }
 
     fn request_redraw(&self) {
@@ -361,10 +321,10 @@ impl App {
             return None;
         }
 
-        let tabs = panel_tabs(can_text, can_fill, can_stroke);
+        let tabs = style::tabs(can_text, can_fill, can_stroke);
         let active_target = self.resolve_panel_target(tabs)?;
-        let title = panel_title_for_selection(&selected);
-        let active_color = panel_color_for_selection(&selected, active_target);
+        let title = style::title_for_selection(&selected);
+        let active_color = style::color_for_selection(&selected, active_target);
         let border_width = selected
             .iter()
             .find(|element| element.uses_border_width())
@@ -390,40 +350,40 @@ impl App {
     fn resolve_tool_property_panel(&self) -> Option<ResolvedPropertyPanel> {
         let (title, tabs, active_color, border_width, stroke_width) = match self.toolbar.active_tool {
             ui::tool::Tool::Rect => {
-                let tabs = panel_tabs(true, true, true);
+                let tabs = style::tabs(true, true, true);
                 let active = self.resolve_panel_target(tabs)?;
                 (
                     "RECT",
                     tabs,
-                    panel_color_for_box_defaults(self.tool_style_defaults.rect, active),
+                    style::color_for_box_defaults(self.tool_style_defaults.rect, active),
                     Some(self.tool_style_defaults.rect.border_width.min(16)),
                     None,
                 )
             }
             ui::tool::Tool::Ellipse => {
-                let tabs = panel_tabs(true, true, true);
+                let tabs = style::tabs(true, true, true);
                 let active = self.resolve_panel_target(tabs)?;
                 (
                     "ELPS",
                     tabs,
-                    panel_color_for_box_defaults(self.tool_style_defaults.ellipse, active),
+                    style::color_for_box_defaults(self.tool_style_defaults.ellipse, active),
                     Some(self.tool_style_defaults.ellipse.border_width.min(16)),
                     None,
                 )
             }
             ui::tool::Tool::Text => {
-                let tabs = panel_tabs(true, true, true);
+                let tabs = style::tabs(true, true, true);
                 let active = self.resolve_panel_target(tabs)?;
                 (
                     "TEXT",
                     tabs,
-                    panel_color_for_box_defaults(self.tool_style_defaults.text, active),
+                    style::color_for_box_defaults(self.tool_style_defaults.text, active),
                     Some(self.tool_style_defaults.text.border_width.min(16)),
                     None,
                 )
             }
             ui::tool::Tool::Line => {
-                let tabs = panel_tabs(false, false, true);
+                let tabs = style::tabs(false, false, true);
                 (
                     "LINE",
                     tabs,
@@ -489,7 +449,7 @@ impl App {
                     .filter_map(|id| {
                         let element = self.board.element(*id)?;
                         let before = element.style_snapshot();
-                        let after = updated_style_with_color(element, target, color)?;
+                        let after = style::updated_style_with_color(element, target, color)?;
                         (before != after).then_some(ElementPropertyChange {
                             id: *id,
                             patch: ElementPropertyPatch::Style { before, after },
@@ -544,7 +504,7 @@ impl App {
                 let ids: Vec<u64> = before.iter().map(|(id, _)| *id).collect();
                 for (id, _) in before {
                     if let Some(element) = self.board.element_mut(*id) {
-                        if let Some(after) = updated_style_with_width(element, target, width) {
+                        if let Some(after) = style::updated_style_with_width(element, target, width) {
                             element.apply_style_snapshot(after);
                         }
                     }
@@ -591,9 +551,9 @@ impl App {
 
     fn apply_tool_panel_color(&mut self, tool: ui::tool::Tool, target: ColorTarget, color: [f32; 4]) {
         match tool {
-            ui::tool::Tool::Rect => apply_box_color(&mut self.tool_style_defaults.rect, target, color),
-            ui::tool::Tool::Ellipse => apply_box_color(&mut self.tool_style_defaults.ellipse, target, color),
-            ui::tool::Tool::Text => apply_box_color(&mut self.tool_style_defaults.text, target, color),
+            ui::tool::Tool::Rect => style::apply_box_color(&mut self.tool_style_defaults.rect, target, color),
+            ui::tool::Tool::Ellipse => style::apply_box_color(&mut self.tool_style_defaults.ellipse, target, color),
+            ui::tool::Tool::Text => style::apply_box_color(&mut self.tool_style_defaults.text, target, color),
             ui::tool::Tool::Line => {
                 if target == ColorTarget::Stroke {
                     self.tool_style_defaults.line.color = color;
@@ -637,6 +597,8 @@ impl App {
         self.set_active_tool(ui::tool::Tool::Select);
     }
 
+    /// Synchronizes the board's CPU state with the GPU render cache.
+    /// This is a high-cost operation if structure or visibility is dirty.
     fn sync_board_render_cache(&mut self) {
 
         if self.board_cache_dirty {
@@ -682,19 +644,19 @@ impl App {
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let current_root = snapshot::snapshot_root(&self.snapshot_path);
-            let target_root = snapshot::snapshot_root(&target_path);
+            let current_root = snapshot_io::snapshot_root(&self.snapshot_path);
+            let target_root = snapshot_io::snapshot_root(&target_path);
             if let Err(err) = self.copy_snapshot_assets(&current_root, &target_root) {
                 eprintln!("Failed to prepare snapshot assets: {err}");
                 return;
             }
         }
 
-        match snapshot::save_to_path(&self.board, &target_path) {
+        match snapshot_io::save_to_path(&self.board, &target_path) {
             Ok(path) => {
                 self.snapshot_path = path.clone();
                 self.snapshot_path_user_selected = true;
-                let asset_root = snapshot::snapshot_root(&self.snapshot_path);
+                let asset_root = snapshot_io::snapshot_root(&self.snapshot_path);
                 self.image_manager.set_asset_root(&mut *self.ctx, asset_root);
                 println!("Saved snapshot to {}", path.display());
             }
@@ -711,11 +673,11 @@ impl App {
         #[cfg(target_arch = "wasm32")]
         let path = self.snapshot_path.clone();
 
-        match snapshot::load_from_path(&path) {
+        match snapshot_io::load_from_path(&path) {
             Ok(loaded) => {
                 self.snapshot_path = loaded.path.clone();
                 self.snapshot_path_user_selected = true;
-                let asset_root = snapshot::snapshot_root(&self.snapshot_path);
+                let asset_root = snapshot_io::snapshot_root(&self.snapshot_path);
                 self.image_manager.set_asset_root(&mut *self.ctx, asset_root);
                 self.board
                     .restore_snapshot(loaded.data);
@@ -758,106 +720,6 @@ impl App {
             }
         }
     }
-}
-
-fn panel_tabs(
-    show_text: bool,
-    show_fill: bool,
-    show_stroke: bool,
-) -> [Option<ColorTarget>; 3] {
-    [
-        show_text.then_some(ColorTarget::Text),
-        show_fill.then_some(ColorTarget::Fill),
-        show_stroke.then_some(ColorTarget::Stroke),
-    ]
-}
-
-fn panel_title_for_selection(selected: &[&Element]) -> &'static str {
-    let first_shape = selected.first().map(|element| element.shape);
-    if selected
-        .iter()
-        .all(|element| Some(element.shape) == first_shape)
-    {
-        match first_shape {
-            Some(ShapeType::Rect) => "RECT",
-            Some(ShapeType::Ellipse) => "ELPS",
-            Some(ShapeType::Line) => "LINE",
-            
-            Some(ShapeType::Image) | None => "MIX",
-        }
-    } else {
-        "MIX"
-    }
-}
-
-fn panel_color_for_selection(selected: &[&Element], target: ColorTarget) -> [f32; 4] {
-    let Some(first) = selected.first() else {
-        return crate::palette::BLACK;
-    };
-
-    match target {
-        ColorTarget::Text => first.current_text_color().unwrap_or(crate::board::DEFAULT_TEXT_COLOR),
-        ColorTarget::Fill => first.color,
-        ColorTarget::Stroke => first.effective_stroke_color(),
-    }
-}
-
-fn panel_color_for_box_defaults(style: crate::board::BoxToolStyle, target: ColorTarget) -> [f32; 4] {
-    match target {
-        ColorTarget::Text => style.text_color,
-        ColorTarget::Fill => style.fill_color,
-        ColorTarget::Stroke => style.stroke_color,
-    }
-}
-
-fn apply_box_color(style: &mut crate::board::BoxToolStyle, target: ColorTarget, color: [f32; 4]) {
-    match target {
-        ColorTarget::Text => style.text_color = color,
-        ColorTarget::Fill => style.fill_color = color,
-        ColorTarget::Stroke => style.stroke_color = color,
-    }
-}
-
-fn updated_style_with_color(
-    element: &Element,
-    target: ColorTarget,
-    color: [f32; 4],
-) -> Option<ElementStyleSnapshot> {
-    let mut after = element.style_snapshot();
-    match target {
-        ColorTarget::Text if element.can_host_text() => after.text_color = Some(color),
-        ColorTarget::Fill if matches!(element.shape, ShapeType::Rect | ShapeType::Ellipse) => {
-            after.fill_color = color;
-        }
-        ColorTarget::Stroke
-            if matches!(element.shape, ShapeType::Rect | ShapeType::Ellipse | ShapeType::Line) =>
-        {
-            after.stroke_color = color;
-            if element.shape == ShapeType::Line {
-                after.fill_color = color;
-            }
-        }
-        _ => return None,
-    }
-    Some(after)
-}
-
-fn updated_style_with_width(
-    element: &Element,
-    target: WidthTarget,
-    width: u8,
-) -> Option<ElementStyleSnapshot> {
-    let mut after = element.style_snapshot();
-    match target {
-        WidthTarget::Border if element.uses_border_width() => {
-            after.border_width = Some(width.clamp(0, 16));
-        }
-        WidthTarget::Stroke if element.uses_stroke_width() => {
-            after.stroke_width = Some(width.clamp(1, 16));
-        }
-        _ => return None,
-    }
-    Some(after)
 }
 
 impl EventHandler for App {

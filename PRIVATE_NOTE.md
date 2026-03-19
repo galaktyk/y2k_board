@@ -1,9 +1,3 @@
-this file is too large,
-move function to proper file, dir or create new file if needed
-also add code comment for better readability and maintainability
-
-if any function is using high CPU usage, add comment about it so other developers can be aware of it 
-
 
 ---
 

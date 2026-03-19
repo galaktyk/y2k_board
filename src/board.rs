@@ -4,6 +4,14 @@ use crate::palette;
 
 use crate::input::SelectionBounds;
 
+mod geometry;
+
+#[cfg(test)]
+mod tests;
+
+use geometry::element_hit;
+pub use geometry::{rotate_point, world_to_local_norm};
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -309,22 +317,6 @@ impl ElementTransform {
     pub fn new(pos: Vec2, size: Vec2, rotation: f32) -> Self {
         Self { pos, size, rotation }
     }
-}
-
-pub fn rotate_point(point: Vec2, center: Vec2, angle: f32) -> Vec2 {
-    let offset = point - center;
-    let cos_a = angle.cos();
-    let sin_a = angle.sin();
-    center + Vec2::new(
-        offset.x * cos_a - offset.y * sin_a,
-        offset.x * sin_a + offset.y * cos_a,
-    )
-}
-
-pub fn world_to_local_norm(world: Vec2, target: &Element) -> Vec2 {
-    let origin = target.pos + target.size * 0.5;
-    let local = rotate_point(world, origin, -target.rotation);
-    (local - target.pos) / target.size
 }
 
 fn apply_transform(element: &mut Element, before: Option<ElementTransform>, after: ElementTransform) {
@@ -668,6 +660,9 @@ impl Board {
     }
 
     pub fn update_connected_lines(&mut self, target_id: u64) {
+
+        println!("[HOT] Updating connected lines for target_id={target_id}");
+        
         self.update_connected_lines_filtered(target_id, None);
     }
 
@@ -676,6 +671,9 @@ impl Board {
         target_id: u64,
         visible_ids: Option<&std::collections::HashSet<u64>>,
     ) {
+        // This walk can touch every line anchored to the target, so it is one of the
+        // more expensive board-side transform paths. Keep drag preview on GPU offsets
+        // where possible and reserve this for commit-time updates or targeted refreshes.
         let (target_pos, target_size, target_rotation) = if let Some(target) = self.element(target_id) {
             (target.pos, target.size, target.rotation)
         } else {
@@ -731,6 +729,8 @@ impl Board {
     where
         I: IntoIterator<Item = u64>,
     {
+        // Potentially CPU-heavy for large selections: this deduplicates the input set and then
+        // walks each target's connected lines. Avoid calling it from per-frame pointer updates.
         let mut unique_ids: Vec<u64> = target_ids.into_iter().collect();
         unique_ids.sort_unstable();
         unique_ids.dedup();
@@ -1098,6 +1098,9 @@ impl Board {
 
     /// Hit-test a world-space point against elements (last-on-top).
     pub fn hit_test(&self, p: Vec2) -> Option<u64> {
+        // This is an O(n) scan over painter order. It is fine for user-driven pointer events,
+        // but should not be moved into any per-frame update loop.
+        // The two-pass walk is intentional: non-image shapes win over images at the same point.
         for element in self.elements.iter().rev() {
             if element.shape != ShapeType::Image && element_hit(element, p) {
                 return Some(element.id);
@@ -1115,6 +1118,8 @@ impl Board {
 
     /// Hit-test a world-space point against elements, returning all hits in top-to-bottom order.
     pub fn hit_test_all(&self, p: Vec2) -> Vec<u64> {
+        // This is also O(n) and intentionally preserves board order plus image-layer priority.
+        // Use it only when the caller really needs the full hit stack.
         let mut hits = Vec::new();
         
         for element in self.elements.iter().rev() {
@@ -1138,356 +1143,5 @@ impl Board {
 
     pub fn element_mut(&mut self, id: u64) -> Option<&mut Element> {
         self.elements.iter_mut().find(|element| element.id == id)
-    }
-}
-
-fn element_hit(e: &Element, mut p: Vec2) -> bool {
-    let center = e.pos + e.size * 0.5;
-    let cos_r = e.rotation.cos();
-    let sin_r = e.rotation.sin();
-    let dx = p.x - center.x;
-    let dy = p.y - center.y;
-    p.x = center.x + dx * cos_r + dy * sin_r;
-    p.y = center.y - dx * sin_r + dy * cos_r;
-
-    match e.shape {
-        ShapeType::Rect | ShapeType::Image => {
-            let min_x = e.pos.x.min(e.pos.x + e.size.x);
-            let max_x = e.pos.x.max(e.pos.x + e.size.x);
-            let min_y = e.pos.y.min(e.pos.y + e.size.y);
-            let max_y = e.pos.y.max(e.pos.y + e.size.y);
-            p.x >= min_x && p.x <= max_x && p.y >= min_y && p.y <= max_y
-        }
-        ShapeType::Ellipse => {
-            let c = e.pos + e.size * 0.5;
-            let r = (e.size * 0.5).abs();
-            if r.x == 0.0 || r.y == 0.0 {
-                return false;
-            }
-            let d = (p - c) / r;
-            d.dot(d) <= 1.0
-        }
-        ShapeType::Line => {
-            let a = e.pos;
-            let b = e.pos + e.size;
-            dist_point_segment(p, a, b) <= (f32::from(e.stroke_width.max(1)) * 0.5 + 8.0)
-        }
-    }
-}
-
-fn dist_point_segment(p: Vec2, a: Vec2, b: Vec2) -> f32 {
-    let ab = b - a;
-    let len2 = ab.dot(ab);
-    if len2 == 0.0 {
-        return (p - a).length();
-    }
-    let t = ((p - a).dot(ab) / len2).clamp(0.0, 1.0);
-    (p - (a + ab * t)).length()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn text_bounds_keep_inner_box_centered() {
-        let element = Element {
-            id: 1,
-            shape: ShapeType::Rect,
-            pos: Vec2::new(100.0, 50.0),
-            size: Vec2::new(200.0, 120.0),
-            rotation: 0.4,
-            color: [0.0, 0.0, 0.0, 0.0],
-            stroke_color: default_stroke_color(),
-            border_width: default_border_width(),
-            stroke_width: default_line_stroke_width(),
-            selected: false,
-            text: Some(TextData::default()),
-            image: None,
-            text_layout_generation: 0,
-        };
-
-        let (min, max) = element.text_bounds().unwrap();
-        let inner_center = (min + max) * 0.5;
-
-        assert_eq!(min, Vec2::new(112.0, 62.0));
-        assert_eq!(max, Vec2::new(288.0, 158.0));
-        assert_eq!(inner_center, element.pos + element.size * 0.5);
-    }
-
-    #[test]
-    fn bring_to_front_works() {
-        let mut board = Board::new();
-        board.elements = vec![
-            Element {
-                id: 1,
-                shape: ShapeType::Rect,
-                pos: Vec2::ZERO,
-                size: Vec2::splat(10.0),
-                rotation: 0.0,
-                color: [1.0, 0.0, 0.0, 1.0],
-                stroke_color: default_stroke_color(),
-                border_width: default_border_width(),
-                stroke_width: default_line_stroke_width(),
-                selected: false,
-                text: None,
-                image: None,
-                text_layout_generation: 0,
-            },
-            Element {
-                id: 2,
-                shape: ShapeType::Image,
-                pos: Vec2::ZERO,
-                size: Vec2::splat(10.0),
-                rotation: 0.0,
-                color: [1.0, 1.0, 1.0, 1.0],
-                stroke_color: default_stroke_color(),
-                border_width: default_border_width(),
-                stroke_width: default_line_stroke_width(),
-                selected: false,
-                text: None,
-                image: Some(ImageData {
-                    asset_path: "img.webp".to_string(),
-                    hires_asset_path: None,
-                    original_width: 10,
-                    original_height: 10,
-                    base_width: 10,
-                    base_height: 10,
-                }),
-                text_layout_generation: 0,
-            },
-            Element {
-                id: 3,
-                shape: ShapeType::Ellipse,
-                pos: Vec2::ZERO,
-                size: Vec2::splat(10.0),
-                rotation: 0.0,
-                color: [0.0, 1.0, 0.0, 1.0],
-                stroke_color: default_stroke_color(),
-                border_width: default_border_width(),
-                stroke_width: default_line_stroke_width(),
-                selected: false,
-                text: None,
-                image: None,
-                text_layout_generation: 0,
-            },
-        ];
-
-        assert!(board.bring_to_front(1));
-        assert_eq!(board.elements.iter().map(|element| element.id).collect::<Vec<_>>(), vec![2, 3, 1]);
-    }
-
-    #[test]
-    fn hit_test_prioritizes_shape_layer_over_images() {
-        let mut board = Board::new();
-        board.elements = vec![
-            Element {
-                id: 1,
-                shape: ShapeType::Image,
-                pos: Vec2::ZERO,
-                size: Vec2::splat(20.0),
-                rotation: 0.0,
-                color: [1.0, 1.0, 1.0, 1.0],
-                stroke_color: default_stroke_color(),
-                border_width: default_border_width(),
-                stroke_width: default_line_stroke_width(),
-                selected: false,
-                text: None,
-                image: Some(ImageData {
-                    asset_path: "img.webp".to_string(),
-                    hires_asset_path: None,
-                    original_width: 20,
-                    original_height: 20,
-                    base_width: 20,
-                    base_height: 20,
-                }),
-                text_layout_generation: 0,
-            },
-            Element {
-                id: 2,
-                shape: ShapeType::Rect,
-                pos: Vec2::ZERO,
-                size: Vec2::splat(20.0),
-                rotation: 0.0,
-                color: [1.0, 0.0, 0.0, 1.0],
-                stroke_color: default_stroke_color(),
-                border_width: default_border_width(),
-                stroke_width: default_line_stroke_width(),
-                selected: false,
-                text: None,
-                image: None,
-                text_layout_generation: 0,
-            },
-        ];
-
-        assert_eq!(board.hit_test(Vec2::new(10.0, 10.0)), Some(2));
-    }
-
-    #[test]
-    fn hit_test_uses_board_order_within_shape_layer() {
-        let mut board = Board::new();
-        board.elements = vec![
-            Element {
-                id: 1,
-                shape: ShapeType::Rect,
-                pos: Vec2::ZERO,
-                size: Vec2::splat(20.0),
-                rotation: 0.0,
-                color: [1.0, 0.0, 0.0, 1.0],
-                stroke_color: default_stroke_color(),
-                border_width: default_border_width(),
-                stroke_width: default_line_stroke_width(),
-                selected: false,
-                text: None,
-                image: None,
-                text_layout_generation: 0,
-            },
-            Element {
-                id: 2,
-                shape: ShapeType::Ellipse,
-                pos: Vec2::ZERO,
-                size: Vec2::splat(20.0),
-                rotation: 0.0,
-                color: [0.0, 1.0, 0.0, 1.0],
-                stroke_color: default_stroke_color(),
-                border_width: default_border_width(),
-                stroke_width: default_line_stroke_width(),
-                selected: false,
-                text: None,
-                image: None,
-                text_layout_generation: 0,
-            },
-        ];
-
-        assert_eq!(board.hit_test(Vec2::new(10.0, 10.0)), Some(2));
-    }
-
-    #[test]
-    fn hit_test_prioritizes_text_elements_over_images() {
-        let mut board = Board::new();
-        board.elements = vec![
-            Element {
-                id: 1,
-                shape: ShapeType::Image,
-                pos: Vec2::ZERO,
-                size: Vec2::splat(20.0),
-                rotation: 0.0,
-                color: [1.0, 1.0, 1.0, 1.0],
-                stroke_color: default_stroke_color(),
-                border_width: default_border_width(),
-                stroke_width: default_line_stroke_width(),
-                selected: false,
-                text: None,
-                image: Some(ImageData {
-                    asset_path: "img.webp".to_string(),
-                    hires_asset_path: None,
-                    original_width: 20,
-                    original_height: 20,
-                    base_width: 20,
-                    base_height: 20,
-                }),
-                text_layout_generation: 0,
-            },
-            Element {
-                id: 2,
-                shape: ShapeType::Rect,
-                pos: Vec2::ZERO,
-                size: Vec2::splat(20.0),
-                rotation: 0.0,
-                color: [0.0, 0.0, 0.0, 0.0],
-                stroke_color: default_stroke_color(),
-                border_width: default_border_width(),
-                stroke_width: default_line_stroke_width(),
-                selected: false,
-                text: Some(TextData {
-                    content: "hello".to_string(),
-                    font_size: 24.0,
-                    color: DEFAULT_TEXT_COLOR,
-                }),
-                image: None,
-                text_layout_generation: 0,
-            },
-        ];
-
-        assert_eq!(board.hit_test(Vec2::new(10.0, 10.0)), Some(2));
-    }
-
-    #[test]
-    fn set_property_can_skip_connected_line_sync() {
-        let mut board = Board::new();
-        board.elements = vec![
-            Element {
-                id: 1,
-                shape: ShapeType::Rect,
-                pos: Vec2::ZERO,
-                size: Vec2::splat(20.0),
-                rotation: 0.0,
-                color: [1.0, 0.0, 0.0, 1.0],
-                stroke_color: default_stroke_color(),
-                border_width: default_border_width(),
-                stroke_width: default_line_stroke_width(),
-                selected: false,
-                text: None,
-                image: None,
-                text_layout_generation: 0,
-            },
-            Element {
-                id: 2,
-                shape: ShapeType::Line,
-                pos: Vec2::new(20.0, 10.0),
-                size: Vec2::new(40.0, 0.0),
-                rotation: 0.0,
-                color: DEFAULT_LINE_COLOR,
-                stroke_color: default_stroke_color(),
-                border_width: default_border_width(),
-                stroke_width: default_line_stroke_width(),
-                selected: false,
-                text: None,
-                image: None,
-                text_layout_generation: 0,
-            },
-        ];
-        board.line_attachments.insert(
-            2,
-            LineEndpoints {
-                start: Some(LineAnchor {
-                    target_id: 1,
-                    norm_pos: Vec2::new(1.0, 0.5),
-                }),
-                end: None,
-            },
-        );
-        board
-            .connected_lines
-            .insert(1, vec![2]);
-
-        board.execute(&BoardOperation::SetProperty {
-            changes: vec![ElementPropertyChange {
-                id: 1,
-                patch: ElementPropertyPatch::Transform {
-                    before: ElementTransform::new(Vec2::ZERO, Vec2::splat(20.0), 0.0),
-                    after: ElementTransform::new(Vec2::new(100.0, 0.0), Vec2::splat(20.0), 0.0),
-                },
-            }],
-            sync_connected_lines: false,
-        });
-
-        let line = board.element(2).unwrap();
-        assert_eq!(line.pos, Vec2::new(20.0, 10.0));
-        assert_eq!(line.size, Vec2::new(40.0, 0.0));
-    }
-
-    #[test]
-    fn transform_related_ids_can_filter_connected_lines_by_visibility() {
-        let mut board = Board::new();
-        board.connected_lines.insert(10, vec![20, 21]);
-
-        let visible_ids = std::collections::HashSet::from([21_u64]);
-
-        assert_eq!(board.transform_related_ids([10]), vec![10, 20, 21]);
-        assert_eq!(
-            board.transform_related_ids_filtered([10], Some(&visible_ids)),
-            vec![10, 21]
-        );
     }
 }
