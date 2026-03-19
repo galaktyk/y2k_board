@@ -503,7 +503,10 @@ impl App {
                     return;
                 }
 
-                self.board.apply_operation(crate::board::BoardOperation::SetProperty { changes });
+                self.board.apply_operation(crate::board::BoardOperation::SetProperty {
+                    changes,
+                    sync_connected_lines: true,
+                });
                 self.mark_elements_dirty(ids);
             }
         }
@@ -575,7 +578,10 @@ impl App {
                     .collect();
 
                 if !changes.is_empty() {
-                    self.board.apply_operation(crate::board::BoardOperation::SetProperty { changes });
+                    self.board.apply_operation(crate::board::BoardOperation::SetProperty {
+                        changes,
+                        sync_connected_lines: true,
+                    });
                     self.mark_elements_dirty(ids);
                 } else {
                     self.request_redraw();

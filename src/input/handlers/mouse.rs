@@ -2,8 +2,9 @@ use glam::Vec2;
 
 
 use crate::board::{
-    world_to_local_norm, Board, BoardOperation, Element, LineAnchor, LineConnectionChange,
-    LineEndpoints, ShapeType, ToolStyleDefaults,
+    world_to_local_norm, Board, BoardOperation, Element, ElementPropertyChange,
+    ElementPropertyPatch, ElementTransform, LineAnchor, LineConnectionChange, LineEndpoints,
+    ShapeType, ToolStyleDefaults,
 };
 use crate::camera::Camera;
 use crate::input::handles::{get_element_handles, get_selection_bounds_handles, handle_hit_radius};
@@ -118,6 +119,21 @@ fn transform_ids(state: &InputState) -> Vec<u64> {
         .move_origin
         .iter()
         .map(|&(id, _, _, _)| id)
+        .collect()
+}
+
+fn move_transform_changes(state: &InputState) -> Vec<ElementPropertyChange> {
+    state
+        .move_origin
+        .iter()
+        .filter_map(|&(id, orig_pos, orig_size, orig_rot)| {
+            let before = ElementTransform::new(orig_pos, orig_size, orig_rot);
+            let after = ElementTransform::new(orig_pos + state.move_delta, orig_size, orig_rot);
+            (before != after).then_some(ElementPropertyChange {
+                id,
+                patch: ElementPropertyPatch::Transform { before, after },
+            })
+        })
         .collect()
 }
 
@@ -690,21 +706,30 @@ pub fn on_mouse_up(
                 }
             }
             DragMode::MoveSelected => {
-                let changes = board.selected_transform_changes(&state.move_origin);
+                let changes = if state.move_origin.len() > 1 {
+                    move_transform_changes(state)
+                } else {
+                    board.selected_transform_changes(&state.move_origin)
+                };
                 if !changes.is_empty() {
-                    board.apply_operation(BoardOperation::SetProperty { changes });
+                    board.apply_operation(BoardOperation::SetProperty {
+                        changes,
+                        sync_connected_lines: state.move_origin.len() <= 1,
+                    });
                 }
 
-                let line_connection_changes: Vec<LineConnectionChange> = state
-                    .move_origin
-                    .iter()
-                    .map(|&(id, _, _, _)| id)
-                    .filter_map(|id| line_connection_change_for_move_release(board, id))
-                    .collect();
-                if !line_connection_changes.is_empty() {
-                    board.apply_operation(BoardOperation::SetLineConnections {
-                        changes: line_connection_changes,
-                    });
+                if state.move_origin.len() <= 1 {
+                    let line_connection_changes: Vec<LineConnectionChange> = state
+                        .move_origin
+                        .iter()
+                        .map(|&(id, _, _, _)| id)
+                        .filter_map(|id| line_connection_change_for_move_release(board, id))
+                        .collect();
+                    if !line_connection_changes.is_empty() {
+                        board.apply_operation(BoardOperation::SetLineConnections {
+                            changes: line_connection_changes,
+                        });
+                    }
                 }
 
                 if state.move_origin.len() > 1 {
@@ -727,7 +752,10 @@ pub fn on_mouse_up(
             _ => {
                 let changes = board.selected_transform_changes(&state.move_origin);
                 if !changes.is_empty() {
-                    board.apply_operation(BoardOperation::SetProperty { changes });
+                    board.apply_operation(BoardOperation::SetProperty {
+                        changes,
+                        sync_connected_lines: true,
+                    });
                 }
                 if state.move_origin.len() > 1 {
                     state.selection_bounds = state.drag_selection_bounds;
@@ -877,22 +905,24 @@ pub fn on_mouse_move(
         state.move_delta = world - state.move_start_world;
         state.rotate_delta = 0.0;
         if state.drag_mode == DragMode::MoveSelected {
-            let moving_ids = transform_ids(state);
+            if state.move_origin.len() <= 1 {
+                let moving_ids = transform_ids(state);
 
-            for &(id, orig_pos, orig_size, orig_rot) in &state.move_origin {
-                if let Some(element) = board.element_mut(id) {
-                    element.pos = orig_pos + state.move_delta;
-                    element.size = orig_size;
-                    element.rotation = orig_rot;
+                for &(id, orig_pos, orig_size, orig_rot) in &state.move_origin {
+                    if let Some(element) = board.element_mut(id) {
+                        element.pos = orig_pos + state.move_delta;
+                        element.size = orig_size;
+                        element.rotation = orig_rot;
+                    }
                 }
-            }
 
-            board.update_connected_lines_for_targets(moving_ids);
-            state.drag_selection_bounds = if state.move_origin.len() > 1 {
-                board.selected_bounds()
+                board.update_connected_lines_for_targets(moving_ids);
+                state.drag_selection_bounds = None;
             } else {
-                None
-            };
+                state.drag_selection_bounds = state
+                    .transform_bounds_origin
+                    .map(|bounds| bounds.with_position(bounds.pos + state.move_delta));
+            }
             return;
         }
 

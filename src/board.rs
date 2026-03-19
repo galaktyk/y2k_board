@@ -398,7 +398,10 @@ pub enum BoardOperation {
     MoveElements { ids: Vec<u64>, delta: Vec2 },
     RotateElements { ids: Vec<u64>, center: Vec2, angle: f32 },
     SetElementRotations { changes: Vec<ElementRotationChange> },
-    SetProperty { changes: Vec<ElementPropertyChange> },
+    SetProperty {
+        changes: Vec<ElementPropertyChange>,
+        sync_connected_lines: bool,
+    },
     SetLineConnections { changes: Vec<LineConnectionChange> },
 }
 
@@ -431,7 +434,10 @@ fn inverse(op: &BoardOperation) -> BoardOperation {
                 })
                 .collect(),
         },
-        BoardOperation::SetProperty { changes } => BoardOperation::SetProperty {
+        BoardOperation::SetProperty {
+            changes,
+            sync_connected_lines,
+        } => BoardOperation::SetProperty {
             changes: changes
                 .iter()
                 .map(|change| ElementPropertyChange {
@@ -456,6 +462,7 @@ fn inverse(op: &BoardOperation) -> BoardOperation {
                     },
                 })
                 .collect(),
+            sync_connected_lines: *sync_connected_lines,
         },
         BoardOperation::SetLineConnections { changes } => BoardOperation::SetLineConnections {
             changes: changes
@@ -514,8 +521,15 @@ fn log_operation(op: &BoardOperation) {
                 );
             }
         }
-        BoardOperation::SetProperty { changes } => {
-            println!("[ops] SET_PROPERTY count={}", changes.len());
+        BoardOperation::SetProperty {
+            changes,
+            sync_connected_lines,
+        } => {
+            println!(
+                "[ops] SET_PROPERTY count={} sync_connected_lines={}",
+                changes.len(),
+                sync_connected_lines,
+            );
             for change in changes {
                 match &change.patch {
                     ElementPropertyPatch::Transform { before, after } => {
@@ -762,7 +776,10 @@ impl Board {
                     self.update_connected_lines(change.id);
                 }
             }
-            BoardOperation::SetProperty { changes } => {
+            BoardOperation::SetProperty {
+                changes,
+                sync_connected_lines,
+            } => {
                 for change in changes {
                     let (before, after) = match &change.patch {
                         ElementPropertyPatch::Transform { before, after } => (Some(*before), *after),
@@ -771,7 +788,9 @@ impl Board {
                     if let Some(element) = self.elements.iter_mut().find(|e| e.id == change.id) {
                         apply_transform(element, before, after);
                     }
-                    self.update_connected_lines(change.id);
+                    if *sync_connected_lines {
+                        self.update_connected_lines(change.id);
+                    }
                 }
                 for change in changes {
                     let after = match &change.patch {
@@ -1352,5 +1371,70 @@ mod tests {
         ];
 
         assert_eq!(board.hit_test(Vec2::new(10.0, 10.0)), Some(2));
+    }
+
+    #[test]
+    fn set_property_can_skip_connected_line_sync() {
+        let mut board = Board::new();
+        board.elements = vec![
+            Element {
+                id: 1,
+                shape: ShapeType::Rect,
+                pos: Vec2::ZERO,
+                size: Vec2::splat(20.0),
+                rotation: 0.0,
+                color: [1.0, 0.0, 0.0, 1.0],
+                stroke_color: default_stroke_color(),
+                border_width: default_border_width(),
+                stroke_width: default_line_stroke_width(),
+                selected: false,
+                text: None,
+                image: None,
+                text_layout_generation: 0,
+            },
+            Element {
+                id: 2,
+                shape: ShapeType::Line,
+                pos: Vec2::new(20.0, 10.0),
+                size: Vec2::new(40.0, 0.0),
+                rotation: 0.0,
+                color: DEFAULT_LINE_COLOR,
+                stroke_color: default_stroke_color(),
+                border_width: default_border_width(),
+                stroke_width: default_line_stroke_width(),
+                selected: false,
+                text: None,
+                image: None,
+                text_layout_generation: 0,
+            },
+        ];
+        board.line_attachments.insert(
+            2,
+            LineEndpoints {
+                start: Some(LineAnchor {
+                    target_id: 1,
+                    norm_pos: Vec2::new(1.0, 0.5),
+                }),
+                end: None,
+            },
+        );
+        board
+            .connected_lines
+            .insert(1, vec![2]);
+
+        board.execute(&BoardOperation::SetProperty {
+            changes: vec![ElementPropertyChange {
+                id: 1,
+                patch: ElementPropertyPatch::Transform {
+                    before: ElementTransform::new(Vec2::ZERO, Vec2::splat(20.0), 0.0),
+                    after: ElementTransform::new(Vec2::new(100.0, 0.0), Vec2::splat(20.0), 0.0),
+                },
+            }],
+            sync_connected_lines: false,
+        });
+
+        let line = board.element(2).unwrap();
+        assert_eq!(line.pos, Vec2::new(20.0, 10.0));
+        assert_eq!(line.size, Vec2::new(40.0, 0.0));
     }
 }

@@ -31,7 +31,10 @@ impl App {
         self.sync_board_render_cache();
         self.upload_scene_shapes_if_needed();
 
-        let move_drag_offset = None;
+        let move_drag_offset = (self.input.drag_mode == DragMode::MoveSelected
+            && self.input.move_origin.len() > 1)
+            .then_some(self.input.move_delta)
+            .filter(|delta| delta.length_squared() > 0.0);
         let rotate_drag_preview = (self.input.drag_mode == DragMode::Rotating
             && self.input.move_origin.len() > 1)
             .then_some(self.input.rotate_delta)

@@ -49,6 +49,7 @@ impl App {
                         id: edit.element_id(),
                         patch: ElementPropertyPatch::Text { before, after },
                     }],
+                    sync_connected_lines: true,
                 });
             }
         }
