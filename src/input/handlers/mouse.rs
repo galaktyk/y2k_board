@@ -710,7 +710,7 @@ pub fn on_mouse_up(
                 if !changes.is_empty() {
                     board.apply_operation(BoardOperation::SetProperty {
                         changes,
-                        sync_connected_lines: state.move_origin.len() <= 1,
+                        sync_connected_lines: true,
                     });
                 }
 

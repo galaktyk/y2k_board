@@ -94,6 +94,19 @@ impl BoardRenderCache {
         }
     }
 
+    /// Overwrite the pos/size of cached instances for the given elements.
+    /// Used for drag-preview of connected lines without mutating board state.
+    pub fn patch_element_positions(&mut self, patches: &[(u64, Vec2, Vec2)]) {
+        for &(id, pos, size) in patches {
+            let Some(&index) = self.index_by_id.get(&id) else { continue };
+            let range = self.element_ranges[index].clone();
+            for i in range {
+                self.all_instances[i].pos = pos.to_array();
+                self.all_instances[i].size = size.to_array();
+            }
+        }
+    }
+
     pub fn all_instances(&self) -> &[InstanceData] {
         &self.all_instances
     }

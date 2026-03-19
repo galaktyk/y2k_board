@@ -176,7 +176,9 @@ impl App {
     /// This is O(N) where N is the number of elements on the board.
     /// Called when board structure changes or after drag-and-drop.
     fn rebuild_spatial(&mut self) {
-        println!("[HOT] Rebuilding spatial grid");
+
+
+        // [HOT] Rebuilding spatial grid
         self.spatial.clear();
         for e in &self.board.elements {
             let (min, max) = e.aabb();

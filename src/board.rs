@@ -661,7 +661,8 @@ impl Board {
 
     pub fn update_connected_lines(&mut self, target_id: u64) {
 
-        println!("[HOT] Updating connected lines for target_id={target_id}");
+
+        // [HOT] Updating connected lines 
         
         self.update_connected_lines_filtered(target_id, None);
     }
@@ -738,6 +739,68 @@ impl Board {
         for target_id in unique_ids {
             self.update_connected_lines_filtered(target_id, visible_ids);
         }
+    }
+
+    /// Compute preview positions for lines connected to elements being dragged
+    /// by `delta`. Returns `(line_id, new_pos, new_size)` for each affected line
+    /// that is **not** itself selected (the GPU move-offset uniform handles those).
+    pub fn compute_drag_line_previews(
+        &self,
+        selected_ids: &std::collections::HashSet<u64>,
+        delta: Vec2,
+    ) -> Vec<(u64, Vec2, Vec2)> {
+        let mut result = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        for &target_id in selected_ids {
+            let line_ids = match self.connected_lines.get(&target_id) {
+                Some(ids) => ids,
+                None => continue,
+            };
+
+            for &line_id in line_ids {
+                if selected_ids.contains(&line_id) || !seen.insert(line_id) {
+                    continue;
+                }
+
+                let endpoints = match self.line_attachments.get(&line_id) {
+                    Some(ep) => ep,
+                    None => continue,
+                };
+
+                let line = match self.element(line_id) {
+                    Some(el) => el,
+                    None => continue,
+                };
+
+                let mut start_pos = line.pos;
+                let mut end_pos = line.pos + line.size;
+
+                if let Some(start) = &endpoints.start {
+                    if let Some(target) = self.element(start.target_id) {
+                        let offset = if selected_ids.contains(&start.target_id) { delta } else { Vec2::ZERO };
+                        let target_pos = target.pos + offset;
+                        let origin = target_pos + target.size * 0.5;
+                        let local = (start.norm_pos - Vec2::splat(0.5)) * target.size;
+                        start_pos = rotate_point(origin + local, origin, target.rotation);
+                    }
+                }
+
+                if let Some(end) = &endpoints.end {
+                    if let Some(target) = self.element(end.target_id) {
+                        let offset = if selected_ids.contains(&end.target_id) { delta } else { Vec2::ZERO };
+                        let target_pos = target.pos + offset;
+                        let origin = target_pos + target.size * 0.5;
+                        let local = (end.norm_pos - Vec2::splat(0.5)) * target.size;
+                        end_pos = rotate_point(origin + local, origin, target.rotation);
+                    }
+                }
+
+                result.push((line_id, start_pos, end_pos - start_pos));
+            }
+        }
+
+        result
     }
 
     #[allow(dead_code)]

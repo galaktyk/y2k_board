@@ -29,6 +29,7 @@ impl App {
         self.update_frame_timing();
         self.apply_pan_glide();
         self.sync_board_render_cache();
+        self.preview_connected_lines_for_drag();
         self.upload_scene_shapes_if_needed();
 
         let move_drag_offset = (self.input.drag_mode == DragMode::MoveSelected)
@@ -77,6 +78,23 @@ impl App {
             self.fps = self.fps_frames as f32 / (self.fps_accum / 1000.0);
             self.fps_accum = 0.0;
             self.fps_frames = 0;
+        }
+    }
+
+    fn preview_connected_lines_for_drag(&mut self) {
+        if self.input.drag_mode != DragMode::MoveSelected {
+            return;
+        }
+        let delta = self.input.move_delta;
+        if delta.length_squared() == 0.0 {
+            return;
+        }
+        let selected_ids: std::collections::HashSet<u64> =
+            self.input.move_origin.iter().map(|&(id, _, _, _)| id).collect();
+        let patches = self.board.compute_drag_line_previews(&selected_ids, delta);
+        if !patches.is_empty() {
+            self.board_render_cache.patch_element_positions(&patches);
+            self.board_scene_dirty = true;
         }
     }
 
