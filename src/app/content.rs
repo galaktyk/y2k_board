@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use glam::Vec2;
@@ -5,9 +6,10 @@ use miniquad::window;
 
 use crate::board::{
     default_border_width, default_line_stroke_width, default_stroke_color, default_text_box_color,
-    BoardOperation, Element, ShapeType, TextData, DEFAULT_TEXT_COLOR,
+    BoardOperation, Element, LineAnchor, LineConnectionChange, LineEndpoints, ShapeType, TextData,
+    DEFAULT_TEXT_COLOR,
 };
-use crate::clipboard::{self, ClipboardPaste};
+use crate::clipboard::{self, BoardClipboardData, ClipboardPaste};
 use crate::images::{ImageImportError, ImportedImage};
 use crate::rendering::renderer::PreparedImageDraw;
 use crate::rendering::cache::element_in_expanded_view;
@@ -171,7 +173,102 @@ impl App {
         true
     }
 
+    pub(super) fn copy_selected_to_clipboard(&mut self) {
+        use crate::snapshot::snapshot_root;
+
+        let selected_ids: std::collections::HashSet<u64> = self
+            .board
+            .elements
+            .iter()
+            .filter(|e| e.selected)
+            .map(|e| e.id)
+            .collect();
+
+        if selected_ids.is_empty() {
+            return;
+        }
+
+        // Collect elements, clearing selection flag.
+        let elements: Vec<Element> = self
+            .board
+            .elements
+            .iter()
+            .filter(|e| selected_ids.contains(&e.id))
+            .cloned()
+            .map(|mut e| { e.selected = false; e })
+            .collect();
+
+        // Compute bounding-box centroid.
+        let mut bb_min = Vec2::splat(f32::MAX);
+        let mut bb_max = Vec2::splat(f32::MIN);
+        for e in &elements {
+            let (mn, mx) = e.aabb();
+            bb_min = bb_min.min(mn);
+            bb_max = bb_max.max(mx);
+        }
+        let centroid = (bb_min + bb_max) * 0.5;
+
+        // Build line_connections: only keep anchors where target_id is also selected.
+        let mut line_connections: HashMap<String, LineEndpoints> = HashMap::new();
+        for (&line_id, endpoints) in &self.board.line_attachments {
+            if !selected_ids.contains(&line_id) {
+                continue;
+            }
+            let filtered_start = endpoints.start.as_ref().and_then(|a| {
+                selected_ids.contains(&a.target_id).then(|| a.clone())
+            });
+            let filtered_end = endpoints.end.as_ref().and_then(|a| {
+                selected_ids.contains(&a.target_id).then(|| a.clone())
+            });
+            if filtered_start.is_some() || filtered_end.is_some() {
+                line_connections.insert(
+                    line_id.to_string(),
+                    LineEndpoints { start: filtered_start, end: filtered_end },
+                );
+            }
+        }
+
+        // Embed image bytes as base64.
+        let asset_root = snapshot_root(&self.snapshot_path);
+        let mut images: HashMap<String, String> = HashMap::new();
+        for element in &elements {
+            if let Some(img) = &element.image {
+                for path_str in [Some(&img.asset_path), img.hires_asset_path.as_ref()]
+                    .into_iter()
+                    .flatten()
+                {
+                    if images.contains_key(path_str.as_str()) {
+                        continue;
+                    }
+                    let full_path = asset_root.join(path_str);
+                    match std::fs::read(&full_path) {
+                        Ok(bytes) => {
+                            use base64::Engine as _;
+                            let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                            images.insert(path_str.clone(), encoded);
+                        }
+                        Err(err) => {
+                            eprintln!("clipboard copy: failed to read image {}: {err}", full_path.display());
+                        }
+                    }
+                }
+            }
+        }
+
+        let data = BoardClipboardData::new(centroid.to_array(), elements, line_connections, images);
+        if let Err(err) = clipboard::set_board_clipboard(&data) {
+            eprintln!("clipboard copy: failed to write: {err}");
+        }
+    }
+
     pub(super) fn handle_board_paste(&mut self) -> bool {
+        // Check for a board-object clipboard payload first (works on all platforms).
+        if let Some(text) = clipboard::get_clipboard_text() {
+            if let Some(data) = clipboard::detect_board_clipboard(&text) {
+                return self.paste_board_clipboard(data);
+            }
+        }
+
         #[cfg(all(target_os = "windows", not(target_arch = "wasm32")))]
         {
             let anchor = self.paste_anchor_world();
@@ -207,6 +304,126 @@ impl App {
         }
 
         false
+    }
+
+    fn paste_board_clipboard(&mut self, data: BoardClipboardData) -> bool {
+        use crate::snapshot::snapshot_root;
+
+        if data.elements.is_empty() {
+            return false;
+        }
+
+        let anchor = self.paste_anchor_world();
+        let centroid = Vec2::from_array(data.centroid);
+        let delta = anchor - centroid;
+
+        // Build old-ID → new-ID remap.
+        let mut id_remap: HashMap<u64, u64> = HashMap::new();
+        for e in &data.elements {
+            id_remap.insert(e.id, self.board.next_id());
+        }
+
+        // Save embedded images to the asset root; build path remap.
+        let asset_root = snapshot_root(&self.snapshot_path);
+        let mut path_remap: HashMap<String, String> = HashMap::new();
+        for (old_path, b64) in &data.images {
+            if path_remap.contains_key(old_path) {
+                continue;
+            }
+            use base64::Engine as _;
+            let bytes = match base64::engine::general_purpose::STANDARD.decode(b64) {
+                Ok(b) => b,
+                Err(err) => {
+                    eprintln!("clipboard paste: base64 decode failed for {old_path}: {err}");
+                    continue;
+                }
+            };
+            // Derive a unique filename using a simple counter approach.
+            let ext = Path::new(old_path)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("webp");
+            let new_id = self.board.next_available_id();
+            let is_hires = old_path.contains("_hires");
+            let new_rel = if is_hires {
+                format!("images/image_{new_id}_hires.{ext}")
+            } else {
+                format!("images/image_{new_id}.{ext}")
+            };
+            let dest = asset_root.join(&new_rel);
+            if let Some(parent) = dest.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if let Err(err) = std::fs::write(&dest, &bytes) {
+                eprintln!("clipboard paste: failed to write image {}: {err}", dest.display());
+                continue;
+            }
+            path_remap.insert(old_path.clone(), new_rel);
+        }
+
+        // Remap and insert elements.
+        self.board.deselect_all();
+        let mut conn_changes: Vec<LineConnectionChange> = Vec::new();
+
+        for mut element in data.elements {
+            let new_id = match id_remap.get(&element.id) {
+                Some(&id) => id,
+                None => continue,
+            };
+            element.id = new_id;
+            element.selected = true;
+            element.pos += delta;
+
+            // Update image asset paths.
+            if let Some(img) = element.image.as_mut() {
+                if let Some(new_path) = path_remap.get(&img.asset_path) {
+                    img.asset_path = new_path.clone();
+                }
+                if let Some(hires) = img.hires_asset_path.as_mut() {
+                    if let Some(new_path) = path_remap.get(hires.as_str()) {
+                        *hires = new_path.clone();
+                    }
+                }
+            }
+
+            self.board.apply_operation(BoardOperation::AddElement(element));
+        }
+
+        // Build line connection changes with remapped IDs.
+        for (id_str, endpoints) in &data.line_connections {
+            let old_line_id: u64 = match id_str.parse() {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let new_line_id = match id_remap.get(&old_line_id) {
+                Some(&id) => id,
+                None => continue,
+            };
+            let remap_anchor = |anchor: &LineAnchor| -> Option<LineAnchor> {
+                id_remap.get(&anchor.target_id).map(|&new_target| LineAnchor {
+                    target_id: new_target,
+                    norm_pos: anchor.norm_pos,
+                })
+            };
+            let new_endpoints = LineEndpoints {
+                start: endpoints.start.as_ref().and_then(remap_anchor),
+                end: endpoints.end.as_ref().and_then(remap_anchor),
+            };
+            if new_endpoints.start.is_some() || new_endpoints.end.is_some() {
+                conn_changes.push(LineConnectionChange {
+                    id: new_line_id,
+                    before: LineEndpoints::default(),
+                    after: new_endpoints,
+                });
+            }
+        }
+
+        if !conn_changes.is_empty() {
+            self.board.apply_operation(BoardOperation::SetLineConnections { changes: conn_changes });
+        }
+
+        self.mark_board_structure_dirty();
+        true
     }
 
     pub(super) fn import_dropped_files(&mut self) {

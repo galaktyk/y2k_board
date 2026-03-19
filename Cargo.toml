@@ -8,6 +8,8 @@ miniquad = "0.4.8"
 glam = { version = "0.29", default-features = false, features = ["std", "serde"] }
 serde = { version = "1", default-features = false, features = ["derive"] }
 bincode = "1"
+serde_json = "1"
+base64 = "0.22"
 cosmic-text = { version = "0.18.2", default-features = false, features = ["std", "swash"] }
 image = { version = "0.25", default-features = false, features = ["bmp", "gif", "ico", "jpeg", "png", "webp"] }
 

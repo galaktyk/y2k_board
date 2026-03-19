@@ -89,6 +89,10 @@ impl App {
             self.load_snapshot();
             return;
         }
+        if keymods.ctrl && keycode == KeyCode::C {
+            self.copy_selected_to_clipboard();
+            return;
+        }
         if keymods.ctrl && keycode == KeyCode::V && self.handle_board_paste() {
             return;
         }
