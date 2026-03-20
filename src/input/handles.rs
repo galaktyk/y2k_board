@@ -8,7 +8,7 @@ use crate::rendering::renderer::InstanceData;
 const HANDLE_SIZE_PX: f32 = 10.0;
 const ROTATION_HANDLE_OFFSET_PX: f32 = 30.0;
 const CONNECTION_HELPER_SIZE_PX: f32 = 12.0;
-const CONNECTION_HELPER_OFFSET_PX: f32 = 10.0;
+const CONNECTION_HELPER_OFFSET_PX: f32 = 20.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ConnectionHelper {
@@ -173,7 +173,7 @@ pub fn connection_helpers_to_instances(e: &Element, zoom: f32) -> Vec<InstanceDa
 
     let helper_size = CONNECTION_HELPER_SIZE_PX * world_units_per_screen_px(zoom);
     for helper in helpers {
-        push_circle_handle_instances(&mut out, helper.point, helper_size, palette::CYAN);
+        push_circle_handle_instances(&mut out, helper.point, helper_size, palette::TEAL);
     }
 
     out
