@@ -46,6 +46,25 @@ pub fn preview_instances(element: &Element, zoom: f32, alpha: f32) -> Vec<Instan
     instances
 }
 
+pub fn connection_preview_instance(
+    start: Vec2,
+    end: Vec2,
+    color: [f32; 4],
+    stroke_width: u8,
+    alpha: f32,
+) -> InstanceData {
+    InstanceData::new(
+        start.to_array(),
+        (end - start).to_array(),
+        0.0,
+        color,
+        2.0,
+        alpha,
+        false,
+    )
+    .with_stroke_width(stroke_width.max(1))
+}
+
 pub fn element_to_instances(element: &Element, alpha: f32) -> Vec<InstanceData> {
     let mut out = Vec::new();
 

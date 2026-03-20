@@ -39,6 +39,8 @@ pub const PURE_BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0]; // #000000
 pub const PURE_WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0]; // #ffffff
 pub const TEXT_SELECTION_COLOR: [f32; 4] = [0.18, 0.45, 1.0, 0.22]; // semi-transparent light blue
 pub const TRANSPARENT: [f32; 4] = [0.0, 0.0, 0.0, 0.0]; // fully transparent
+pub const GRAY_TRANSPARENT: [f32; 4] = [0.5, 0.5, 0.5, 0.5]; // semi-transparent gray
+
 
 // ── Palette Array ─────────────────────────────────────────────────────────────
 

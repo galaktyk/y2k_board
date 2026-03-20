@@ -7,8 +7,10 @@ use crate::board::{
     ShapeType, ToolStyleDefaults,
 };
 use crate::camera::Camera;
-use crate::input::handles::{get_element_handles, get_selection_bounds_handles, handle_hit_radius};
-use crate::input::state::{DragMode, HandleDir, InputState, SelectionBounds};
+use crate::input::handles::{
+    get_connection_helpers, get_element_handles, get_selection_bounds_handles, handle_hit_radius,
+};
+use crate::input::state::{ConnectionDrag, DragMode, HandleDir, InputState, SelectionBounds};
 use crate::ui::tool::Tool;
 
 const MARQUEE_MIN_SIZE: f32 = 4.0;
@@ -98,6 +100,18 @@ fn begin_marquee_drag(state: &mut InputState, world: Vec2) {
     state.transform_bounds_origin = None;
 }
 
+fn begin_connection_drag(state: &mut InputState, connection_drag: ConnectionDrag) {
+    state.pending_drag_mode = DragMode::None;
+    state.drag_mode = DragMode::CreatingConnection;
+    state.move_origin.clear();
+    state.move_delta = Vec2::ZERO;
+    state.rotate_delta = 0.0;
+    state.marquee_bounds = None;
+    state.drag_selection_bounds = None;
+    state.transform_bounds_origin = None;
+    state.connection_drag = Some(connection_drag);
+}
+
 fn current_multi_selection_bounds(state: &InputState, board: &Board) -> Option<SelectionBounds> {
     if board.selected_count() <= 1 {
         return None;
@@ -185,6 +199,33 @@ fn selection_handle_hit(state: &InputState, board: &Board, world: Vec2, zoom: f3
                         }
                     });
                 }
+            }
+        }
+    }
+
+    None
+}
+
+fn connection_helper_hit(board: &Board, world: Vec2, zoom: f32) -> Option<ConnectionDrag> {
+    if board.selected_count() != 1 {
+        return None;
+    }
+
+    let hit_radius = handle_hit_radius(zoom);
+    for element in board.elements.iter().filter(|element| element.selected).rev() {
+        let Some(helpers) = get_connection_helpers(element, zoom) else {
+            continue;
+        };
+
+        for helper in helpers {
+            let delta = world - helper.point;
+            if delta.length_squared() < hit_radius * hit_radius {
+                return Some(ConnectionDrag {
+                    source_id: element.id,
+                    source_norm_pos: helper.norm_pos,
+                    start_world: helper.point,
+                    end_world: helper.point,
+                });
             }
         }
     }
@@ -390,6 +431,19 @@ fn line_anchor_from_drop(target: &Element, world: Vec2) -> Option<LineAnchor> {
     })
 }
 
+fn anchored_position_from_element(element: &Element, norm_pos: Vec2) -> Vec2 {
+    let center = element.pos + element.size * 0.5;
+    let local = (norm_pos - Vec2::splat(0.5)) * element.size;
+    let c = element.rotation.cos();
+    let s = element.rotation.sin();
+    center + Vec2::new(local.x * c - local.y * s, local.x * s + local.y * c)
+}
+
+fn anchored_position_from_anchor(board: &Board, anchor: &LineAnchor) -> Option<Vec2> {
+    let element = board.element(anchor.target_id)?;
+    Some(anchored_position_from_element(element, anchor.norm_pos))
+}
+
 fn find_line_anchor(board: &Board, line_id: u64, world: Vec2) -> Option<LineAnchor> {
     board
         .hit_test_all(world)
@@ -553,6 +607,12 @@ pub fn on_mouse_down(
         Tool::Select => {
             let now = miniquad::date::now();
             clear_pending_drag(state);
+            if let Some(connection_drag) = connection_helper_hit(board, world, camera.zoom) {
+                state.active_text_id = None;
+                state.text_selecting = false;
+                begin_connection_drag(state, connection_drag);
+                return false;
+            }
             if let Some(drag_mode) = selection_handle_hit(state, board, world, camera.zoom) {
                 state.active_text_id = None;
                 state.text_selecting = false;
@@ -661,6 +721,7 @@ pub fn on_mouse_up(
     let was_panning = state.panning;
     let completed_drag_mode = state.drag_mode;
     state.mouse_pos = Vec2::new(x, y);
+    let world = camera.screen_to_world(state.mouse_pos, screen_size);
 
     match btn {
         miniquad::MouseButton::Left => state.mouse_down_left = false,
@@ -732,6 +793,42 @@ pub fn on_mouse_up(
                     state.selection_bounds = board.selected_bounds();
                 }
             }
+            DragMode::CreatingConnection => {
+                if let Some(connection_drag) = state.connection_drag {
+                    let end_anchor = find_line_anchor(board, u64::MAX, world);
+                    let end_world = end_anchor
+                        .as_ref()
+                        .and_then(|anchor| anchored_position_from_anchor(board, anchor))
+                        .unwrap_or(connection_drag.end_world);
+
+                    if (end_world - connection_drag.start_world).length_squared()
+                        >= MARQUEE_MIN_SIZE * MARQUEE_MIN_SIZE
+                    {
+                        let new_id = board.next_id();
+                        board.apply_operation(BoardOperation::AddElement(Element {
+                            id: new_id,
+                            shape: ShapeType::Line,
+                            pos: connection_drag.start_world,
+                            size: end_world - connection_drag.start_world,
+                            rotation: 0.0,
+                            color: crate::board::DEFAULT_LINE_COLOR,
+                            stroke_color: crate::board::DEFAULT_LINE_COLOR,
+                            border_width: crate::board::default_border_width(),
+                            stroke_width: crate::board::default_line_stroke_width(),
+                            selected: false,
+                            text: None,
+                            image: None,
+                            text_layout_generation: 0,
+                        }));
+                        board.deselect_all();
+                        board.select_only(new_id);
+                        board.apply_operation(BoardOperation::SetLineConnections {
+                            changes: vec![connection_line_change(new_id, &connection_drag, end_anchor)],
+                        });
+                        state.selection_bounds = None;
+                    }
+                }
+            }
             DragMode::Rotating if state.move_origin.len() > 1 => {
                 if let Some(bounds) = state.transform_bounds_origin {
                     let ids = transform_ids(state);
@@ -775,6 +872,7 @@ pub fn on_mouse_up(
     state.drag_mode = DragMode::None;
     state.move_delta = Vec2::ZERO;
     state.rotate_delta = 0.0;
+    state.connection_drag = None;
     state.move_origin.clear();
     state.marquee_bounds = None;
     state.drag_selection_bounds = None;
@@ -885,7 +983,7 @@ pub fn on_mouse_move(
                 DragMode::MarqueeSelect => {
                     begin_marquee_drag(state, state.pending_drag_start_world);
                 }
-                DragMode::ResizingHandle(_) | DragMode::Rotating | DragMode::None => {
+                DragMode::ResizingHandle(_) | DragMode::Rotating | DragMode::CreatingConnection | DragMode::None => {
                     clear_pending_drag(state);
                 }
             }
@@ -895,6 +993,18 @@ pub fn on_mouse_move(
     if state.drag_mode != DragMode::None {
         if state.drag_mode == DragMode::MarqueeSelect {
             state.marquee_bounds = Some(SelectionBounds::from_points(state.move_start_world, world));
+            return;
+        }
+
+        if state.drag_mode == DragMode::CreatingConnection {
+            if let Some(connection_drag) = state.connection_drag.as_mut() {
+                if let Some(anchor) = find_line_anchor(board, u64::MAX, world) {
+                    connection_drag.end_world =
+                        anchored_position_from_anchor(board, &anchor).unwrap_or(world);
+                } else {
+                    connection_drag.end_world = world;
+                }
+            }
             return;
         }
 
@@ -1042,7 +1152,10 @@ pub fn on_mouse_move(
                                 state.last_resize_text_bump = now;
                             }
                         }
-                        DragMode::MoveSelected | DragMode::MarqueeSelect | DragMode::None => {}
+                        DragMode::MoveSelected
+                        | DragMode::MarqueeSelect
+                        | DragMode::CreatingConnection
+                        | DragMode::None => {}
                     }
                 }
             }
@@ -1151,5 +1264,23 @@ fn preview_text_color(tool: &Tool, defaults: &ToolStyleDefaults) -> [f32; 4] {
         Tool::Ellipse => defaults.ellipse.text_color,
         Tool::Text => defaults.text.text_color,
         _ => crate::board::DEFAULT_TEXT_COLOR,
+    }
+}
+
+fn connection_line_change(
+    line_id: u64,
+    source: &ConnectionDrag,
+    end: Option<LineAnchor>,
+) -> LineConnectionChange {
+    LineConnectionChange {
+        id: line_id,
+        before: LineEndpoints::default(),
+        after: LineEndpoints {
+            start: Some(LineAnchor {
+                target_id: source.source_id,
+                norm_pos: source.source_norm_pos,
+            }),
+            end,
+        },
     }
 }

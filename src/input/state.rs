@@ -3,6 +3,14 @@ use glam::Vec2;
 use crate::board::Element;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ConnectionDrag {
+    pub source_id: u64,
+    pub source_norm_pos: Vec2,
+    pub start_world: Vec2,
+    pub end_world: Vec2,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SelectionBounds {
     pub pos: Vec2,
     pub size: Vec2,
@@ -101,6 +109,7 @@ pub struct InputState {
     pub preview: Option<Element>,
     pub move_delta: Vec2,
     pub rotate_delta: f32,
+    pub connection_drag: Option<ConnectionDrag>,
     pub marquee_bounds: Option<SelectionBounds>,
     pub selection_bounds: Option<SelectionBounds>,
     pub drag_selection_bounds: Option<SelectionBounds>,
@@ -130,6 +139,7 @@ pub enum DragMode {
     MarqueeSelect,
     ResizingHandle(HandleDir),
     Rotating,
+    CreatingConnection,
 }
 
 impl InputState {
@@ -158,6 +168,7 @@ impl InputState {
             preview: None,
             move_delta: Vec2::ZERO,
             rotate_delta: 0.0,
+            connection_drag: None,
             marquee_bounds: None,
             selection_bounds: None,
             drag_selection_bounds: None,

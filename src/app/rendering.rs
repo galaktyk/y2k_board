@@ -171,7 +171,7 @@ impl App {
 
                 changed.then_some((selected_ids, preview_transforms))
             }
-            DragMode::MarqueeSelect | DragMode::None => None,
+            DragMode::MarqueeSelect | DragMode::CreatingConnection | DragMode::None => None,
         }
     }
 
@@ -341,6 +341,18 @@ impl App {
             self.renderer
                 .draw_instances(&mut *self.ctx, &preview_inst, board_mvp, self.screen_size);
         }
+
+        if let Some(connection_drag) = self.input.connection_drag {
+            let preview_line = overlay::connection_preview_instance(
+                connection_drag.start_world,
+                connection_drag.end_world,
+                crate::board::DEFAULT_LINE_COLOR,
+                crate::board::DEFAULT_LINE_STROKE_WIDTH,
+                0.85,
+            );
+            self.renderer
+                .draw_instances(&mut *self.ctx, &[preview_line], board_mvp, self.screen_size);
+        }
     }
 
     fn draw_selection_overlay(
@@ -400,12 +412,20 @@ impl App {
             for e in &self.board.elements {
                 if e.selected {
                     let mut instances = crate::input::handles_to_instances(e, self.camera.zoom);
+                    let mut helper_instances = crate::input::connection_helpers_to_instances(
+                        e,
+                        self.camera.zoom,
+                    );
                     if let Some(offset) = move_drag_offset {
                         for instance in &mut instances {
                             *instance = offset_instance(*instance, offset);
                         }
+                        for instance in &mut helper_instances {
+                            *instance = offset_instance(*instance, offset);
+                        }
                     }
                     handle_inst.extend(instances);
+                    handle_inst.extend(helper_instances);
                 }
             }
         }
