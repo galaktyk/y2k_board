@@ -57,7 +57,7 @@ impl App {
         self.draw_board_layers(board_mvp, move_drag_offset, rotate_drag_preview, &image_draws);
         self.draw_text_layers(board_mvp, move_drag_offset, rotate_drag_preview);
         self.draw_overlay_layers(board_mvp, move_drag_offset, rotate_drag_preview);
-        self.draw_screen_ui();
+        self.draw_screen_ui(move_drag_offset, rotate_drag_preview);
 
         self.ctx.end_render_pass();
         self.ctx.commit_frame();
@@ -415,7 +415,11 @@ impl App {
         }
     }
 
-    fn draw_screen_ui(&mut self) {
+    fn draw_screen_ui(
+        &mut self,
+        move_drag_offset: Option<Vec2>,
+        rotate_drag_preview: Option<(f32, Vec2)>,
+    ) {
         let mut ui_bg_instances = self.toolbar.build_instances(
             self.screen_size,
             self.input.mouse_pos,
@@ -436,6 +440,43 @@ impl App {
             self.board.can_undo(),
             self.board.can_redo(),
         );
+
+        if self.board.selected_count() > 1 {
+            if let Some(bounds) = self
+                .input
+                .drag_selection_bounds
+                .or(self.input.selection_bounds)
+                .or_else(|| self.board.selected_bounds())
+            {
+                let handles = crate::input::get_selection_bounds_handles(bounds, self.camera.zoom);
+                if handles.len() > 4 {
+                    let pos = handles[4];
+                    let screen_pos = self.camera.world_to_screen(pos, self.screen_size);
+                    ui_text_specs.push(crate::text::UiTextSpec::top_center("↻", screen_pos - glam::Vec2::new(0.0, 12.0), 24.0, [1.0, 1.0, 1.0, 1.0]));
+                }
+            }
+        } else {
+            for e in &self.board.elements {
+                if e.selected {
+                    if let Some(handles) = crate::input::get_element_handles(e, self.camera.zoom) {
+                        if handles.len() > 4 {
+                            let mut pos = handles[4];
+                            if let Some(offset) = move_drag_offset {
+                                pos += offset;
+                            }
+                            if let Some((angle, center)) = rotate_drag_preview {
+                                let rel = pos - center;
+                                let c = angle.cos();
+                                let s = angle.sin();
+                                pos = center + glam::Vec2::new(rel.x * c - rel.y * s, rel.x * s + rel.y * c);
+                            }
+                            let screen_pos = self.camera.world_to_screen(pos, self.screen_size);
+                            ui_text_specs.push(crate::text::UiTextSpec::top_center("↻", screen_pos - glam::Vec2::new(0.0, 12.0), 24.0, [1.0, 1.0, 1.0, 1.0]));
+                        }
+                    }
+                }
+            }
+        }
 
         if let Some(panel) = self.resolve_property_panel() {
             let mut panel_inst = crate::ui::property_panel::build_instances(

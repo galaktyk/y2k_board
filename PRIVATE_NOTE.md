@@ -1,4 +1,17 @@
 
+line drag helper
+add line connection create helper (miro clone)
+4 edges [center top, right, left, bottom]
+have a purple dots that when drag from it will auto create line and pre hook line to element edge
+
+(basically what miro do)
+---
+support border resize, also change cursor when hovering on border
+
+
+---
+wasm
+
 ---
 
 ro sprite player
