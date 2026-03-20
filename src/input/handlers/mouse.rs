@@ -220,11 +220,12 @@ fn connection_helper_hit(board: &Board, world: Vec2, zoom: f32) -> Option<Connec
         for helper in helpers {
             let delta = world - helper.point;
             if delta.length_squared() < hit_radius * hit_radius {
+                let start_world = anchored_position_from_element(element, helper.norm_pos);
                 return Some(ConnectionDrag {
                     source_id: element.id,
                     source_norm_pos: helper.norm_pos,
-                    start_world: helper.point,
-                    end_world: helper.point,
+                    start_world,
+                    end_world: start_world,
                 });
             }
         }
