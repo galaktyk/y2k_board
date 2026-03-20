@@ -102,8 +102,7 @@ impl App {
         anchor: Vec2,
         select: bool,
     ) -> Result<(), ImageImportError> {
-        let element_id = self.board.next_available_id();
-        let imported = self.image_manager.import_from_source(element_id, path)?;
+        let imported = self.image_manager.import_from_source(path)?;
         self.insert_imported_image(imported, anchor, select);
         Ok(())
     }
@@ -114,8 +113,7 @@ impl App {
         anchor: Vec2,
         select: bool,
     ) -> Result<(), ImageImportError> {
-        let element_id = self.board.next_available_id();
-        let imported = self.image_manager.import_from_bytes(element_id, bytes)?;
+        let imported = self.image_manager.import_from_bytes(bytes)?;
         self.insert_imported_image(imported, anchor, select);
         Ok(())
     }
@@ -128,10 +126,9 @@ impl App {
         anchor: Vec2,
         select: bool,
     ) -> Result<(), ImageImportError> {
-        let element_id = self.board.next_available_id();
         let imported = self
             .image_manager
-            .import_from_rgba(element_id, width, height, rgba)?;
+            .import_from_rgba(width, height, rgba)?;
         self.insert_imported_image(imported, anchor, select);
         Ok(())
     }
@@ -338,27 +335,21 @@ impl App {
                     continue;
                 }
             };
-            // Derive a unique filename using a simple counter approach.
-            let ext = Path::new(old_path)
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("webp");
-            let new_id = self.board.next_available_id();
-            let is_hires = old_path.contains("_hires");
-            let new_rel = if is_hires {
-                format!("images/image_{new_id}_hires.{ext}")
+            // Image files are content-addressed by hash; reuse the same path.
+            let dest = asset_root.join(old_path);
+            if dest.exists() {
+                println!("[image] paste hash hit: {old_path}");
             } else {
-                format!("images/image_{new_id}.{ext}")
-            };
-            let dest = asset_root.join(&new_rel);
-            if let Some(parent) = dest.parent() {
-                let _ = std::fs::create_dir_all(parent);
+                if let Some(parent) = dest.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                if let Err(err) = std::fs::write(&dest, &bytes) {
+                    eprintln!("clipboard paste: failed to write image {}: {err}", dest.display());
+                    continue;
+                }
+                println!("[image] paste write: {old_path}");
             }
-            if let Err(err) = std::fs::write(&dest, &bytes) {
-                eprintln!("clipboard paste: failed to write image {}: {err}", dest.display());
-                continue;
-            }
-            path_remap.insert(old_path.clone(), new_rel);
+            path_remap.insert(old_path.clone(), old_path.clone());
         }
 
         // Remap and insert elements.

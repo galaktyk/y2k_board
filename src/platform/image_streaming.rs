@@ -49,6 +49,10 @@ impl DiskImageStreamingAdapter {
         let decoded = image::open(&full_path).ok()?;
         Some(decoded_from_image(&decoded))
     }
+
+    pub(crate) fn asset_exists(&self, relative_path: &str) -> bool {
+        self.asset_root.join(relative_path).exists()
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -82,5 +86,9 @@ impl WebImageStreamingAdapter {
 
     pub(crate) fn load_decoded(&self, _relative_path: &str) -> Option<DecodedImage> {
         None
+    }
+
+    pub(crate) fn asset_exists(&self, _relative_path: &str) -> bool {
+        false
     }
 }

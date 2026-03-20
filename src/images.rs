@@ -176,58 +176,70 @@ impl ImageManager {
         self.clear_runtime_caches(ctx);
     }
 
-    pub fn import_from_source(&mut self, element_id: u64, source_path: &Path) -> Result<ImportedImage, ImageImportError> {
+    pub fn import_from_source(&mut self, source_path: &Path) -> Result<ImportedImage, ImageImportError> {
         #[cfg(target_arch = "wasm32")]
         {
-            let _ = element_id;
             let _ = source_path;
             return Err(ImageImportError::UnsupportedPlatform);
         }
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let decoded = image::open(source_path)?;
-            self.import_from_image(element_id, &decoded)
+            let bytes = std::fs::read(source_path)?;
+            let hash = fnv1a_hash(&bytes);
+            let decoded = image::load_from_memory(&bytes)?;
+            self.import_from_image(&hash, &decoded)
         }
     }
 
-    pub fn import_from_bytes(&mut self, element_id: u64, bytes: &[u8]) -> Result<ImportedImage, ImageImportError> {
+    pub fn import_from_bytes(&mut self, bytes: &[u8]) -> Result<ImportedImage, ImageImportError> {
+        let hash = fnv1a_hash(bytes);
         let decoded = image::load_from_memory(bytes)?;
-        self.import_from_image(element_id, &decoded)
+        self.import_from_image(&hash, &decoded)
     }
 
     pub fn import_from_rgba(
         &mut self,
-        element_id: u64,
         width: u32,
         height: u32,
         rgba: Vec<u8>,
     ) -> Result<ImportedImage, ImageImportError> {
+        let hash = fnv1a_hash(&rgba);
         let image = image::RgbaImage::from_raw(width, height, rgba)
             .ok_or(ImageImportError::InvalidData("clipboard image data had an invalid RGBA size"))?;
         let decoded = DynamicImage::ImageRgba8(image);
-        self.import_from_image(element_id, &decoded)
+        self.import_from_image(&hash, &decoded)
     }
 
     pub fn import_from_image(
         &mut self,
-        element_id: u64,
+        hash: &str,
         decoded: &DynamicImage,
     ) -> Result<ImportedImage, ImageImportError> {
         let (original_width, original_height) = decoded.dimensions();
         let base_image = resize_to_limit(decoded, BASE_IMAGE_MAX_DIMENSION);
         let (base_width, base_height) = base_image.dimensions();
 
-        let asset_path = format!("images/image_{element_id}.webp");
-        self.streaming_adapter
-            .persist_webp(&asset_path, &base_image, BASE_WEBP_QUALITY)?;
+        let asset_path = format!("images/image_{hash}.webp");
+        if !self.streaming_adapter.asset_exists(&asset_path) {
+            println!("[image] encode new: {asset_path}");
+            self.streaming_adapter
+                .persist_webp(&asset_path, &base_image, BASE_WEBP_QUALITY)?;
+        } else {
+            println!("[image] hash hit: {asset_path}");
+        }
         self.seed_ram(asset_path.clone(), decoded_from_image(&base_image));
 
         let hires_asset_path = if original_width.max(original_height) > BASE_IMAGE_MAX_DIMENSION {
             let hires_image = resize_to_limit(decoded, HIRES_IMAGE_MAX_DIMENSION);
-            let hires_asset_path = format!("images/image_{element_id}_hires.webp");
-            self.streaming_adapter
-                .persist_webp(&hires_asset_path, &hires_image, HIRES_WEBP_QUALITY)?;
+            let hires_asset_path = format!("images/image_{hash}_hires.webp");
+            if !self.streaming_adapter.asset_exists(&hires_asset_path) {
+                println!("[image] encode new: {hires_asset_path}");
+                self.streaming_adapter
+                    .persist_webp(&hires_asset_path, &hires_image, HIRES_WEBP_QUALITY)?;
+            } else {
+                println!("[image] hash hit: {hires_asset_path}");
+            }
             self.seed_ram(hires_asset_path.clone(), decoded_from_image(&hires_image));
             Some(hires_asset_path)
         } else {
@@ -553,6 +565,15 @@ fn remove_from_lru(order: &mut Vec<String>, key: &str) {
     if let Some(index) = order.iter().position(|entry| entry == key) {
         order.remove(index);
     }
+}
+
+fn fnv1a_hash(data: &[u8]) -> String {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for &b in data {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    format!("{:016x}", h)
 }
 
 fn create_missing_texture(ctx: &mut dyn RenderingBackend) -> TextureId {

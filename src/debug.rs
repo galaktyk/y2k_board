@@ -289,8 +289,7 @@ pub fn spawn_debug_images(
     for _ in 0..20 {
         let pick = (rng(&mut seed) * image_paths.len() as f32) as usize;
         let source_path = &image_paths[pick.min(image_paths.len() - 1)];
-        let asset_id = board.next_available_id();
-        let imported = image_manager.import_from_source(asset_id, source_path).map_err(|source| {
+        let imported = image_manager.import_from_source(source_path).map_err(|source| {
             DebugImageSpawnError::Import {
                 path: source_path.clone(),
                 source,

@@ -1,8 +1,5 @@
 
 ---
-
-copy paste
----
 reuse old image from hash
 
 
