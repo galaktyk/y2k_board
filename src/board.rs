@@ -9,8 +9,8 @@ pub mod operation;
 mod tests;
 
 pub use element::{
-    BoxToolStyle, Element, ElementStyleSnapshot, ImageData, LineAnchor, LineEndpoints, LineToolStyle,
-    ShapeType, TextData, ToolStyleDefaults, DEFAULT_BOX_STROKE_COLOR, DEFAULT_BORDER_WIDTH,
+    BoxToolStyle, Element, ElementStyleSnapshot, ImageData, LineAnchor, LineEndpoints,
+    ShapeType, TextData, ToolStyleDefaults, DEFAULT_BORDER_WIDTH,
     DEFAULT_ELLIPSE_COLOR, DEFAULT_LINE_COLOR, DEFAULT_LINE_STROKE_WIDTH, DEFAULT_RECT_COLOR,
     DEFAULT_STROKE_COLOR, DEFAULT_TEXT_COLOR, default_border_width, default_line_stroke_width,
     default_stroke_color, default_text_box_color,

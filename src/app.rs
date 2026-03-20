@@ -28,7 +28,7 @@ use crate::spatial::SpatialGrid;
 use crate::text::{PreparedTextDraw, TextEditSession, TextEditSnapshot, TextSystem};
 
 use crate::ui::toolbar::{self, Toolbar, ToolbarAction};
-use crate::ui::property_panel::{self, ColorTarget, WidthTarget};
+use crate::ui::property_panel::{self, ColorTarget, LineArrowTarget, WidthTarget};
 
 const IMAGE_RAM_FLUSH_INTERVAL: Duration = Duration::from_secs(60);
 const IMAGE_RAM_FLUSH_INTERVAL_SECS: f64 = IMAGE_RAM_FLUSH_INTERVAL.as_secs_f64();
@@ -335,6 +335,9 @@ impl App {
             .iter()
             .find(|element| element.uses_stroke_width())
             .map(|element| element.stroke_width.clamp(1, 16));
+        let show_line_arrows = selected.iter().all(|element| element.shape == ShapeType::Line);
+        let line_arrow_start = show_line_arrows.then(|| selected[0].line_arrow_start);
+        let line_arrow_end = show_line_arrows.then(|| selected[0].line_arrow_end);
 
         Some(ResolvedPropertyPanel {
             source: PropertyPanelSource::Selection(ids),
@@ -345,12 +348,14 @@ impl App {
                 active_color,
                 border_width,
                 stroke_width,
+                line_arrow_start,
+                line_arrow_end,
             },
         })
     }
 
     fn resolve_tool_property_panel(&self) -> Option<ResolvedPropertyPanel> {
-        let (title, tabs, active_color, border_width, stroke_width) = match self.toolbar.active_tool {
+        let (title, tabs, active_color, border_width, stroke_width, line_arrow_start, line_arrow_end) = match self.toolbar.active_tool {
             ui::tool::Tool::Rect => {
                 let tabs = style::tabs(true, true, true);
                 let active = self.resolve_panel_target(tabs)?;
@@ -359,6 +364,8 @@ impl App {
                     tabs,
                     style::color_for_box_defaults(self.tool_style_defaults.rect, active),
                     Some(self.tool_style_defaults.rect.border_width.min(16)),
+                    None,
+                    None,
                     None,
                 )
             }
@@ -371,6 +378,8 @@ impl App {
                     style::color_for_box_defaults(self.tool_style_defaults.ellipse, active),
                     Some(self.tool_style_defaults.ellipse.border_width.min(16)),
                     None,
+                    None,
+                    None,
                 )
             }
             ui::tool::Tool::Text => {
@@ -382,6 +391,8 @@ impl App {
                     style::color_for_box_defaults(self.tool_style_defaults.text, active),
                     Some(self.tool_style_defaults.text.border_width.min(16)),
                     None,
+                    None,
+                    None,
                 )
             }
             ui::tool::Tool::Line => {
@@ -392,6 +403,8 @@ impl App {
                     self.tool_style_defaults.line.color,
                     None,
                     Some(self.tool_style_defaults.line.stroke_width.clamp(1, 16)),
+                    Some(self.tool_style_defaults.line.arrow_start),
+                    Some(self.tool_style_defaults.line.arrow_end),
                 )
             }
             ui::tool::Tool::Select => return None,
@@ -406,6 +419,8 @@ impl App {
                 active_color,
                 border_width,
                 stroke_width,
+                line_arrow_start,
+                line_arrow_end,
             },
         })
     }
@@ -431,6 +446,52 @@ impl App {
             }
             property_panel::PropertyPanelHit::Width(target, width) => {
                 self.begin_property_width_drag(target, width);
+            }
+            property_panel::PropertyPanelHit::Arrow(target) => {
+                self.apply_property_panel_arrow(target);
+            }
+        }
+    }
+
+    fn apply_property_panel_arrow(&mut self, target: LineArrowTarget) {
+        let Some(panel) = self.resolve_property_panel() else {
+            return;
+        };
+
+        let enabled = match target {
+            LineArrowTarget::Start => !panel.view.line_arrow_start.unwrap_or(false),
+            LineArrowTarget::End => !panel.view.line_arrow_end.unwrap_or(false),
+        };
+
+        match panel.source {
+            PropertyPanelSource::Tool(tool) => {
+                self.apply_tool_panel_arrow(tool, target, enabled);
+                self.request_redraw();
+            }
+            PropertyPanelSource::Selection(ids) => {
+                let changes: Vec<ElementPropertyChange> = ids
+                    .iter()
+                    .filter_map(|id| {
+                        let element = self.board.element(*id)?;
+                        let before = element.style_snapshot();
+                        let after = style::updated_style_with_arrow(element, target, enabled)?;
+                        (before != after).then_some(ElementPropertyChange {
+                            id: *id,
+                            patch: ElementPropertyPatch::Style { before, after },
+                        })
+                    })
+                    .collect();
+
+                if changes.is_empty() {
+                    self.request_redraw();
+                    return;
+                }
+
+                self.board.apply_operation(crate::board::BoardOperation::SetProperty {
+                    changes,
+                    sync_connected_lines: false,
+                });
+                self.mark_elements_dirty(ids);
             }
         }
     }
@@ -573,6 +634,17 @@ impl App {
             ui::tool::Tool::Line if target == WidthTarget::Stroke => self.tool_style_defaults.line.stroke_width = width,
             ui::tool::Tool::Select => {}
             _ => {}
+        }
+    }
+
+    fn apply_tool_panel_arrow(&mut self, tool: ui::tool::Tool, target: LineArrowTarget, enabled: bool) {
+        if tool != ui::tool::Tool::Line {
+            return;
+        }
+
+        match target {
+            LineArrowTarget::Start => self.tool_style_defaults.line.arrow_start = enabled,
+            LineArrowTarget::End => self.tool_style_defaults.line.arrow_end = enabled,
         }
     }
 
@@ -823,6 +895,7 @@ impl EventHandler for App {
             &mut self.input,
             &mut self.board,
             &self.camera,
+            &self.tool_style_defaults,
             self.toolbar.active_tool,
             self.screen_size,
             x,

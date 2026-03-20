@@ -72,13 +72,25 @@ impl InstanceData {
             alpha: (alpha_f32 * 255.0) as u8,
             shape_type: shape_type as u8,
             stroke_width: 1,
-            selected: if selected { 1 } else { 0 },
+            selected: Self::pack_flags(selected, false, false),
         }
     }
 
     pub fn with_stroke_width(mut self, stroke_width: u8) -> Self {
         self.stroke_width = stroke_width;
         self
+    }
+
+    pub fn with_line_arrowheads(mut self, arrow_start: bool, arrow_end: bool) -> Self {
+        let selected = (self.selected & 0b0000_0001) != 0;
+        self.selected = Self::pack_flags(selected, arrow_start, arrow_end);
+        self
+    }
+
+    fn pack_flags(selected: bool, arrow_start: bool, arrow_end: bool) -> u8 {
+        (selected as u8)
+            | ((arrow_start as u8) << 1)
+            | ((arrow_end as u8) << 2)
     }
 }
 

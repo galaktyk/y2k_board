@@ -712,6 +712,7 @@ pub fn on_mouse_up(
     state: &mut InputState,
     board: &mut Board,
     camera: &Camera,
+    tool_style_defaults: &ToolStyleDefaults,
     active_tool: Tool,
     screen_size: Vec2,
     x: f32,
@@ -811,10 +812,12 @@ pub fn on_mouse_up(
                             pos: connection_drag.start_world,
                             size: end_world - connection_drag.start_world,
                             rotation: 0.0,
-                            color: crate::board::DEFAULT_LINE_COLOR,
-                            stroke_color: crate::board::DEFAULT_LINE_COLOR,
+                            color: tool_style_defaults.line.color,
+                            stroke_color: tool_style_defaults.line.color,
                             border_width: crate::board::default_border_width(),
-                            stroke_width: crate::board::default_line_stroke_width(),
+                            stroke_width: tool_style_defaults.line.stroke_width,
+                            line_arrow_start: tool_style_defaults.line.arrow_start,
+                            line_arrow_end: tool_style_defaults.line.arrow_end,
                             selected: false,
                             text: None,
                             image: None,
@@ -1206,6 +1209,8 @@ pub fn on_mouse_move(
             stroke_color: preview_stroke_color(&active_tool, tool_style_defaults),
             border_width: preview_border_width(&active_tool, tool_style_defaults),
             stroke_width: preview_line_stroke_width(&active_tool, tool_style_defaults),
+            line_arrow_start: preview_line_arrow_start(&active_tool, tool_style_defaults),
+            line_arrow_end: preview_line_arrow_end(&active_tool, tool_style_defaults),
             selected: false,
             text: if matches!(shape, ShapeType::Rect | ShapeType::Ellipse) {
                 Some(crate::board::TextData {
@@ -1255,6 +1260,20 @@ fn preview_line_stroke_width(tool: &Tool, defaults: &ToolStyleDefaults) -> u8 {
     match tool {
         Tool::Line => defaults.line.stroke_width,
         _ => crate::board::DEFAULT_LINE_STROKE_WIDTH,
+    }
+}
+
+fn preview_line_arrow_start(tool: &Tool, defaults: &ToolStyleDefaults) -> bool {
+    match tool {
+        Tool::Line => defaults.line.arrow_start,
+        _ => false,
+    }
+}
+
+fn preview_line_arrow_end(tool: &Tool, defaults: &ToolStyleDefaults) -> bool {
+    match tool {
+        Tool::Line => defaults.line.arrow_end,
+        _ => false,
     }
 }
 

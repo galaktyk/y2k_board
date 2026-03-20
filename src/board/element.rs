@@ -13,11 +13,13 @@ pub enum ShapeType {
 pub const DEFAULT_TEXT_COLOR: [f32; 4] = palette::GRAY_3;
 pub const DEFAULT_RECT_COLOR: [f32; 4] = palette::OLIVE_LIGHT;
 pub const DEFAULT_ELLIPSE_COLOR: [f32; 4] = palette::TEAL;
-pub const DEFAULT_LINE_COLOR: [f32; 4] = palette::RED;
+pub const DEFAULT_LINE_COLOR: [f32; 4] = palette::BLACK;
 pub const DEFAULT_STROKE_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
-pub const DEFAULT_BORDER_WIDTH: u8 = 1;
-pub const DEFAULT_LINE_STROKE_WIDTH: u8 = 1;
+pub const DEFAULT_BORDER_WIDTH: u8 = 2;
+pub const DEFAULT_LINE_STROKE_WIDTH: u8 = 2;
 pub const DEFAULT_BOX_STROKE_COLOR: [f32; 4] = palette::BLACK;
+pub const DEFAULT_LINE_ARROW_START: bool = false;
+pub const DEFAULT_LINE_ARROW_END: bool = true;
 
 pub fn default_text_box_color() -> [f32; 4] {
     let mut color = DEFAULT_TEXT_COLOR;
@@ -35,6 +37,10 @@ pub fn default_border_width() -> u8 {
 
 pub fn default_line_stroke_width() -> u8 {
     DEFAULT_LINE_STROKE_WIDTH
+}
+
+pub fn default_line_arrow_disabled() -> bool {
+    false
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -78,6 +84,8 @@ impl BoxToolStyle {
 pub struct LineToolStyle {
     pub color: [f32; 4],
     pub stroke_width: u8,
+    pub arrow_start: bool,
+    pub arrow_end: bool,
 }
 
 impl LineToolStyle {
@@ -85,6 +93,8 @@ impl LineToolStyle {
         Self {
             color: DEFAULT_LINE_COLOR,
             stroke_width: DEFAULT_LINE_STROKE_WIDTH,
+            arrow_start: DEFAULT_LINE_ARROW_START,
+            arrow_end: DEFAULT_LINE_ARROW_END,
         }
     }
 }
@@ -114,6 +124,8 @@ pub struct ElementStyleSnapshot {
     pub stroke_color: [f32; 4],
     pub border_width: Option<u8>,
     pub stroke_width: Option<u8>,
+    pub line_arrow_start: Option<bool>,
+    pub line_arrow_end: Option<bool>,
     pub text_color: Option<[f32; 4]>,
 }
 
@@ -171,6 +183,10 @@ pub struct Element {
     pub border_width: u8,
     #[serde(default = "default_line_stroke_width")]
     pub stroke_width: u8,
+    #[serde(default = "default_line_arrow_disabled")]
+    pub line_arrow_start: bool,
+    #[serde(default = "default_line_arrow_disabled")]
+    pub line_arrow_end: bool,
     pub selected: bool,
     #[serde(default)]
     pub text: Option<TextData>,
@@ -212,6 +228,8 @@ impl Element {
             stroke_color: self.effective_stroke_color(),
             border_width: self.uses_border_width().then_some(self.border_width),
             stroke_width: self.uses_stroke_width().then_some(self.stroke_width.max(1)),
+            line_arrow_start: self.uses_stroke_width().then_some(self.line_arrow_start),
+            line_arrow_end: self.uses_stroke_width().then_some(self.line_arrow_end),
             text_color: self.current_text_color(),
         }
     }
@@ -224,6 +242,8 @@ impl Element {
         }
         if self.uses_stroke_width() {
             self.stroke_width = style.stroke_width.unwrap_or(DEFAULT_LINE_STROKE_WIDTH).max(1);
+            self.line_arrow_start = style.line_arrow_start.unwrap_or(false);
+            self.line_arrow_end = style.line_arrow_end.unwrap_or(false);
         }
 
         if self.shape == ShapeType::Line {

@@ -63,6 +63,7 @@ pub fn connection_preview_instance(
         false,
     )
     .with_stroke_width(stroke_width.max(1))
+    .with_line_arrowheads(false, true)
 }
 
 pub fn element_to_instances(element: &Element, alpha: f32) -> Vec<InstanceData> {
@@ -90,7 +91,8 @@ pub fn element_to_instances(element: &Element, alpha: f32) -> Vec<InstanceData> 
                         alpha,
                         element.selected,
                     )
-                    .with_stroke_width(element.stroke_width),
+                    .with_stroke_width(element.stroke_width)
+                    .with_line_arrowheads(element.line_arrow_start, element.line_arrow_end),
                 );
             }
         }

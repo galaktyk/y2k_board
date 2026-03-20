@@ -14,6 +14,8 @@ fn text_bounds_keep_inner_box_centered() {
         stroke_color: default_stroke_color(),
         border_width: default_border_width(),
         stroke_width: default_line_stroke_width(),
+        line_arrow_start: false,
+        line_arrow_end: false,
         selected: false,
         text: Some(TextData::default()),
         image: None,
@@ -42,6 +44,8 @@ fn bring_to_front_works() {
             stroke_color: default_stroke_color(),
             border_width: default_border_width(),
             stroke_width: default_line_stroke_width(),
+            line_arrow_start: false,
+            line_arrow_end: false,
             selected: false,
             text: None,
             image: None,
@@ -57,6 +61,8 @@ fn bring_to_front_works() {
             stroke_color: default_stroke_color(),
             border_width: default_border_width(),
             stroke_width: default_line_stroke_width(),
+            line_arrow_start: false,
+            line_arrow_end: false,
             selected: false,
             text: None,
             image: Some(ImageData {
@@ -79,6 +85,8 @@ fn bring_to_front_works() {
             stroke_color: default_stroke_color(),
             border_width: default_border_width(),
             stroke_width: default_line_stroke_width(),
+            line_arrow_start: false,
+            line_arrow_end: false,
             selected: false,
             text: None,
             image: None,
@@ -107,6 +115,8 @@ fn hit_test_prioritizes_shape_layer_over_images() {
             stroke_color: default_stroke_color(),
             border_width: default_border_width(),
             stroke_width: default_line_stroke_width(),
+            line_arrow_start: false,
+            line_arrow_end: false,
             selected: false,
             text: None,
             image: Some(ImageData {
@@ -129,6 +139,8 @@ fn hit_test_prioritizes_shape_layer_over_images() {
             stroke_color: default_stroke_color(),
             border_width: default_border_width(),
             stroke_width: default_line_stroke_width(),
+            line_arrow_start: false,
+            line_arrow_end: false,
             selected: false,
             text: None,
             image: None,
@@ -153,6 +165,8 @@ fn hit_test_uses_board_order_within_shape_layer() {
             stroke_color: default_stroke_color(),
             border_width: default_border_width(),
             stroke_width: default_line_stroke_width(),
+            line_arrow_start: false,
+            line_arrow_end: false,
             selected: false,
             text: None,
             image: None,
@@ -168,6 +182,8 @@ fn hit_test_uses_board_order_within_shape_layer() {
             stroke_color: default_stroke_color(),
             border_width: default_border_width(),
             stroke_width: default_line_stroke_width(),
+            line_arrow_start: false,
+            line_arrow_end: false,
             selected: false,
             text: None,
             image: None,
@@ -192,6 +208,8 @@ fn hit_test_prioritizes_text_elements_over_images() {
             stroke_color: default_stroke_color(),
             border_width: default_border_width(),
             stroke_width: default_line_stroke_width(),
+            line_arrow_start: false,
+            line_arrow_end: false,
             selected: false,
             text: None,
             image: Some(ImageData {
@@ -214,6 +232,8 @@ fn hit_test_prioritizes_text_elements_over_images() {
             stroke_color: default_stroke_color(),
             border_width: default_border_width(),
             stroke_width: default_line_stroke_width(),
+            line_arrow_start: false,
+            line_arrow_end: false,
             selected: false,
             text: Some(TextData {
                 content: "hello".to_string(),
@@ -242,6 +262,8 @@ fn set_property_can_skip_connected_line_sync() {
             stroke_color: default_stroke_color(),
             border_width: default_border_width(),
             stroke_width: default_line_stroke_width(),
+            line_arrow_start: false,
+            line_arrow_end: false,
             selected: false,
             text: None,
             image: None,
@@ -257,6 +279,8 @@ fn set_property_can_skip_connected_line_sync() {
             stroke_color: default_stroke_color(),
             border_width: default_border_width(),
             stroke_width: default_line_stroke_width(),
+            line_arrow_start: false,
+            line_arrow_end: false,
             selected: false,
             text: None,
             image: None,
@@ -365,6 +389,25 @@ fn compute_drag_line_previews_tracks_rotated_targets() {
     assert_eq!(previews, vec![(2, Vec2::new(10.0, 20.0), Vec2::new(50.0, -10.0))]);
 }
 
+#[test]
+fn line_style_snapshot_round_trip_preserves_arrowheads() {
+    let mut line = line_element(1, Vec2::ZERO, Vec2::new(120.0, 0.0));
+    line.line_arrow_start = true;
+    line.line_arrow_end = false;
+    line.stroke_width = 5;
+
+    let snapshot = line.style_snapshot();
+
+    line.line_arrow_start = false;
+    line.line_arrow_end = true;
+    line.stroke_width = 1;
+    line.apply_style_snapshot(snapshot);
+
+    assert!(line.line_arrow_start);
+    assert!(!line.line_arrow_end);
+    assert_eq!(line.stroke_width, 5);
+}
+
 fn rect_element(id: u64, pos: Vec2, size: Vec2) -> Element {
     Element {
         id,
@@ -376,6 +419,8 @@ fn rect_element(id: u64, pos: Vec2, size: Vec2) -> Element {
         stroke_color: default_stroke_color(),
         border_width: default_border_width(),
         stroke_width: default_line_stroke_width(),
+        line_arrow_start: false,
+        line_arrow_end: false,
         selected: false,
         text: None,
         image: None,
@@ -394,6 +439,8 @@ fn line_element(id: u64, pos: Vec2, size: Vec2) -> Element {
         stroke_color: default_stroke_color(),
         border_width: default_border_width(),
         stroke_width: default_line_stroke_width(),
+        line_arrow_start: false,
+        line_arrow_end: false,
         selected: false,
         text: None,
         image: None,

@@ -23,6 +23,8 @@ const SLIDER_HEIGHT: f32 = 26.0;
 const SLIDER_TRACK_HEIGHT: f32 = 6.0;
 const SLIDER_KNOB_SIZE: f32 = 12.0;
 const PANEL_TEXT_SIZE: f32 = 12.0;
+const TOGGLE_HEIGHT: f32 = 18.0;
+const TOGGLE_GAP: f32 = 6.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ColorTarget {
@@ -35,6 +37,21 @@ pub enum ColorTarget {
 pub enum WidthTarget {
     Border,
     Stroke,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LineArrowTarget {
+    Start,
+    End,
+}
+
+impl LineArrowTarget {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Start => "START",
+            Self::End => "END",
+        }
+    }
 }
 
 impl WidthTarget {
@@ -71,6 +88,8 @@ pub struct PropertyPanelView {
     pub active_color: [f32; 4],
     pub border_width: Option<u8>,
     pub stroke_width: Option<u8>,
+    pub line_arrow_start: Option<bool>,
+    pub line_arrow_end: Option<bool>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -78,6 +97,7 @@ pub enum PropertyPanelHit {
     Tab(ColorTarget),
     Swatch(usize),
     Width(WidthTarget, u8),
+    Arrow(LineArrowTarget),
 }
 
 #[derive(Clone, Copy)]
@@ -105,6 +125,7 @@ struct PropertyPanelLayout {
     tab_rects: Vec<(ColorTarget, Rect)>,
     swatch_rects: Vec<Rect>,
     width_tracks: Vec<(WidthTarget, Rect)>,
+    arrow_rects: Vec<(LineArrowTarget, Rect)>,
 }
 
 pub fn first_available_target(tabs: [Option<ColorTarget>; 3]) -> Option<ColorTarget> {
@@ -138,6 +159,12 @@ pub fn hit_test(screen_size: Vec2, view: &PropertyPanelView, x: f32, y: f32) -> 
     for (target, rect) in &layout.width_tracks {
         if rect.contains(point) {
             return Some(PropertyPanelHit::Width(*target, width_from_track(*rect, x, *target)));
+        }
+    }
+
+    for (target, rect) in &layout.arrow_rects {
+        if rect.contains(point) {
+            return Some(PropertyPanelHit::Arrow(*target));
         }
     }
 
@@ -316,6 +343,59 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
             ));
     }
 
+    for (target, rect) in &layout.arrow_rects {
+        let enabled = arrow_enabled(view, *target).unwrap_or(false);
+        let is_hovered = hovered == Some(PropertyPanelHit::Arrow(*target));
+        let background = if enabled {
+            PANEL_SLIDER_FILL_COLOR
+        } else if is_hovered {
+            PANEL_HOVER_COLOR
+        } else {
+            PANEL_ACTIVE_COLOR
+        };
+
+        out.push(InstanceData::new(
+            [rect.x, rect.y],
+            [rect.w, rect.h],
+            0.0,
+            background,
+            0.0,
+            1.0, false,
+        ));
+        out.push(InstanceData::new(
+            [rect.x, rect.y],
+            [rect.w, 1.0],
+            0.0,
+            PANEL_BORDER_HIGHLIGHT,
+            0.0,
+            1.0, false,
+        ));
+        out.push(InstanceData::new(
+            [rect.x, rect.y],
+            [1.0, rect.h],
+            0.0,
+            PANEL_BORDER_HIGHLIGHT,
+            0.0,
+            1.0, false,
+        ));
+        out.push(InstanceData::new(
+            [rect.x, rect.y + rect.h - 1.0],
+            [rect.w, 1.0],
+            0.0,
+            PANEL_BORDER_SHADOW,
+            0.0,
+            1.0, false,
+        ));
+        out.push(InstanceData::new(
+            [rect.x + rect.w - 1.0, rect.y],
+            [1.0, rect.h],
+            0.0,
+            PANEL_BORDER_SHADOW,
+            0.0,
+            1.0, false,
+        ));
+    }
+
     out
 }
 
@@ -355,6 +435,19 @@ pub fn build_text_specs(screen_size: Vec2, view: &PropertyPanelView) -> Vec<UiTe
             UiTextSpec::top_left(
                 format!("{} {}PX", target.label(), width),
                 Vec2::new(track.x, track.y - 14.0),
+                PANEL_TEXT_SIZE,
+                PANEL_TEXT_COLOR,
+            )
+            .with_line_height(PANEL_TEXT_SIZE),
+        );
+    }
+
+    for (target, rect) in &layout.arrow_rects {
+        let enabled = arrow_enabled(view, *target).unwrap_or(false);
+        out.push(
+            UiTextSpec::top_center(
+                if enabled { format!("> {}", target.label()) } else { target.label().to_string() },
+                Vec2::new(rect.x + rect.w * 0.5, rect.y + 4.0),
                 PANEL_TEXT_SIZE,
                 PANEL_TEXT_COLOR,
             )
@@ -431,6 +524,28 @@ fn layout(screen_size: Vec2, view: &PropertyPanelView) -> PropertyPanelLayout {
         y += SLIDER_HEIGHT;
     }
 
+    let mut arrow_rects = Vec::new();
+    let arrow_targets: Vec<LineArrowTarget> = [LineArrowTarget::Start, LineArrowTarget::End]
+        .into_iter()
+        .filter(|target| arrow_enabled(view, *target).is_some())
+        .collect();
+    if !arrow_targets.is_empty() {
+        y += 6.0;
+        let button_width = (PANEL_WIDTH - PANEL_PADDING * 2.0 - TOGGLE_GAP) / 2.0;
+        for (index, target) in arrow_targets.iter().enumerate() {
+            arrow_rects.push((
+                *target,
+                Rect {
+                    x: PANEL_PADDING + index as f32 * (button_width + TOGGLE_GAP),
+                    y,
+                    w: button_width,
+                    h: TOGGLE_HEIGHT,
+                },
+            ));
+        }
+        y += TOGGLE_HEIGHT;
+    }
+
     let size = Vec2::new(PANEL_WIDTH, y + PANEL_PADDING);
     let origin = Vec2::new(
         (screen_size.x - PANEL_WIDTH - PANEL_OUTER_MARGIN).max(0.0),
@@ -451,6 +566,11 @@ fn layout(screen_size: Vec2, view: &PropertyPanelView) -> PropertyPanelLayout {
         rect.y += origin.y;
     }
 
+    for (_, rect) in &mut arrow_rects {
+        rect.x += origin.x;
+        rect.y += origin.y;
+    }
+
     PropertyPanelLayout {
         origin,
         size,
@@ -463,6 +583,7 @@ fn layout(screen_size: Vec2, view: &PropertyPanelView) -> PropertyPanelLayout {
         tab_rects,
         swatch_rects,
         width_tracks,
+        arrow_rects,
     }
 }
 
@@ -470,6 +591,13 @@ fn width_for(view: &PropertyPanelView, target: WidthTarget) -> Option<u8> {
     match target {
         WidthTarget::Border => view.border_width,
         WidthTarget::Stroke => view.stroke_width,
+    }
+}
+
+fn arrow_enabled(view: &PropertyPanelView, target: LineArrowTarget) -> Option<bool> {
+    match target {
+        LineArrowTarget::Start => view.line_arrow_start,
+        LineArrowTarget::End => view.line_arrow_end,
     }
 }
 

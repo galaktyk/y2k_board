@@ -18,6 +18,7 @@ varying float v_shape;
 varying float v_alpha;
 varying vec2 v_line_p;
 varying float v_line_len;
+varying vec2 v_line_arrows;
 varying vec2 v_size;
 varying float v_stroke_width;
 
@@ -26,6 +27,10 @@ void main() {
     float i_alpha = i_pack.x / 255.0;
     float i_shape = i_pack.y;
     float i_stroke_width = i_pack.z;
+    float i_flags = i_pack.w;
+    float i_selected = mod(i_flags, 2.0);
+    float i_arrow_start = mod(floor(i_flags / 2.0), 2.0);
+    float i_arrow_end = mod(floor(i_flags / 4.0), 2.0);
     vec4 actual_color = i_color / 255.0;
 
     vec2 world_pos;
@@ -39,9 +44,11 @@ void main() {
         vec2 v = vec2(-u.y, u.x);
 
         // The fixed-screen outline only needs a few pixels of extra room.
+        float line_half_width = max(i_stroke_width * u_world_per_px, u_world_per_px);
+        float arrow_half_width = max(line_half_width * 2.5, u_world_per_px * 4.0);
         float margin = (i_shape > 5.5 && i_shape < 6.5)
             ? max(u_world_per_px * 3.0, 0.0001)
-            : 8.0;
+            : max(8.0, arrow_half_width + u_world_per_px * 2.0);
 
         vec2 p = vec2(
             mix(-margin, len + margin, a_pos.x),
@@ -51,6 +58,7 @@ void main() {
 
         v_line_p = p;
         v_line_len = len;
+        v_line_arrows = vec2(i_arrow_start, i_arrow_end);
         v_uv = a_pos;
     } else {
         vec2 draw_pos = i_pos;
@@ -63,6 +71,7 @@ void main() {
         world_pos = draw_pos + a_pos * draw_size;
         v_uv = a_pos;
         v_size = draw_size;
+        v_line_arrows = vec2(0.0);
     }
 
     vec2 center = i_pos + i_size * 0.5;
@@ -71,7 +80,7 @@ void main() {
     mat2 rot = mat2(c, s, -s, c);
     world_pos = center + rot * (world_pos - center);
 
-    if (i_pack.w > 0.0) {
+    if (i_selected > 0.5) {
         float sel_c = cos(u_rotate_angle);
         float sel_s = sin(u_rotate_angle);
         mat2 sel_rot = mat2(sel_c, sel_s, -sel_s, sel_c);
@@ -101,6 +110,7 @@ varying float v_shape;
 varying float v_alpha;
 varying vec2 v_line_p;
 varying float v_line_len;
+varying vec2 v_line_arrows;
 varying vec2 v_size;
 varying float v_stroke_width;
 
@@ -123,6 +133,16 @@ float ellipse_signed_distance(vec2 p, vec2 radius) {
 float line_segment_distance(vec2 p, float len) {
     float dx = p.x - clamp(p.x, 0.0, len);
     return length(vec2(dx, p.y));
+}
+
+float arrow_triangle_alpha(float axial, float lateral, float arrow_length, float arrow_half_width, float aa) {
+    if (arrow_length <= 0.0001 || arrow_half_width <= 0.0001) {
+        return 0.0;
+    }
+
+    float inside_axial = step(0.0, axial) * step(axial, arrow_length);
+    float edge = abs(lateral) - (axial / arrow_length) * arrow_half_width;
+    return inside_axial * (1.0 - smoothstep(0.0, aa, edge));
 }
 
 float fixed_stroke_width() {
@@ -162,7 +182,20 @@ void main() {
         vec2 p = v_line_p;
         float d = line_segment_distance(p, v_line_len);
         float thickness = max(v_stroke_width * u_world_per_px, u_world_per_px);
+        float aa = max(u_world_per_px * 0.75, 0.0001);
         float a = 1.0 - step(thickness, d);
+        float arrow_count = v_line_arrows.x + v_line_arrows.y;
+        float arrow_half_width = max(thickness * 2.5, u_world_per_px * 4.0);
+        float max_arrow_length = arrow_count > 1.5 ? v_line_len * 0.5 : v_line_len;
+        float arrow_length = min(max(arrow_half_width * 1.75, thickness * 4.0), max_arrow_length);
+
+        if (v_line_arrows.x > 0.5) {
+            a = max(a, arrow_triangle_alpha(p.x, p.y, arrow_length, arrow_half_width, aa));
+        }
+        if (v_line_arrows.y > 0.5) {
+            a = max(a, arrow_triangle_alpha(v_line_len - p.x, p.y, arrow_length, arrow_half_width, aa));
+        }
+
         gl_FragColor = vec4(v_color.rgb, alpha * a);
     } else if (v_shape < 3.5) {
         vec2 dist = min(uv, 1.0 - uv) * v_size;

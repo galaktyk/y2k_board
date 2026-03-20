@@ -1,5 +1,5 @@
 use crate::board::{Element, ShapeType, ElementStyleSnapshot};
-use crate::ui::property_panel::{ColorTarget, WidthTarget};
+use crate::ui::property_panel::{ColorTarget, LineArrowTarget, WidthTarget};
 
 pub fn tabs(
     show_text: bool,
@@ -96,6 +96,23 @@ pub fn updated_style_with_width(
             after.stroke_width = Some(width.clamp(1, 16));
         }
         _ => return None,
+    }
+    Some(after)
+}
+
+pub fn updated_style_with_arrow(
+    element: &Element,
+    target: LineArrowTarget,
+    enabled: bool,
+) -> Option<ElementStyleSnapshot> {
+    if element.shape != ShapeType::Line {
+        return None;
+    }
+
+    let mut after = element.style_snapshot();
+    match target {
+        LineArrowTarget::Start => after.line_arrow_start = Some(enabled),
+        LineArrowTarget::End => after.line_arrow_end = Some(enabled),
     }
     Some(after)
 }
