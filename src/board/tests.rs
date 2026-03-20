@@ -304,3 +304,99 @@ fn transform_related_ids_can_filter_connected_lines_by_visibility() {
         vec![10, 21]
     );
 }
+
+#[test]
+fn compute_drag_line_previews_tracks_resized_targets() {
+    let mut board = Board::new();
+    board.elements = vec![
+        rect_element(1, Vec2::ZERO, Vec2::new(20.0, 20.0)),
+        line_element(2, Vec2::new(20.0, 10.0), Vec2::new(40.0, 0.0)),
+    ];
+    board.line_attachments.insert(
+        2,
+        LineEndpoints {
+            start: Some(LineAnchor {
+                target_id: 1,
+                norm_pos: Vec2::new(1.0, 0.5),
+            }),
+            end: None,
+        },
+    );
+    board.connected_lines.insert(1, vec![2]);
+
+    let selected_ids = std::collections::HashSet::from([1_u64]);
+    let preview_transforms = std::collections::HashMap::from([(
+        1_u64,
+        ElementTransform::new(Vec2::ZERO, Vec2::new(40.0, 20.0), 0.0),
+    )]);
+
+    let previews = board.compute_drag_line_previews(&selected_ids, &preview_transforms);
+
+    assert_eq!(previews, vec![(2, Vec2::new(40.0, 10.0), Vec2::new(20.0, 0.0))]);
+}
+
+#[test]
+fn compute_drag_line_previews_tracks_rotated_targets() {
+    let mut board = Board::new();
+    board.elements = vec![
+        rect_element(1, Vec2::ZERO, Vec2::new(20.0, 20.0)),
+        line_element(2, Vec2::new(20.0, 10.0), Vec2::new(40.0, 0.0)),
+    ];
+    board.line_attachments.insert(
+        2,
+        LineEndpoints {
+            start: Some(LineAnchor {
+                target_id: 1,
+                norm_pos: Vec2::new(1.0, 0.5),
+            }),
+            end: None,
+        },
+    );
+    board.connected_lines.insert(1, vec![2]);
+
+    let selected_ids = std::collections::HashSet::from([1_u64]);
+    let preview_transforms = std::collections::HashMap::from([(
+        1_u64,
+        ElementTransform::new(Vec2::ZERO, Vec2::new(20.0, 20.0), std::f32::consts::FRAC_PI_2),
+    )]);
+
+    let previews = board.compute_drag_line_previews(&selected_ids, &preview_transforms);
+
+    assert_eq!(previews, vec![(2, Vec2::new(10.0, 20.0), Vec2::new(50.0, -10.0))]);
+}
+
+fn rect_element(id: u64, pos: Vec2, size: Vec2) -> Element {
+    Element {
+        id,
+        shape: ShapeType::Rect,
+        pos,
+        size,
+        rotation: 0.0,
+        color: [1.0, 0.0, 0.0, 1.0],
+        stroke_color: default_stroke_color(),
+        border_width: default_border_width(),
+        stroke_width: default_line_stroke_width(),
+        selected: false,
+        text: None,
+        image: None,
+        text_layout_generation: 0,
+    }
+}
+
+fn line_element(id: u64, pos: Vec2, size: Vec2) -> Element {
+    Element {
+        id,
+        shape: ShapeType::Line,
+        pos,
+        size,
+        rotation: 0.0,
+        color: DEFAULT_LINE_COLOR,
+        stroke_color: default_stroke_color(),
+        border_width: default_border_width(),
+        stroke_width: default_line_stroke_width(),
+        selected: false,
+        text: None,
+        image: None,
+        text_layout_generation: 0,
+    }
+}

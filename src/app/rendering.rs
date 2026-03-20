@@ -1,6 +1,7 @@
 use glam::Vec2;
 use miniquad::PassAction;
 
+use crate::board::ElementTransform;
 use crate::input::DragMode;
 use crate::rendering::renderer::Renderer;
 use crate::rendering::transform::{
@@ -82,26 +83,95 @@ impl App {
     }
 
     /// Called every render frame (not on mouse-move events) to keep connected-line
-    /// positions visually correct while a MoveSelected drag is in progress.
+    /// positions visually correct while a transform preview is in progress.
     /// `sync_board_render_cache` runs first and may rebuild instances from the true
     /// board state; this then patches the in-memory buffer with preview positions,
     /// and `upload_scene_shapes_if_needed` does **one** GPU upload per frame.
     fn preview_connected_lines_for_drag(&mut self) {
-        if self.input.drag_mode != DragMode::MoveSelected {
+        let Some((selected_ids, preview_transforms)) = self.connected_line_preview_state() else {
             return;
-        }
-        let delta = self.input.move_delta;
-        if delta.length_squared() == 0.0 {
-            // No displacement yet — board state is already correct in the buffer.
-            return;
-        }
-        let selected_ids: std::collections::HashSet<u64> =
-            self.input.move_origin.iter().map(|&(id, _, _, _)| id).collect();
-        let patches = self.board.compute_drag_line_previews(&selected_ids, delta);
+        };
+        let patches = self
+            .board
+            .compute_drag_line_previews(&selected_ids, &preview_transforms);
         if !patches.is_empty() {
             self.board_render_cache.patch_element_positions(&patches);
             // Force a GPU re-upload this frame so the patched positions reach the shader.
             self.board_scene_dirty = true;
+        }
+    }
+
+    fn connected_line_preview_state(
+        &self,
+    ) -> Option<(
+        std::collections::HashSet<u64>,
+        std::collections::HashMap<u64, ElementTransform>,
+    )> {
+        let selected_ids: std::collections::HashSet<u64> =
+            self.input.move_origin.iter().map(|&(id, _, _, _)| id).collect();
+        if selected_ids.is_empty() {
+            return None;
+        }
+
+        match self.input.drag_mode {
+            DragMode::MoveSelected => {
+                let delta = self.input.move_delta;
+                if delta.length_squared() == 0.0 {
+                    return None;
+                }
+
+                let preview_transforms = self
+                    .input
+                    .move_origin
+                    .iter()
+                    .map(|&(id, pos, size, rotation)| {
+                        (
+                            id,
+                            ElementTransform::new(pos + delta, size, rotation),
+                        )
+                    })
+                    .collect();
+                Some((selected_ids, preview_transforms))
+            }
+            DragMode::Rotating if self.input.move_origin.len() > 1 => {
+                let angle = self.input.rotate_delta;
+                let center = self.input.transform_bounds_origin.map(|bounds| bounds.center())?;
+                if angle.abs() == 0.0 {
+                    return None;
+                }
+
+                let preview_transforms = self
+                    .input
+                    .move_origin
+                    .iter()
+                    .map(|&(id, pos, size, rotation)| {
+                        let rotated_center = rotate_point(pos + size * 0.5, center, angle);
+                        (
+                            id,
+                            ElementTransform::new(rotated_center - size * 0.5, size, rotation + angle),
+                        )
+                    })
+                    .collect();
+                Some((selected_ids, preview_transforms))
+            }
+            DragMode::Rotating | DragMode::ResizingHandle(_) => {
+                let mut changed = false;
+                let preview_transforms: std::collections::HashMap<u64, ElementTransform> = self
+                    .input
+                    .move_origin
+                    .iter()
+                    .filter_map(|&(id, orig_pos, orig_size, orig_rotation)| {
+                        let element = self.board.element(id)?;
+                        let before = ElementTransform::new(orig_pos, orig_size, orig_rotation);
+                        let after = ElementTransform::new(element.pos, element.size, element.rotation);
+                        changed |= before != after;
+                        Some((id, after))
+                    })
+                    .collect();
+
+                changed.then_some((selected_ids, preview_transforms))
+            }
+            DragMode::MarqueeSelect | DragMode::None => None,
         }
     }
 

@@ -741,13 +741,33 @@ impl Board {
         }
     }
 
+    fn anchored_position_from_transform(
+        transform: ElementTransform,
+        norm_pos: Vec2,
+    ) -> Vec2 {
+        let origin = transform.pos + transform.size * 0.5;
+        let local = (norm_pos - Vec2::splat(0.5)) * transform.size;
+        rotate_point(origin + local, origin, transform.rotation)
+    }
+
+    fn preview_transform(
+        &self,
+        target_id: u64,
+        preview_transforms: &std::collections::HashMap<u64, ElementTransform>,
+    ) -> Option<ElementTransform> {
+        preview_transforms.get(&target_id).copied().or_else(|| {
+            self.element(target_id)
+                .map(|target| ElementTransform::new(target.pos, target.size, target.rotation))
+        })
+    }
+
     /// Compute preview positions for lines connected to elements being dragged
-    /// by `delta`. Returns `(line_id, new_pos, new_size)` for each affected line
-    /// that is **not** itself selected (the GPU move-offset uniform handles those).
+    /// by temporary transform previews. Returns `(line_id, new_pos, new_size)` for
+    /// each affected line that is **not** itself selected.
     pub fn compute_drag_line_previews(
         &self,
         selected_ids: &std::collections::HashSet<u64>,
-        delta: Vec2,
+        preview_transforms: &std::collections::HashMap<u64, ElementTransform>,
     ) -> Vec<(u64, Vec2, Vec2)> {
         let mut result = Vec::new();
         let mut seen = std::collections::HashSet::new();
@@ -777,22 +797,14 @@ impl Board {
                 let mut end_pos = line.pos + line.size;
 
                 if let Some(start) = &endpoints.start {
-                    if let Some(target) = self.element(start.target_id) {
-                        let offset = if selected_ids.contains(&start.target_id) { delta } else { Vec2::ZERO };
-                        let target_pos = target.pos + offset;
-                        let origin = target_pos + target.size * 0.5;
-                        let local = (start.norm_pos - Vec2::splat(0.5)) * target.size;
-                        start_pos = rotate_point(origin + local, origin, target.rotation);
+                    if let Some(transform) = self.preview_transform(start.target_id, preview_transforms) {
+                        start_pos = Self::anchored_position_from_transform(transform, start.norm_pos);
                     }
                 }
 
                 if let Some(end) = &endpoints.end {
-                    if let Some(target) = self.element(end.target_id) {
-                        let offset = if selected_ids.contains(&end.target_id) { delta } else { Vec2::ZERO };
-                        let target_pos = target.pos + offset;
-                        let origin = target_pos + target.size * 0.5;
-                        let local = (end.norm_pos - Vec2::splat(0.5)) * target.size;
-                        end_pos = rotate_point(origin + local, origin, target.rotation);
+                    if let Some(transform) = self.preview_transform(end.target_id, preview_transforms) {
+                        end_pos = Self::anchored_position_from_transform(transform, end.norm_pos);
                     }
                 }
 

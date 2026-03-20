@@ -1,9 +1,5 @@
 
 ---
-reuse old image from hash
-
-
----
 
 ro sprite player
 
