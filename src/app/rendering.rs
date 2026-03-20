@@ -416,7 +416,7 @@ impl App {
     }
 
     fn draw_screen_ui(&mut self) {
-        let tb_inst = self.toolbar.build_instances(
+        let mut ui_bg_instances = self.toolbar.build_instances(
             self.screen_size,
             self.input.mouse_pos,
             self.board.can_undo(),
@@ -437,23 +437,17 @@ impl App {
             self.board.can_redo(),
         );
 
-        self.renderer
-            .draw_instances(&mut *self.ctx, &tb_inst, screen_mvp, self.screen_size);
-        self.renderer
-            .draw_image_draws(&mut *self.ctx, &tb_icon_draws, screen_mvp, None, None);
-
         if let Some(panel) = self.resolve_property_panel() {
-            let panel_inst = crate::ui::property_panel::build_instances(
+            let mut panel_inst = crate::ui::property_panel::build_instances(
                 self.screen_size,
                 &panel.view,
                 self.input.mouse_pos,
             );
+            ui_bg_instances.append(&mut panel_inst);
             ui_text_specs.extend(crate::ui::property_panel::build_text_specs(
                 self.screen_size,
                 &panel.view,
             ));
-            self.renderer
-                .draw_instances(&mut *self.ctx, &panel_inst, screen_mvp, self.screen_size);
         }
 
         let text_draw = self.cached_text_draw.as_ref().unwrap();
@@ -482,13 +476,13 @@ impl App {
             spec.pos += stats_layout.text_origin;
         }
         ui_text_specs.extend(stats_text_specs);
+        let mut stats_bg = stats::build_stats_background_instances(&stats_layout);
+        ui_bg_instances.append(&mut stats_bg);
+
         self.renderer
-            .draw_instances(
-                &mut *self.ctx,
-                &stats::build_stats_background_instances(&stats_layout),
-                screen_mvp,
-                self.screen_size,
-            );
+            .draw_instances(&mut *self.ctx, &ui_bg_instances, screen_mvp, self.screen_size);
+        self.renderer
+            .draw_image_draws(&mut *self.ctx, &tb_icon_draws, screen_mvp, None, None);
 
         let ui_text_draw = self.text_system.build_ui_text_instances(
             &mut *self.ctx,
