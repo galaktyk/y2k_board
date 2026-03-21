@@ -92,6 +92,10 @@ impl DecodedImage {
     fn byte_len(&self) -> usize {
         self.rgba.len()
     }
+
+    fn supports_mipmaps(&self) -> bool {
+        self.width.is_power_of_two() && self.height.is_power_of_two()
+    }
 }
 
 struct RamEntry {
@@ -400,6 +404,7 @@ impl ImageManager {
 
         let decoded = self.load_ram_image(relative_path)?;
         let bytes = decoded.byte_len();
+        let use_mipmaps = !is_hires && decoded.supports_mipmaps();
         self.evict_gpu_if_needed(ctx, bytes);
         let texture = ctx.new_texture(
             TextureAccess::Static,
@@ -411,23 +416,25 @@ impl ImageManager {
                 wrap: TextureWrap::Clamp,
                 min_filter: FilterMode::Linear,
                 mag_filter: FilterMode::Linear,
-                mipmap_filter: if is_hires {
-                    MipmapFilterMode::None
-                } else {
+                mipmap_filter: if use_mipmaps {
                     MipmapFilterMode::Linear
+                } else {
+                    MipmapFilterMode::None
                 },
-                allocate_mipmaps: !is_hires,
+                allocate_mipmaps: use_mipmaps,
                 ..Default::default()
             },
         );
-        if is_hires {
-            ctx.texture_set_filter(texture, FilterMode::Linear, MipmapFilterMode::None);
-        } else {
+        if use_mipmaps {
             ctx.texture_generate_mipmaps(texture);
             ctx.texture_set_filter(texture, FilterMode::Linear, MipmapFilterMode::Linear);
+        } else {
+            ctx.texture_set_filter(texture, FilterMode::Linear, MipmapFilterMode::None);
         }
         if is_hires {
             println!("[image] HIRES resident {} {}x{} no-mipmap", relative_path, decoded.width, decoded.height);
+        } else if !use_mipmaps {
+            println!("[image] BASE resident {} {}x{} no-mipmap", relative_path, decoded.width, decoded.height);
         }
         self.gpu_cache
             .insert(relative_path.to_string(), GpuEntry { texture, bytes });

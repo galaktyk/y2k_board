@@ -14,6 +14,7 @@ const canvas = document.querySelector("#glcanvas");
 var gl;
 
 var clipboard = null;
+var browserFileInput = null;
 
 var plugins = [];
 var wasm_memory;
@@ -195,6 +196,69 @@ function stringToUTF8(str, heap, outIdx, maxBytesToWrite) {
         }
     }
     return outIdx - startIdx;
+}
+
+function getBrowserFileInput() {
+    if (browserFileInput !== null) {
+        return browserFileInput;
+    }
+
+    browserFileInput = document.createElement("input");
+    browserFileInput.type = "file";
+    browserFileInput.style.display = "none";
+    document.body.appendChild(browserFileInput);
+    return browserFileInput;
+}
+
+async function forwardBrowserFilesToWasm(kind, files) {
+    if (!files || files.length === 0) {
+        return;
+    }
+
+    const encoder = new TextEncoder();
+
+    for (const file of files) {
+        const fileName = file.name && file.name.length > 0 ? file.name : "upload.bin";
+        const nameBytes = encoder.encode(fileName);
+        const nameVec = wasm_exports.allocate_vec_u8(nameBytes.length);
+        const nameHeap = new Uint8Array(wasm_memory.buffer, nameVec, nameBytes.length);
+        nameHeap.set(nameBytes, 0);
+
+        const fileBuf = await file.arrayBuffer();
+        const fileLen = fileBuf.byteLength;
+        const fileVec = wasm_exports.allocate_vec_u8(fileLen);
+        const fileHeap = new Uint8Array(wasm_memory.buffer, fileVec, fileLen);
+        fileHeap.set(new Uint8Array(fileBuf), 0);
+
+        wasm_exports.mg_browser_file_selected(kind, nameVec, nameBytes.length, fileVec, fileLen);
+    }
+}
+
+function requestBrowserFiles(kind, accept, multiple) {
+    const input = getBrowserFileInput();
+    input.accept = accept;
+    input.multiple = multiple;
+    input.value = "";
+    input.onchange = async function (event) {
+        const files = Array.from(event.target.files || []);
+        await forwardBrowserFilesToWasm(kind, files);
+        input.value = "";
+    };
+    input.click();
+}
+
+function downloadBrowserBytes(name, mime, bytes) {
+    const blob = new Blob([bytes], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = name;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(function () {
+        URL.revokeObjectURL(url);
+    }, 0);
 }
 var FS = {
     loaded_files: [],
@@ -648,6 +712,18 @@ var importObject = {
         },
         now: function () {
             return Date.now() / 1000.0;
+        },
+        mg_request_snapshot_load: function () {
+            requestBrowserFiles(1, ".bin,application/octet-stream", false);
+        },
+        mg_request_image_upload: function () {
+            requestBrowserFiles(2, "image/png,image/jpeg,image/webp,image/bmp,image/gif", true);
+        },
+        mg_download_bytes: function (name_ptr, name_len, mime_ptr, mime_len, data_ptr, data_len) {
+            const name = UTF8ToString(name_ptr, name_len) || "snapshot.bin";
+            const mime = UTF8ToString(mime_ptr, mime_len) || "application/octet-stream";
+            const bytes = new Uint8Array(wasm_memory.buffer, data_ptr, data_len).slice();
+            downloadBrowserBytes(name, mime, bytes);
         },
         canvas_width: function () {
             return Math.floor(canvas.width);

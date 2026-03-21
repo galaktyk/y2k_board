@@ -10,6 +10,8 @@ use crate::board::{
     DEFAULT_TEXT_COLOR,
 };
 use crate::clipboard::{self, BoardClipboardData};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::clipboard::ClipboardPaste;
 use crate::images::{ImageImportError, ImportedImage};
 use crate::rendering::renderer::PreparedImageDraw;
 use crate::rendering::cache::element_in_expanded_view;
@@ -20,7 +22,7 @@ impl App {
     pub(super) fn import_image_via_dialog(&mut self) {
         #[cfg(target_arch = "wasm32")]
         {
-            eprintln!("Image import is only implemented for native desktop builds");
+            crate::platform::browser_io::request_image_upload();
             return;
         }
 
@@ -56,7 +58,7 @@ impl App {
         size
     }
 
-    fn paste_anchor_world(&self) -> Vec2 {
+    pub(super) fn paste_anchor_world(&self) -> Vec2 {
         let mouse = self.input.mouse_pos;
         if mouse.x >= 0.0
             && mouse.y >= 0.0
@@ -109,7 +111,7 @@ impl App {
         Ok(())
     }
 
-    fn import_image_from_bytes_at(
+    pub(super) fn import_image_from_bytes_at(
         &mut self,
         bytes: &[u8],
         anchor: Vec2,

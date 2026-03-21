@@ -25,6 +25,9 @@ use crate::board::{
 use crate::camera::Camera;
 use crate::images::ImageManager;
 use crate::input::{self, DragMode, InputState};
+#[cfg(target_arch = "wasm32")]
+use crate::platform::browser_io::{self, BrowserFileKind};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::platform::snapshot::{PlatformSnapshotDialogAdapter, SnapshotDialogAdapter};
 use crate::rendering::renderer::Renderer;
 use crate::rendering::cache::BoardRenderCache;
@@ -198,10 +201,12 @@ impl App {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn pick_snapshot_save_path(&self) -> Option<PathBuf> {
         PlatformSnapshotDialogAdapter::new().pick_save_path(&self.snapshot_path)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn pick_snapshot_load_path(&self) -> Option<PathBuf> {
         PlatformSnapshotDialogAdapter::new().pick_load_path(&self.snapshot_path)
     }
@@ -213,6 +218,74 @@ impl App {
 
     fn request_redraw(&self) {
         window::schedule_update();
+    }
+
+    fn apply_loaded_snapshot(&mut self, loaded: snapshot_io::LoadedSnapshot) {
+        self.snapshot_path = loaded.path.clone();
+        self.snapshot_path_user_selected = true;
+        let asset_root = snapshot_io::snapshot_root(&self.snapshot_path);
+        self.image_manager.set_asset_root(&mut *self.ctx, asset_root);
+        self.board.restore_snapshot(loaded.data);
+        self.camera = Camera::new();
+        self.input = InputState::new();
+        self.toolbar = Toolbar::new();
+        self.tool_style_defaults = ToolStyleDefaults::default();
+        self.property_panel_target = ColorTarget::Fill;
+        self.property_width_drag = None;
+        self.board_cache_dirty = true;
+        self.spatial_dirty = true;
+        self.visibility_dirty = true;
+        self.dirty_element_ids.clear();
+        self.text_edit = None;
+        self.text_dirty = true;
+        self.cached_text_draw = None;
+        self.cached_text_edit_snapshot = None;
+        self.request_redraw();
+        println!("Loaded snapshot from {}", self.snapshot_path.display());
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn process_browser_file_events(&mut self) {
+        let picked_files = browser_io::take_picked_files();
+        if picked_files.is_empty() {
+            return;
+        }
+
+        let base_anchor = self.paste_anchor_world();
+        let mut imported_image_count = 0usize;
+        let mut had_error = false;
+
+        for picked_file in picked_files {
+            match picked_file.kind {
+                BrowserFileKind::Snapshot => {
+                    let snapshot_name = if picked_file.name.is_empty() {
+                        String::from("snapshot.bin")
+                    } else {
+                        picked_file.name
+                    };
+
+                    match snapshot_io::load_from_bytes(&picked_file.bytes, PathBuf::from(snapshot_name).as_path()) {
+                        Ok(loaded) => self.apply_loaded_snapshot(loaded),
+                        Err(err) => {
+                            eprintln!("Failed to load snapshot: {err}");
+                            had_error = true;
+                        }
+                    }
+                }
+                BrowserFileKind::Image => {
+                    let anchor = base_anchor + Vec2::splat(imported_image_count as f32 * 24.0);
+                    imported_image_count += 1;
+                    if let Err(err) = self.import_image_from_bytes_at(&picked_file.bytes, anchor, false) {
+                        eprintln!("Failed to import image: {err}");
+                        had_error = true;
+                    }
+                }
+            }
+        }
+
+        if had_error && imported_image_count == 0 {
+            self.request_redraw();
+        }
     }
 
     fn set_cursor_icon(&mut self, cursor: CursorIcon) {
@@ -792,6 +865,7 @@ impl App {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn save_snapshot(&mut self) {
         let target_path = if self.snapshot_path_user_selected {
             self.snapshot_path.clone()
@@ -824,38 +898,38 @@ impl App {
         }
     }
 
+    #[cfg(target_arch = "wasm32")]
+    fn save_snapshot(&mut self) {
+        let file_name = self
+            .snapshot_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("snapshot.bin");
+
+        match snapshot_io::save_to_bytes(&self.board) {
+            Ok(bytes) => {
+                browser_io::download_bytes(file_name, "application/octet-stream", &bytes);
+                println!("Saved snapshot to browser download: {file_name}");
+            }
+            Err(err) => eprintln!("Failed to save snapshot: {err}"),
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     fn load_snapshot(&mut self) {
         let Some(path) = self.pick_snapshot_load_path() else {
             return;
         };
 
         match snapshot_io::load_from_path(&path) {
-            Ok(loaded) => {
-                self.snapshot_path = loaded.path.clone();
-                self.snapshot_path_user_selected = true;
-                let asset_root = snapshot_io::snapshot_root(&self.snapshot_path);
-                self.image_manager.set_asset_root(&mut *self.ctx, asset_root);
-                self.board
-                    .restore_snapshot(loaded.data);
-                self.camera = Camera::new();
-                self.input = InputState::new();
-                self.toolbar = Toolbar::new();
-                self.tool_style_defaults = ToolStyleDefaults::default();
-                self.property_panel_target = ColorTarget::Fill;
-                self.property_width_drag = None;
-                self.board_cache_dirty = true;
-                self.spatial_dirty = true;
-                self.visibility_dirty = true;
-                self.dirty_element_ids.clear();
-                self.text_edit = None;
-                self.text_dirty = true;
-                self.cached_text_draw = None;
-                self.cached_text_edit_snapshot = None;
-                self.request_redraw();
-                println!("Loaded snapshot from {}", self.snapshot_path.display());
-            }
+            Ok(loaded) => self.apply_loaded_snapshot(loaded),
             Err(err) => eprintln!("Failed to load snapshot: {err}"),
         }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn load_snapshot(&mut self) {
+        browser_io::request_snapshot_load();
     }
 
     fn handle_toolbar_action(&mut self, action: ToolbarAction) {
@@ -880,6 +954,8 @@ impl App {
 
 impl EventHandler for App {
     fn update(&mut self) {
+        #[cfg(target_arch = "wasm32")]
+        self.process_browser_file_events();
         self.update_image_ram_maintenance();
     }
 

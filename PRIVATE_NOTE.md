@@ -1,3 +1,7 @@
+font is not fallback correctly on wasm
+
+---
+copy/paste is not working on wasm
 
 
 ---

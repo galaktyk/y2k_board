@@ -2,6 +2,9 @@ use std::path::{Path, PathBuf};
 
 use crate::snapshot::{LoadedSnapshot, SnapshotData, SnapshotError};
 
+#[cfg(target_arch = "wasm32")]
+use serde::{Deserialize, Serialize};
+
 pub(crate) trait SnapshotDialogAdapter {
     fn pick_save_path(&self, snapshot_path: &Path) -> Option<PathBuf>;
     fn pick_load_path(&self, snapshot_path: &Path) -> Option<PathBuf>;
@@ -19,6 +22,52 @@ pub(crate) type PlatformSnapshotDialogAdapter = WebSnapshotAdapter;
 pub(crate) trait SnapshotPersistenceAdapter {
     fn save_to_path(&self, snapshot: &SnapshotData, path: &Path) -> Result<PathBuf, SnapshotError>;
     fn load_from_path(&self, path: &Path) -> Result<LoadedSnapshot, SnapshotError>;
+
+    #[cfg(target_arch = "wasm32")]
+    fn save_to_bytes(&self, snapshot: &SnapshotData) -> Result<Vec<u8>, SnapshotError>;
+
+    #[cfg(target_arch = "wasm32")]
+    fn load_from_bytes(&self, bytes: &[u8], path: &Path) -> Result<LoadedSnapshot, SnapshotError>;
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct EmbeddedSnapshotAsset {
+    relative_path: String,
+    bytes: Vec<u8>,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct SnapshotBundle {
+    format_version: u32,
+    data: SnapshotData,
+    assets: Vec<EmbeddedSnapshotAsset>,
+}
+
+#[cfg(target_arch = "wasm32")]
+const SNAPSHOT_BUNDLE_VERSION: u32 = 1;
+
+#[cfg(target_arch = "wasm32")]
+fn snapshot_asset_paths(snapshot: &SnapshotData) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut relative_paths = Vec::new();
+
+    for element in &snapshot.elements {
+        let Some(image) = element.image.as_ref() else {
+            continue;
+        };
+
+        for relative_path in std::iter::once(image.asset_path.as_str())
+            .chain(image.hires_asset_path.iter().map(String::as_str))
+        {
+            if seen.insert(relative_path.to_string()) {
+                relative_paths.push(relative_path.to_string());
+            }
+        }
+    }
+
+    relative_paths
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -145,12 +194,49 @@ impl SnapshotPersistenceAdapter for WebSnapshotAdapter {
     fn load_from_path(&self, _path: &Path) -> Result<LoadedSnapshot, SnapshotError> {
         Err(SnapshotError::UnsupportedPlatform)
     }
+
+    fn save_to_bytes(&self, snapshot: &SnapshotData) -> Result<Vec<u8>, SnapshotError> {
+        let assets = crate::platform::image_streaming::collect_embedded_assets(snapshot_asset_paths(snapshot))
+            .into_iter()
+            .map(|(relative_path, bytes)| EmbeddedSnapshotAsset { relative_path, bytes })
+            .collect();
+        let bundle = SnapshotBundle {
+            format_version: SNAPSHOT_BUNDLE_VERSION,
+            data: snapshot.clone(),
+            assets,
+        };
+        Ok(bincode::serialize(&bundle)?)
+    }
+
+    fn load_from_bytes(&self, bytes: &[u8], path: &Path) -> Result<LoadedSnapshot, SnapshotError> {
+        if let Ok(bundle) = bincode::deserialize::<SnapshotBundle>(bytes) {
+            if bundle.format_version == SNAPSHOT_BUNDLE_VERSION {
+                crate::platform::image_streaming::replace_embedded_assets(
+                    bundle
+                        .assets
+                        .into_iter()
+                        .map(|asset| (asset.relative_path, asset.bytes))
+                        .collect(),
+                );
+                return Ok(LoadedSnapshot {
+                    data: bundle.data,
+                    path: path.to_path_buf(),
+                });
+            }
+        }
+
+        crate::platform::image_streaming::clear_embedded_assets();
+        Ok(LoadedSnapshot {
+            data: bincode::deserialize(bytes)?,
+            path: path.to_path_buf(),
+        })
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 impl SnapshotDialogAdapter for WebSnapshotAdapter {
     fn pick_save_path(&self, _snapshot_path: &Path) -> Option<PathBuf> {
-        todo!("wasm snapshot save dialog is not implemented yet")
+        None
     }
 
     fn pick_load_path(&self, _snapshot_path: &Path) -> Option<PathBuf> {

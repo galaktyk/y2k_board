@@ -92,3 +92,13 @@ pub fn save_to_path(board: &Board, path: &Path) -> Result<PathBuf, SnapshotError
 pub fn load_from_path(path: &Path) -> Result<LoadedSnapshot, SnapshotError> {
     PlatformSnapshotAdapter::new().load_from_path(path)
 }
+
+#[cfg(target_arch = "wasm32")]
+pub fn save_to_bytes(board: &Board) -> Result<Vec<u8>, SnapshotError> {
+    PlatformSnapshotAdapter::new().save_to_bytes(&snapshot_from_board(board))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn load_from_bytes(bytes: &[u8], path: &Path) -> Result<LoadedSnapshot, SnapshotError> {
+    PlatformSnapshotAdapter::new().load_from_bytes(bytes, path)
+}
