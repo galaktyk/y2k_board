@@ -4,7 +4,7 @@
 cursor image is not change  when web inactive e.g. resize box cursor not change
 
 ---
-copy/paste is not working on wasm
+copy/paste is working wrong working on wasm
 
 
 ---

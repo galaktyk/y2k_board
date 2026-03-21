@@ -337,11 +337,15 @@
     }
 
     async function requestFontsForText(text, wasmExports, wasmMemory) {
-        try {
-            await fetchFontSubsetsForText(text, wasmExports, wasmMemory);
-        } catch (error) {
-            console.warn("Font subset fetch failed:", error && error.message ? error.message : error);
-        }
+        // Run as background task to avoid blocking main UI loop.
+        // fetchFontSubsetsForText is already async and handles its own state.
+        setTimeout(async function () {
+            try {
+                await fetchFontSubsetsForText(text, wasmExports, wasmMemory);
+            } catch (error) {
+                console.warn("Font subset fetch failed:", error && error.message ? error.message : error);
+            }
+        }, 0);
     }
 
     async function clearFontCache() {

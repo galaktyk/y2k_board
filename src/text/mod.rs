@@ -967,24 +967,53 @@ fn request_browser_fonts_for_text(text: &str) {
 
     #[cfg(target_arch = "wasm32")]
     {
-        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
         static LAST_REQUEST_HASH: AtomicU64 = AtomicU64::new(0);
+        static LOADED_SINGLE_FILE_LANGS: AtomicU32 = AtomicU32::new(0);
 
         let mut hash = 0u64;
+        let mut needs_cjk_or_new = false;
+        let mut lang_bits = 0u32;
+
         for ch in text.chars() {
-            if may_need_browser_font(ch) {
-                hash = hash.wrapping_mul(31).wrapping_add(ch as u64);
+            if !may_need_browser_font(ch) {
+                continue;
             }
+
+            let cp = ch as u32;
+            // CJK range: Hiragana, Katakana, CJK Unified Ideographs
+            if (cp >= 0x3040 && cp <= 0x30FF) || (cp >= 0x4E00 && cp <= 0x9FFF) {
+                needs_cjk_or_new = true;
+            } else {
+                // Bitmask for non-CJK languages that are typically single-file
+                let bit = match cp {
+                    0x0E00..=0x0E7F => 1 << 0, // Thai
+                    0x0600..=0x08FF | 0xFB50..=0xFEFF => 1 << 1, // Arabic
+                    0x0900..=0x097F => 1 << 2, // Devanagari
+                    0x1F300..=0x1FAFF => 1 << 3, // Emoji
+                    0x2000..=0x2BFF => 1 << 4, // Symbols
+                    _ => 0,
+                };
+                if bit != 0 && (LOADED_SINGLE_FILE_LANGS.load(Ordering::Relaxed) & bit) == 0 {
+                    needs_cjk_or_new = true;
+                    lang_bits |= bit;
+                }
+            }
+            hash = hash.wrapping_mul(31).wrapping_add(cp as u64);
         }
 
-        if hash == 0 {
+        if !needs_cjk_or_new && hash != 0 {
+            // Already loaded these languages and no CJK present
             return;
         }
 
-        if LAST_REQUEST_HASH.load(Ordering::Relaxed) == hash {
+        if hash == 0 || LAST_REQUEST_HASH.load(Ordering::Relaxed) == hash {
             return;
         }
         LAST_REQUEST_HASH.store(hash, Ordering::Relaxed);
+        if lang_bits != 0 {
+            LOADED_SINGLE_FILE_LANGS.fetch_or(lang_bits, Ordering::Relaxed);
+        }
 
         browser_io::request_fonts_for_text(text);
     }

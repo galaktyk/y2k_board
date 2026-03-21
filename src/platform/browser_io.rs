@@ -75,18 +75,43 @@ pub(crate) fn request_image_upload() {
 pub(crate) fn request_image_upload() {}
 
 #[cfg(target_arch = "wasm32")]
+fn browser_font_request_queue() -> &'static Mutex<String> {
+    static REQUEST_QUEUE: OnceLock<Mutex<String>> = OnceLock::new();
+    REQUEST_QUEUE.get_or_init(|| Mutex::new(String::new()))
+}
+
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn request_fonts_for_text(text: &str) {
     if text.is_empty() {
         return;
     }
 
+    let mut queue = browser_font_request_queue()
+        .lock()
+        .expect("font request queue mutex should not be poisoned");
+    queue.push_str(text);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn request_fonts_for_text(_text: &str) {}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn flush_font_requests() {
+    let mut queue = browser_font_request_queue()
+        .lock()
+        .expect("font request queue mutex should not be poisoned");
+    if queue.is_empty() {
+        return;
+    }
+
+    let text = std::mem::take(&mut *queue);
     unsafe {
         mg_load_fonts_for_text(text.as_ptr(), text.len());
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn request_fonts_for_text(_text: &str) {}
+pub(crate) fn flush_font_requests() {}
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn download_bytes(name: &str, mime: &str, data: &[u8]) {
