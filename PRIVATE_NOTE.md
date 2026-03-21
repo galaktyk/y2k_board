@@ -1,4 +1,7 @@
-font is not fallback correctly on wasm
+
+
+---
+cursor image is not change  when web inactive e.g. resize box cursor not change
 
 ---
 copy/paste is not working on wasm

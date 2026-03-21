@@ -501,6 +501,24 @@ function bootstrapBrowserImageStorage() {
 function persistBrowserImageAsset(relativePath, width, height, rgbaBytes, quality) {
     createBrowserImageStorage().persistAsset(relativePath, width, height, rgbaBytes, quality);
 }
+
+function requestBrowserFontsForText(text) {
+    if (!text) {
+        return;
+    }
+
+    if (!window.miniGalaktykFonts || typeof window.miniGalaktykFonts.requestFontsForText !== "function") {
+        return;
+    }
+
+    if (!wasm_exports || !wasm_memory) {
+        return;
+    }
+
+    window.miniGalaktykFonts.requestFontsForText(text, wasm_exports, wasm_memory);
+}
+
+window.miniGalaktykDebugLoadFonts = requestBrowserFontsForText;
 var FS = {
     loaded_files: [],
     unique_id: 0
@@ -959,6 +977,10 @@ var importObject = {
         },
         mg_request_image_upload: function () {
             requestBrowserFiles(2, "image/png,image/jpeg,image/webp,image/bmp,image/gif", true);
+        },
+        mg_load_fonts_for_text: function (text_ptr, text_len) {
+            const text = UTF8ToString(text_ptr, text_len);
+            requestBrowserFontsForText(text);
         },
         mg_store_webp_asset: function (relative_path_ptr, relative_path_len, rgba_ptr, rgba_len, width, height, quality) {
             const relativePath = UTF8ToString(relative_path_ptr, relative_path_len);
@@ -1889,6 +1911,9 @@ function load(wasm_path) {
                 async obj => {
                     wasm_memory = obj.exports.memory;
                     wasm_exports = obj.exports;
+                    window.__miniGalaktykWasmExports = wasm_exports;
+                    window.__miniGalaktykWasmMemory = wasm_memory;
+                    console.info("[miniGalaktyk/fonts] wasm initialized; debug hook ready as window.miniGalaktykDebugLoadFonts(text)");
 
                     var crate_version = wasm_exports.crate_version();
                     if (version != crate_version) {

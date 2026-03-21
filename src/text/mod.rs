@@ -1,17 +1,24 @@
 mod edit;
 
 use std::collections::{HashMap, HashSet};
+use std::io::Cursor as IoCursor;
 use std::sync::Arc;
 
 use cosmic_text::{
     fontdb, Attrs, Buffer, CacheKey, Color, Cursor, Family, FontSystem, Metrics, Motion, Shaping,
     SwashCache, SwashContent, SwashImage, Wrap,
 };
+#[cfg(target_arch = "wasm32")]
+use cosmic_text::Fallback;
 use glam::Vec2;
 use miniquad::{RenderingBackend, TextureId};
+#[cfg(target_arch = "wasm32")]
+use unicode_script::Script;
+use woff2_patched::convert_woff2_to_ttf;
 
 use crate::board::{Board, Element, TextData};
 use crate::palette;
+use crate::platform::browser_io;
 use crate::rendering::renderer::TextInstanceData;
 
 pub use edit::{TextEditSession, TextEditSnapshot};
@@ -20,8 +27,10 @@ const TEXT_ATLAS_SIZE: usize = 1024;
 const EMOJI_ATLAS_SIZE: usize = 1024;
 const ATLAS_GAP: usize = 2;
 const FALLBACK_GLYPH_SIZE: usize = 8;
-const BUNDLED_UI_FONT_BYTES: &[u8] = include_bytes!("../../fonts/W95FA.otf");
-const BUNDLED_UI_FONT_FAMILY_HINT: &str = "W95FA";
+const PRIMARY_UI_FONT: BundledFontAsset = BundledFontAsset {
+    bytes: include_bytes!("../../fonts/W95FA.otf"),
+    family_hint: "W95FA",
+};
 
 const SELECTION_COLOR: [f32; 4] = palette::TEXT_SELECTION_COLOR;
 const CARET_COLOR: [f32; 4] = palette::GRAY_3;
@@ -131,7 +140,7 @@ pub struct TextSystem {
 
 impl TextSystem {
     pub fn new() -> Self {
-        let mut font_system = FontSystem::new();
+        let mut font_system = new_font_system();
         configure_bundled_font_defaults(&mut font_system);
 
         Self {
@@ -160,11 +169,36 @@ impl TextSystem {
         }
     }
 
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn apply_browser_font_updates(&mut self) -> bool {
+        let loaded_fonts = browser_io::take_loaded_fonts();
+        if loaded_fonts.is_empty() {
+            return false;
+        }
+
+        let db = self.font_system.db_mut();
+        println!("[font] applying {} browser-loaded fonts", loaded_fonts.len());
+        for bytes in loaded_fonts {
+            let decoded = decode_browser_font_bytes(bytes);
+            let Some(decoded) = decoded else {
+                continue;
+            };
+            println!("[font] loading into fontdb bytes={}", decoded.len());
+            db.load_font_source(fontdb::Source::Binary(Arc::new(decoded)));
+        }
+
+        self.layout_cache = None;
+        println!("[font] fontdb updated; text layout cache cleared");
+        true
+    }
+
     pub fn measure_text_box(&mut self, content: &str, text: &TextData, max_width: f32) -> Vec2 {
+        request_browser_fonts_for_text(content);
+
         let padding = Vec2::splat(12.0);
         let usable_width = (max_width - padding.x * 2.0).max(1.0);
         let metrics = text_metrics(text.font_size, None);
-        let attrs = default_text_attrs(text.color);
+        let attrs = default_text_attrs(content, text.color);
         let mut buffer = Buffer::new(&mut self.font_system, metrics);
         buffer.set_size(&mut self.font_system, Some(usable_width), None);
         buffer.set_wrap(&mut self.font_system, Wrap::WordOrGlyph);
@@ -201,6 +235,8 @@ impl TextSystem {
             return Vec2::ZERO;
         }
 
+        request_browser_fonts_for_text(&spec.content);
+
         let metrics = text_metrics(spec.font_size, spec.line_height);
         let mut buffer = Buffer::new(&mut self.font_system, metrics);
         buffer.set_size(&mut self.font_system, spec.max_width, None);
@@ -212,7 +248,7 @@ impl TextSystem {
                 Wrap::None
             },
         );
-        let attrs = default_text_attrs(spec.color);
+        let attrs = default_text_attrs(&spec.content, spec.color);
         buffer.set_text(
             &mut self.font_system,
             &spec.content,
@@ -253,7 +289,7 @@ impl TextSystem {
             }
 
             let metrics = text_metrics(spec.font_size, spec.line_height);
-            let attrs = default_text_attrs(spec.color);
+            let attrs = default_text_attrs(&spec.content, spec.color);
             let mut buffer = Buffer::new(&mut self.font_system, metrics);
             buffer.set_size(&mut self.font_system, spec.max_width, None);
             buffer.set_wrap(
@@ -290,6 +326,20 @@ impl TextSystem {
                     })
                 })
                 .collect();
+
+            let mut missing_glyph = false;
+            for (cache_key, _phys_x, _phys_y, _glyph_color, _line_x) in &glyph_data {
+                if !self.mono_atlas.entries.contains_key(cache_key)
+                    && !self.emoji_atlas.entries.contains_key(cache_key)
+                {
+                    missing_glyph = true;
+                    break;
+                }
+            }
+
+            if missing_glyph {
+                request_browser_fonts_for_text(&spec.content);
+            }
 
             for (cache_key, phys_x, phys_y, glyph_color, line_x) in glyph_data {
                 let Some(resolved) = self.resolve_glyph(ctx, text_atlas, emoji_atlas, cache_key) else {
@@ -472,7 +522,6 @@ impl TextSystem {
                     (glyph_data, world_min)
                 } else {
                     // Shape a temporary buffer — no cache write.
-                    println!("[text] Case 1 Compute layout for element id={}", element.id);
                     let Some((world_min, world_max)) = element.text_bounds() else {
                         continue;
                     };
@@ -481,7 +530,7 @@ impl TextSystem {
                     let width = (world_max.x - world_min.x).max(1.0);
                     let height = (world_max.y - world_min.y).max(1.0);
                     let metrics = text_metrics(text.font_size, None);
-                    let attrs = default_text_attrs(text.color);
+                    let attrs = default_text_attrs(content, text.color);
                     let default_color = text.color;
                     let mut buffer = Buffer::new(&mut self.font_system, metrics);
                     buffer.set_size(&mut self.font_system, Some(width), Some(height));
@@ -509,6 +558,21 @@ impl TextSystem {
                         .collect();
                     (glyph_data, world_min)
                 };
+
+            let mut missing_glyph = false;
+
+            for (cache_key, _phys_x, _phys_y, _glyph_color) in &glyph_data {
+                if !self.mono_atlas.entries.contains_key(cache_key)
+                    && !self.emoji_atlas.entries.contains_key(cache_key)
+                {
+                    missing_glyph = true;
+                    break;
+                }
+            }
+
+            if missing_glyph {
+                request_browser_fonts_for_text(content);
+            }
 
             for (cache_key, phys_x, phys_y, glyph_color) in glyph_data {
                 let resolved =
@@ -700,12 +764,13 @@ impl TextSystem {
         let Some((world_min, world_max)) = element.text_bounds() else {
             return false;
         };
+        request_browser_fonts_for_text(content);
         let text = element.text.clone().unwrap_or_default();
         let width = (world_max.x - world_min.x).max(1.0);
         let height = (world_max.y - world_min.y).max(1.0);
 
         let metrics = text_metrics(text.font_size, None);
-        let attrs = default_text_attrs(text.color);
+        let attrs = default_text_attrs(content, text.color);
         let mut buffer = Buffer::new(&mut self.font_system, metrics);
         buffer.set_size(&mut self.font_system, Some(width), Some(height));
         buffer.set_wrap(&mut self.font_system, Wrap::WordOrGlyph);
@@ -803,21 +868,170 @@ impl TextSystem {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+const WASM_COMMON_FALLBACKS: &[&str] = &[
+    "Noto Emoji",
+    "Noto Color Emoji",
+    "Noto Sans Symbols 2",
+    "Noto Sans Symbols",
+    "Noto Sans Thai",
+    "Noto Sans Arabic",
+    "Noto Sans Devanagari",
+    "Noto Sans CJK JP",
+    "Noto Sans JP",
+    "Noto Sans CJK SC",
+    "Noto Sans SC",
+    "Noto Sans CJK TC",
+    "Noto Sans TC",
+];
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Default, Clone, Copy)]
+struct WasmFontFallback;
+
+#[cfg(target_arch = "wasm32")]
+impl Fallback for WasmFontFallback {
+    fn common_fallback(&self) -> &[&'static str] {
+        WASM_COMMON_FALLBACKS
+    }
+
+    fn forbidden_fallback(&self) -> &[&'static str] {
+        &[]
+    }
+
+    fn script_fallback(&self, script: Script, _locale: &str) -> &[&'static str] {
+        match script {
+            Script::Thai => &["Noto Sans Thai"],
+            Script::Arabic => &["Noto Sans Arabic"],
+            Script::Devanagari => &["Noto Sans Devanagari"],
+            Script::Han => &["Noto Sans CJK SC", "Noto Sans CJK TC", "Noto Sans SC", "Noto Sans TC"],
+            Script::Hiragana | Script::Katakana => &["Noto Sans CJK JP", "Noto Sans JP"],
+            Script::Common => &["Noto Emoji", "Noto Color Emoji", "Noto Sans Symbols 2", "Noto Sans Symbols"],
+            _ => &[],
+        }
+    }
+}
+
+fn new_font_system() -> FontSystem {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut db = fontdb::Database::new();
+        db.set_monospace_family("W95FA");
+        db.set_sans_serif_family("W95FA");
+        db.set_serif_family("W95FA");
+        return FontSystem::new_with_locale_and_db_and_fallback(
+            "en-US".to_string(),
+            db,
+            WasmFontFallback,
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        FontSystem::new()
+    }
+}
+
+#[derive(Clone, Copy)]
+struct BundledFontAsset {
+    bytes: &'static [u8],
+    family_hint: &'static str,
+}
+
 fn configure_bundled_font_defaults(font_system: &mut FontSystem) {
     let bundled_family = {
         let db = font_system.db_mut();
-        let ids = db.load_font_source(fontdb::Source::Binary(Arc::new(BUNDLED_UI_FONT_BYTES.to_vec())));
-        let family = ids
-            .first()
-            .and_then(|id| db.face(*id))
-            .and_then(|face| face.families.first())
-            .map(|(name, _)| name.clone())
-            .unwrap_or_else(|| BUNDLED_UI_FONT_FAMILY_HINT.to_string());
+        let family = load_bundled_font(db, PRIMARY_UI_FONT)
+            .unwrap_or_else(|| PRIMARY_UI_FONT.family_hint.to_string());
+
         db.set_sans_serif_family(family.clone());
         family
     };
 
     debug_assert!(!bundled_family.is_empty());
+}
+
+fn load_bundled_font(db: &mut fontdb::Database, asset: BundledFontAsset) -> Option<String> {
+    let ids = db.load_font_source(fontdb::Source::Binary(Arc::new(asset.bytes.to_vec())));
+    ids.first()
+        .and_then(|id| db.face(*id))
+        .and_then(|face| face.families.first())
+        .map(|(name, _)| name.clone())
+        .or_else(|| Some(asset.family_hint.to_string()))
+}
+
+fn request_browser_fonts_for_text(text: &str) {
+    if text.is_empty() {
+        return;
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static LAST_REQUEST_HASH: AtomicU64 = AtomicU64::new(0);
+
+        let mut hash = 0u64;
+        for ch in text.chars() {
+            if may_need_browser_font(ch) {
+                hash = hash.wrapping_mul(31).wrapping_add(ch as u64);
+            }
+        }
+
+        if hash == 0 {
+            return;
+        }
+
+        if LAST_REQUEST_HASH.load(Ordering::Relaxed) == hash {
+            return;
+        }
+        LAST_REQUEST_HASH.store(hash, Ordering::Relaxed);
+
+        browser_io::request_fonts_for_text(text);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = text;
+}
+
+fn may_need_browser_font(ch: char) -> bool {
+    let codepoint = ch as u32;
+
+    matches!(codepoint,
+        0x2190..=0x21FF |
+        0x2300..=0x23FF |
+        0x25A0..=0x25FF |
+        0x0E00..=0x0E7F |
+        0x0600..=0x06FF |
+        0x0750..=0x077F |
+        0x08A0..=0x08FF |
+        0x0900..=0x097F |
+        0x2600..=0x27BF |
+        0x3040..=0x30FF |
+        0x4E00..=0x9FFF |
+        0xFB50..=0xFDFF |
+        0xFE00..=0xFE0F |
+        0xFE70..=0xFEFF |
+        0x1F300..=0x1FAFF
+    )
+}
+
+fn decode_browser_font_bytes(bytes: Vec<u8>) -> Option<Vec<u8>> {
+    if bytes.starts_with(b"wOF2") {
+        println!("[font] decoding woff2 payload bytes={}", bytes.len());
+        let mut cursor = IoCursor::new(bytes);
+        match convert_woff2_to_ttf(&mut cursor) {
+            Ok(decoded) => {
+                println!("[font] decoded woff2 to sfnt bytes={}", decoded.len());
+                Some(decoded)
+            }
+            Err(err) => {
+                eprintln!("[font] failed to decode woff2 payload: {err}");
+                None
+            }
+        }
+    } else {
+        Some(bytes)
+    }
 }
 
 fn text_metrics(font_size: f32, line_height: Option<f32>) -> Metrics {
@@ -828,10 +1042,30 @@ fn text_metrics(font_size: f32, line_height: Option<f32>) -> Metrics {
     )
 }
 
-fn default_text_attrs(color: [f32; 4]) -> Attrs<'static> {
+fn default_text_attrs(content: &str, color: [f32; 4]) -> Attrs<'static> {
     Attrs::new()
-        .family(Family::SansSerif)
+        .family(preferred_family_for_text(content))
         .color(rgba_to_cosmic_color(color))
+}
+
+fn preferred_family_for_text(text: &str) -> Family<'static> {
+    if text.chars().any(is_emoji_like) {
+        Family::Name("Noto Emoji")
+    } else if text.chars().any(is_symbol_like) {
+        Family::Name("Noto Sans Symbols 2")
+    } else {
+        Family::SansSerif
+    }
+}
+
+fn is_emoji_like(ch: char) -> bool {
+    let codepoint = ch as u32;
+    matches!(codepoint, 0x1F300..=0x1FAFF | 0xFE0E..=0xFE0F)
+}
+
+fn is_symbol_like(ch: char) -> bool {
+    let codepoint = ch as u32;
+    matches!(codepoint, 0x2190..=0x21FF | 0x2300..=0x23FF | 0x25A0..=0x25FF | 0x2600..=0x27BF)
 }
 
 pub fn cosmic_color_to_rgba(color: Color) -> [f32; 4] {

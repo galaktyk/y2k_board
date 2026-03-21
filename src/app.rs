@@ -955,7 +955,14 @@ impl App {
 impl EventHandler for App {
     fn update(&mut self) {
         #[cfg(target_arch = "wasm32")]
-        self.process_browser_file_events();
+        {
+            self.process_browser_file_events();
+            if self.text_system.apply_browser_font_updates() {
+                self.text_dirty = true;
+                self.cached_text_draw = None;
+                self.request_redraw();
+            }
+        }
         self.update_image_ram_maintenance();
     }
 

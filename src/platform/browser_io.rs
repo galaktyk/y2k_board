@@ -25,6 +25,12 @@ fn browser_file_queue() -> &'static Mutex<Vec<BrowserPickedFile>> {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn browser_font_queue() -> &'static Mutex<Vec<Vec<u8>>> {
+    static FONT_QUEUE: OnceLock<Mutex<Vec<Vec<u8>>>> = OnceLock::new();
+    FONT_QUEUE.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+#[cfg(target_arch = "wasm32")]
 fn browser_file_kind_from_raw(value: u32) -> Option<BrowserFileKind> {
     match value {
         1 => Some(BrowserFileKind::Snapshot),
@@ -37,6 +43,7 @@ fn browser_file_kind_from_raw(value: u32) -> Option<BrowserFileKind> {
 unsafe extern "C" {
     fn mg_request_snapshot_load();
     fn mg_request_image_upload();
+    fn mg_load_fonts_for_text(text_ptr: *const u8, text_len: usize);
     fn mg_download_bytes(
         name_ptr: *const u8,
         name_len: usize,
@@ -68,6 +75,20 @@ pub(crate) fn request_image_upload() {
 pub(crate) fn request_image_upload() {}
 
 #[cfg(target_arch = "wasm32")]
+pub(crate) fn request_fonts_for_text(text: &str) {
+    if text.is_empty() {
+        return;
+    }
+
+    unsafe {
+        mg_load_fonts_for_text(text.as_ptr(), text.len());
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn request_fonts_for_text(_text: &str) {}
+
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn download_bytes(name: &str, mime: &str, data: &[u8]) {
     unsafe {
         mg_download_bytes(
@@ -94,6 +115,19 @@ pub(crate) fn take_picked_files() -> Vec<BrowserPickedFile> {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn take_picked_files() -> Vec<BrowserPickedFile> {
+    Vec::new()
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn take_loaded_fonts() -> Vec<Vec<u8>> {
+    let mut queue = browser_font_queue()
+        .lock()
+        .expect("browser font queue mutex should not be poisoned");
+    mem::take(&mut *queue)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn take_loaded_fonts() -> Vec<Vec<u8>> {
     Vec::new()
 }
 
@@ -136,6 +170,30 @@ pub extern "C" fn mg_browser_file_selected(
         .lock()
         .expect("browser file queue mutex should not be poisoned");
     queue.push(BrowserPickedFile { kind, name, bytes });
+    drop(queue);
+    miniquad::window::schedule_update();
+}
+
+#[cfg(target_arch = "wasm32")]
+#[unsafe(no_mangle)]
+pub extern "C" fn mg_browser_font_loaded(data_ptr: *mut u8, data_len: usize) {
+    let bytes = if data_len == 0 {
+        Vec::new()
+    } else {
+        unsafe { Vec::from_raw_parts(data_ptr, data_len, data_len) }
+    };
+
+    if bytes.is_empty() {
+        println!("[font] browser delivered empty font payload");
+        return;
+    }
+
+    println!("[font] browser delivered font payload bytes={}", bytes.len());
+
+    let mut queue = browser_font_queue()
+        .lock()
+        .expect("browser font queue mutex should not be poisoned");
+    queue.push(bytes);
     drop(queue);
     miniquad::window::schedule_update();
 }
