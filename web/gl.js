@@ -502,12 +502,8 @@ function persistBrowserImageAsset(relativePath, width, height, rgbaBytes, qualit
     createBrowserImageStorage().persistAsset(relativePath, width, height, rgbaBytes, quality);
 }
 
-function requestBrowserFontsForText(text) {
-    if (!text) {
-        return;
-    }
-
-    if (!window.miniGalaktykFonts || typeof window.miniGalaktykFonts.requestFontsForText !== "function") {
+async function bootstrapBrowserFonts() {
+    if (!window.miniGalaktykFonts || typeof window.miniGalaktykFonts.bootstrapFonts !== "function") {
         return;
     }
 
@@ -515,10 +511,10 @@ function requestBrowserFontsForText(text) {
         return;
     }
 
-    window.miniGalaktykFonts.requestFontsForText(text, wasm_exports, wasm_memory);
+    await window.miniGalaktykFonts.bootstrapFonts(wasm_exports, wasm_memory);
 }
 
-window.miniGalaktykDebugLoadFonts = requestBrowserFontsForText;
+window.miniGalaktykDebugLoadFonts = bootstrapBrowserFonts;
 var FS = {
     loaded_files: [],
     unique_id: 0
@@ -977,10 +973,6 @@ var importObject = {
         },
         mg_request_image_upload: function () {
             requestBrowserFiles(2, "image/png,image/jpeg,image/webp,image/bmp,image/gif", true);
-        },
-        mg_load_fonts_for_text: function (text_ptr, text_len) {
-            const text = UTF8ToString(text_ptr, text_len);
-            requestBrowserFontsForText(text);
         },
         mg_store_webp_asset: function (relative_path_ptr, relative_path_len, rgba_ptr, rgba_len, width, height, quality) {
             const relativePath = UTF8ToString(relative_path_ptr, relative_path_len);
@@ -1913,7 +1905,7 @@ function load(wasm_path) {
                     wasm_exports = obj.exports;
                     window.__miniGalaktykWasmExports = wasm_exports;
                     window.__miniGalaktykWasmMemory = wasm_memory;
-                    console.info("[miniGalaktyk/fonts] wasm initialized; debug hook ready as window.miniGalaktykDebugLoadFonts(text)");
+                    console.info("[miniGalaktyk/fonts] wasm initialized; debug hook ready as window.miniGalaktykDebugLoadFonts()");
 
                     var crate_version = wasm_exports.crate_version();
                     if (version != crate_version) {
@@ -1921,7 +1913,8 @@ function load(wasm_path) {
                             "Version mismatch: gl.js version is: " + version +
                             ", miniquad crate version is: " + crate_version);
                     }
-                            await bootstrapBrowserImageStorage();
+                    await bootstrapBrowserFonts();
+                    await bootstrapBrowserImageStorage();
                     init_plugins(plugins);
                     obj.exports.main();
                 })
@@ -1939,6 +1932,8 @@ function load(wasm_path) {
             .then(async function (obj) {
                 wasm_memory = obj.exports.memory;
                 wasm_exports = obj.exports;
+                window.__miniGalaktykWasmExports = wasm_exports;
+                window.__miniGalaktykWasmMemory = wasm_memory;
 
                 var crate_version = wasm_exports.crate_version();
                 if (version != crate_version) {
@@ -1946,7 +1941,8 @@ function load(wasm_path) {
                         "Version mismatch: gl.js version is: " + version +
                         ", rust sapp-wasm crate version is: " + crate_version);
                 }
-                    await bootstrapBrowserImageStorage();
+                await bootstrapBrowserFonts();
+                await bootstrapBrowserImageStorage();
                 init_plugins(plugins);
                 obj.exports.main();
             })

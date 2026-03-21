@@ -230,7 +230,9 @@ impl App {
         rotate_drag_preview: Option<(f32, Vec2)>,
     ) {
         self.refresh_text_cache_if_needed();
-        let text_draw = self.cached_text_draw.as_ref().unwrap();
+        let Some(text_draw) = self.cached_text_draw.as_ref() else {
+            return;
+        };
 
         self.renderer.draw_scene_text_instances(
             &mut *self.ctx,
@@ -511,7 +513,9 @@ impl App {
             ));
         }
 
-        let text_draw = self.cached_text_draw.as_ref().unwrap();
+        let Some(text_draw) = self.cached_text_draw.as_ref() else {
+            return;
+        };
         let char_count = text_draw.mono_instances.len() + text_draw.color_instances.len();
         let mut stats_text_specs = stats::build_stats_text_specs(
             self.camera.zoom,

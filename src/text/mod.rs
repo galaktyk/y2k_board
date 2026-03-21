@@ -142,8 +142,7 @@ impl TextSystem {
     pub fn new() -> Self {
         let mut font_system = new_font_system();
         configure_bundled_font_defaults(&mut font_system);
-
-        Self {
+        let mut text_system = Self {
             font_system,
             swash_cache: SwashCache::new(),
             mono_atlas: Atlas::new(TEXT_ATLAS_SIZE, true),
@@ -151,7 +150,9 @@ impl TextSystem {
             overlay_ready: false,
             layout_cache: None,
             edit_generation: 0,
-        }
+        };
+        text_system.apply_browser_font_updates();
+        text_system
     }
 
     /// Increment the edit generation counter, invalidating cached layouts
@@ -187,14 +188,20 @@ impl TextSystem {
             db.load_font_source(fontdb::Source::Binary(Arc::new(decoded)));
         }
 
-        self.layout_cache = None;
-        println!("[font] fontdb updated; text layout cache cleared");
+        self.reset_runtime_caches();
+        println!("[font] fontdb updated; text runtime caches reset");
         true
     }
 
-    pub fn measure_text_box(&mut self, content: &str, text: &TextData, max_width: f32) -> Vec2 {
-        request_browser_fonts_for_text(content);
+    fn reset_runtime_caches(&mut self) {
+        self.swash_cache = SwashCache::new();
+        self.mono_atlas = Atlas::new(TEXT_ATLAS_SIZE, true);
+        self.emoji_atlas = Atlas::new(EMOJI_ATLAS_SIZE, false);
+        self.overlay_ready = false;
+        self.layout_cache = None;
+    }
 
+    pub fn measure_text_box(&mut self, content: &str, text: &TextData, max_width: f32) -> Vec2 {
         let padding = Vec2::splat(12.0);
         let usable_width = (max_width - padding.x * 2.0).max(1.0);
         let metrics = text_metrics(text.font_size, None);
@@ -234,8 +241,6 @@ impl TextSystem {
         if spec.content.is_empty() {
             return Vec2::ZERO;
         }
-
-        request_browser_fonts_for_text(&spec.content);
 
         let metrics = text_metrics(spec.font_size, spec.line_height);
         let mut buffer = Buffer::new(&mut self.font_system, metrics);
@@ -326,20 +331,6 @@ impl TextSystem {
                     })
                 })
                 .collect();
-
-            let mut missing_glyph = false;
-            for (cache_key, _phys_x, _phys_y, _glyph_color, _line_x) in &glyph_data {
-                if !self.mono_atlas.entries.contains_key(cache_key)
-                    && !self.emoji_atlas.entries.contains_key(cache_key)
-                {
-                    missing_glyph = true;
-                    break;
-                }
-            }
-
-            if missing_glyph {
-                request_browser_fonts_for_text(&spec.content);
-            }
 
             for (cache_key, phys_x, phys_y, glyph_color, line_x) in glyph_data {
                 let Some(resolved) = self.resolve_glyph(ctx, text_atlas, emoji_atlas, cache_key) else {
@@ -559,21 +550,6 @@ impl TextSystem {
                     (glyph_data, world_min)
                 };
 
-            let mut missing_glyph = false;
-
-            for (cache_key, _phys_x, _phys_y, _glyph_color) in &glyph_data {
-                if !self.mono_atlas.entries.contains_key(cache_key)
-                    && !self.emoji_atlas.entries.contains_key(cache_key)
-                {
-                    missing_glyph = true;
-                    break;
-                }
-            }
-
-            if missing_glyph {
-                request_browser_fonts_for_text(content);
-            }
-
             for (cache_key, phys_x, phys_y, glyph_color) in glyph_data {
                 let resolved =
                     self.resolve_glyph(ctx, text_atlas, emoji_atlas, cache_key);
@@ -764,7 +740,6 @@ impl TextSystem {
         let Some((world_min, world_max)) = element.text_bounds() else {
             return false;
         };
-        request_browser_fonts_for_text(content);
         let text = element.text.clone().unwrap_or_default();
         let width = (world_max.x - world_min.x).max(1.0);
         let height = (world_max.y - world_min.y).max(1.0);
@@ -868,22 +843,7 @@ impl TextSystem {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-const WASM_COMMON_FALLBACKS: &[&str] = &[
-    "Noto Emoji",
-    "Noto Color Emoji",
-    "Noto Sans Symbols 2",
-    "Noto Sans Symbols",
-    "Noto Sans Thai",
-    "Noto Sans Arabic",
-    "Noto Sans Devanagari",
-    "Noto Sans CJK JP",
-    "Noto Sans JP",
-    "Noto Sans CJK SC",
-    "Noto Sans SC",
-    "Noto Sans CJK TC",
-    "Noto Sans TC",
-];
+
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug, Default, Clone, Copy)]
@@ -892,23 +852,19 @@ struct WasmFontFallback;
 #[cfg(target_arch = "wasm32")]
 impl Fallback for WasmFontFallback {
     fn common_fallback(&self) -> &[&'static str] {
-        WASM_COMMON_FALLBACKS
+        // Dummy fallback since wasm can't access browser fonts anyway.
+        &[]
     }
 
     fn forbidden_fallback(&self) -> &[&'static str] {
+        // Dummy fallback since wasm can't access browser fonts anyway.
         &[]
     }
 
     fn script_fallback(&self, script: Script, _locale: &str) -> &[&'static str] {
-        match script {
-            Script::Thai => &["Noto Sans Thai"],
-            Script::Arabic => &["Noto Sans Arabic"],
-            Script::Devanagari => &["Noto Sans Devanagari"],
-            Script::Han => &["Noto Sans CJK SC", "Noto Sans CJK TC", "Noto Sans SC", "Noto Sans TC"],
-            Script::Hiragana | Script::Katakana => &["Noto Sans CJK JP", "Noto Sans JP"],
-            Script::Common => &["Noto Emoji", "Noto Color Emoji", "Noto Sans Symbols 2", "Noto Sans Symbols"],
-            _ => &[],
-        }
+        // Dummy fallback since wasm can't access browser fonts anyway.
+        &[]
+        
     }
 }
 
@@ -960,90 +916,6 @@ fn load_bundled_font(db: &mut fontdb::Database, asset: BundledFontAsset) -> Opti
         .or_else(|| Some(asset.family_hint.to_string()))
 }
 
-fn request_browser_fonts_for_text(text: &str) {
-    if text.is_empty() {
-        return;
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-        static LAST_REQUEST_HASH: AtomicU64 = AtomicU64::new(0);
-        static LOADED_SINGLE_FILE_LANGS: AtomicU32 = AtomicU32::new(0);
-
-        let mut hash = 0u64;
-        let mut needs_cjk_or_new = false;
-        let mut lang_bits = 0u32;
-
-        for ch in text.chars() {
-            if !may_need_browser_font(ch) {
-                continue;
-            }
-
-            let cp = ch as u32;
-            // CJK range: Hiragana, Katakana, CJK Unified Ideographs
-            if (cp >= 0x3040 && cp <= 0x30FF) || (cp >= 0x4E00 && cp <= 0x9FFF) {
-                needs_cjk_or_new = true;
-            } else {
-                // Bitmask for non-CJK languages that are typically single-file
-                let bit = match cp {
-                    0x0E00..=0x0E7F => 1 << 0, // Thai
-                    0x0600..=0x08FF | 0xFB50..=0xFEFF => 1 << 1, // Arabic
-                    0x0900..=0x097F => 1 << 2, // Devanagari
-                    0x1F300..=0x1FAFF => 1 << 3, // Emoji
-                    0x2000..=0x2BFF => 1 << 4, // Symbols
-                    _ => 0,
-                };
-                if bit != 0 && (LOADED_SINGLE_FILE_LANGS.load(Ordering::Relaxed) & bit) == 0 {
-                    needs_cjk_or_new = true;
-                    lang_bits |= bit;
-                }
-            }
-            hash = hash.wrapping_mul(31).wrapping_add(cp as u64);
-        }
-
-        if !needs_cjk_or_new && hash != 0 {
-            // Already loaded these languages and no CJK present
-            return;
-        }
-
-        if hash == 0 || LAST_REQUEST_HASH.load(Ordering::Relaxed) == hash {
-            return;
-        }
-        LAST_REQUEST_HASH.store(hash, Ordering::Relaxed);
-        if lang_bits != 0 {
-            LOADED_SINGLE_FILE_LANGS.fetch_or(lang_bits, Ordering::Relaxed);
-        }
-
-        browser_io::request_fonts_for_text(text);
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    let _ = text;
-}
-
-fn may_need_browser_font(ch: char) -> bool {
-    let codepoint = ch as u32;
-
-    matches!(codepoint,
-        0x2190..=0x21FF |
-        0x2300..=0x23FF |
-        0x25A0..=0x25FF |
-        0x0E00..=0x0E7F |
-        0x0600..=0x06FF |
-        0x0750..=0x077F |
-        0x08A0..=0x08FF |
-        0x0900..=0x097F |
-        0x2600..=0x27BF |
-        0x3040..=0x30FF |
-        0x4E00..=0x9FFF |
-        0xFB50..=0xFDFF |
-        0xFE00..=0xFE0F |
-        0xFE70..=0xFEFF |
-        0x1F300..=0x1FAFF
-    )
-}
-
 fn decode_browser_font_bytes(bytes: Vec<u8>) -> Option<Vec<u8>> {
     if bytes.starts_with(b"wOF2") {
         println!("[font] decoding woff2 payload bytes={}", bytes.len());
@@ -1081,7 +953,7 @@ fn preferred_family_for_text(text: &str) -> Family<'static> {
     if text.chars().any(is_emoji_like) {
         Family::Name("Noto Emoji")
     } else if text.chars().any(is_symbol_like) {
-        Family::Name("Noto Sans Symbols 2")
+        Family::Name("DejaVu Sans")
     } else {
         Family::SansSerif
     }

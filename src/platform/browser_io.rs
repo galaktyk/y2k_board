@@ -3,6 +3,8 @@
 #[cfg(target_arch = "wasm32")]
 use std::mem;
 #[cfg(target_arch = "wasm32")]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_arch = "wasm32")]
 use std::sync::{Mutex, OnceLock};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -31,6 +33,12 @@ fn browser_font_queue() -> &'static Mutex<Vec<Vec<u8>>> {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn browser_app_ready() -> &'static AtomicBool {
+    static APP_READY: AtomicBool = AtomicBool::new(false);
+    &APP_READY
+}
+
+#[cfg(target_arch = "wasm32")]
 fn browser_file_kind_from_raw(value: u32) -> Option<BrowserFileKind> {
     match value {
         1 => Some(BrowserFileKind::Snapshot),
@@ -43,7 +51,6 @@ fn browser_file_kind_from_raw(value: u32) -> Option<BrowserFileKind> {
 unsafe extern "C" {
     fn mg_request_snapshot_load();
     fn mg_request_image_upload();
-    fn mg_load_fonts_for_text(text_ptr: *const u8, text_len: usize);
     fn mg_download_bytes(
         name_ptr: *const u8,
         name_len: usize,
@@ -73,45 +80,6 @@ pub(crate) fn request_image_upload() {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn request_image_upload() {}
-
-#[cfg(target_arch = "wasm32")]
-fn browser_font_request_queue() -> &'static Mutex<String> {
-    static REQUEST_QUEUE: OnceLock<Mutex<String>> = OnceLock::new();
-    REQUEST_QUEUE.get_or_init(|| Mutex::new(String::new()))
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn request_fonts_for_text(text: &str) {
-    if text.is_empty() {
-        return;
-    }
-
-    let mut queue = browser_font_request_queue()
-        .lock()
-        .expect("font request queue mutex should not be poisoned");
-    queue.push_str(text);
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn request_fonts_for_text(_text: &str) {}
-
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn flush_font_requests() {
-    let mut queue = browser_font_request_queue()
-        .lock()
-        .expect("font request queue mutex should not be poisoned");
-    if queue.is_empty() {
-        return;
-    }
-
-    let text = std::mem::take(&mut *queue);
-    unsafe {
-        mg_load_fonts_for_text(text.as_ptr(), text.len());
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn flush_font_requests() {}
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn download_bytes(name: &str, mime: &str, data: &[u8]) {
@@ -155,6 +123,14 @@ pub(crate) fn take_loaded_fonts() -> Vec<Vec<u8>> {
 pub(crate) fn take_loaded_fonts() -> Vec<Vec<u8>> {
     Vec::new()
 }
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn mark_app_ready() {
+    browser_app_ready().store(true, Ordering::Release);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn mark_app_ready() {}
 
 #[cfg(target_arch = "wasm32")]
 #[unsafe(no_mangle)]
@@ -220,5 +196,10 @@ pub extern "C" fn mg_browser_font_loaded(data_ptr: *mut u8, data_len: usize) {
         .expect("browser font queue mutex should not be poisoned");
     queue.push(bytes);
     drop(queue);
-    miniquad::window::schedule_update();
+
+    if browser_app_ready().load(Ordering::Acquire) {
+        miniquad::window::schedule_update();
+    } else {
+        println!("[font] app not ready yet; deferred redraw request for queued browser font");
+    }
 }
