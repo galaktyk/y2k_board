@@ -12,6 +12,7 @@ use crate::input::handles::{
     get_selection_bounds_handles, handle_hit_radius,
 };
 use crate::input::state::{ConnectionDrag, DragMode, HandleDir, InputState, SelectionBounds};
+use crate::spatial::SpatialGrid;
 use crate::ui::tool::Tool;
 
 const MARQUEE_MIN_SIZE: f32 = 4.0;
@@ -503,9 +504,10 @@ fn anchored_position_from_anchor(board: &Board, anchor: &LineAnchor) -> Option<V
     Some(anchored_position_from_element(element, anchor.norm_pos))
 }
 
-fn find_line_anchor(board: &Board, line_id: u64, world: Vec2) -> Option<LineAnchor> {
+fn find_line_anchor(board: &Board, spatial: &SpatialGrid, line_id: u64, world: Vec2) -> Option<LineAnchor> {
+    let candidate_ids = spatial.query(world, world);
     board
-        .hit_test_all(world)
+        .hit_test_all_filtered(world, Some(&candidate_ids))
         .into_iter()
         .filter(|&target_id| target_id != line_id)
         .find_map(|target_id| {
@@ -514,20 +516,21 @@ fn find_line_anchor(board: &Board, line_id: u64, world: Vec2) -> Option<LineAnch
         })
 }
 
-fn resolved_line_endpoints(board: &Board, line_id: u64) -> Option<LineEndpoints> {
+fn resolved_line_endpoints(board: &Board, spatial: &SpatialGrid, line_id: u64) -> Option<LineEndpoints> {
     let line = board.element(line_id)?;
     if line.shape != ShapeType::Line {
         return None;
     }
 
     Some(LineEndpoints {
-        start: find_line_anchor(board, line_id, line.pos),
-        end: find_line_anchor(board, line_id, line.pos + line.size),
+        start: find_line_anchor(board, spatial, line_id, line.pos),
+        end: find_line_anchor(board, spatial, line_id, line.pos + line.size),
     })
 }
 
 fn line_connection_change_for_handle_release(
     board: &Board,
+    spatial: &SpatialGrid,
     line_id: u64,
     dir: HandleDir,
 ) -> Option<LineConnectionChange> {
@@ -546,8 +549,8 @@ fn line_connection_change_for_handle_release(
     let end_world = line.pos + line.size;
 
     match dir {
-        HandleDir::LineStart => after.start = find_line_anchor(board, line_id, start_world),
-        HandleDir::LineEnd => after.end = find_line_anchor(board, line_id, end_world),
+        HandleDir::LineStart => after.start = find_line_anchor(board, spatial, line_id, start_world),
+        HandleDir::LineEnd => after.end = find_line_anchor(board, spatial, line_id, end_world),
         _ => return None,
     }
 
@@ -560,6 +563,7 @@ fn line_connection_change_for_handle_release(
 
 fn line_connection_change_for_move_release(
     board: &Board,
+    spatial: &SpatialGrid,
     line_id: u64,
 ) -> Option<LineConnectionChange> {
     let before = board
@@ -567,7 +571,7 @@ fn line_connection_change_for_move_release(
         .get(&line_id)
         .cloned()
         .unwrap_or_default();
-    let after = resolved_line_endpoints(board, line_id)?;
+    let after = resolved_line_endpoints(board, spatial, line_id)?;
 
     (after != before).then_some(LineConnectionChange {
         id: line_id,
@@ -576,8 +580,8 @@ fn line_connection_change_for_move_release(
     })
 }
 
-fn new_line_connections(board: &Board, line_id: u64) -> Option<LineConnectionChange> {
-    let after = resolved_line_endpoints(board, line_id)?;
+fn new_line_connections(board: &Board, spatial: &SpatialGrid, line_id: u64) -> Option<LineConnectionChange> {
+    let after = resolved_line_endpoints(board, spatial, line_id)?;
 
     (!matches!(after, LineEndpoints { start: None, end: None })).then_some(LineConnectionChange {
         id: line_id,
@@ -664,6 +668,7 @@ fn group_resize_from_handle(
 pub fn on_mouse_down(
     state: &mut InputState,
     board: &mut Board,
+    spatial: &SpatialGrid,
     camera: &Camera,
     active_tool: Tool,
     screen_size: Vec2,
@@ -731,7 +736,8 @@ pub fn on_mouse_down(
                 }
             }
 
-            if let Some(id) = board.hit_test(world) {
+            let candidate_ids = spatial.query(world, world);
+            if let Some(id) = board.hit_test_filtered(world, Some(&candidate_ids)) {
                 if state.active_text_id.is_some() && state.active_text_id != Some(id) {
                     state.active_text_id = None;
                 }
@@ -811,6 +817,7 @@ pub fn on_mouse_down(
 pub fn on_mouse_up(
     state: &mut InputState,
     board: &mut Board,
+    spatial: &SpatialGrid,
     camera: &Camera,
     tool_style_defaults: &ToolStyleDefaults,
     active_tool: Tool,
@@ -856,7 +863,12 @@ pub fn on_mouse_up(
             DragMode::MarqueeSelect => {
                 if let Some(bounds) = state.marquee_bounds.take() {
                     if bounds.size.x >= MARQUEE_MIN_SIZE || bounds.size.y >= MARQUEE_MIN_SIZE {
-                        board.select_intersecting_bounds(bounds, state.shift_held);
+                        let candidate_ids = spatial.query(bounds.min(), bounds.max());
+                        board.select_intersecting_bounds_filtered(
+                            bounds,
+                            state.shift_held,
+                            Some(&candidate_ids),
+                        );
                         sync_multi_selection_bounds(state, board);
                     } else if !state.shift_held {
                         board.deselect_all();
@@ -881,7 +893,7 @@ pub fn on_mouse_up(
                         .move_origin
                         .iter()
                         .map(|&(id, _, _, _)| id)
-                        .filter_map(|id| line_connection_change_for_move_release(board, id))
+                        .filter_map(|id| line_connection_change_for_move_release(board, spatial, id))
                         .collect();
                     if !line_connection_changes.is_empty() {
                         board.apply_operation(BoardOperation::SetLineConnections {
@@ -896,7 +908,7 @@ pub fn on_mouse_up(
             }
             DragMode::CreatingConnection => {
                 if let Some(connection_drag) = state.connection_drag {
-                    let end_anchor = find_line_anchor(board, u64::MAX, world);
+                    let end_anchor = find_line_anchor(board, spatial, u64::MAX, world);
                     let end_world = end_anchor
                         .as_ref()
                         .and_then(|anchor| anchored_position_from_anchor(board, anchor))
@@ -964,7 +976,7 @@ pub fn on_mouse_up(
                 completed_drag_mode
             {
                 let line_id = state.move_origin[0].0;
-                if let Some(change) = line_connection_change_for_handle_release(board, line_id, dir) {
+                if let Some(change) = line_connection_change_for_handle_release(board, spatial, line_id, dir) {
                     board.apply_operation(BoardOperation::SetLineConnections {
                         changes: vec![change],
                     });
@@ -1011,7 +1023,7 @@ pub fn on_mouse_up(
                 board.apply_operation(BoardOperation::AddElement(element));
                 board.deselect_all();
                 board.select_only(new_id);
-                if let Some(change) = new_line_connections(board, new_id) {
+                if let Some(change) = new_line_connections(board, spatial, new_id) {
                     board.apply_operation(BoardOperation::SetLineConnections {
                         changes: vec![change],
                     });
@@ -1039,6 +1051,7 @@ pub fn on_mouse_up(
 pub fn on_mouse_move(
     state: &mut InputState,
     board: &mut Board,
+    spatial: &SpatialGrid,
     camera: &mut Camera,
     tool_style_defaults: &ToolStyleDefaults,
     active_tool: Tool,
@@ -1101,7 +1114,7 @@ pub fn on_mouse_move(
 
         if state.drag_mode == DragMode::CreatingConnection {
             if let Some(connection_drag) = state.connection_drag.as_mut() {
-                if let Some(anchor) = find_line_anchor(board, u64::MAX, world) {
+                if let Some(anchor) = find_line_anchor(board, spatial, u64::MAX, world) {
                     connection_drag.end_world =
                         anchored_position_from_anchor(board, &anchor).unwrap_or(world);
                 } else {

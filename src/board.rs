@@ -30,6 +30,7 @@ pub struct Board {
     pub elements: Vec<Element>,
     pub line_attachments: std::collections::HashMap<u64, LineEndpoints>,
     connected_lines: std::collections::HashMap<u64, Vec<u64>>,
+    index_by_id: std::collections::HashMap<u64, usize>,
     undo_stack: Vec<HistoryEntry>,
     redo_stack: Vec<HistoryEntry>,
     emitted_ops: Vec<BoardOperation>,
@@ -42,6 +43,7 @@ impl Board {
             elements: Vec::new(),
             line_attachments: std::collections::HashMap::new(),
             connected_lines: std::collections::HashMap::new(),
+            index_by_id: std::collections::HashMap::new(),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             emitted_ops: Vec::new(),
@@ -75,6 +77,71 @@ impl Board {
         self.execute(&BoardOperation::AddElement(element));
     }
 
+    fn rebuild_index_by_id(&mut self) {
+        self.index_by_id.clear();
+        self.index_by_id.reserve(self.elements.len());
+        for (index, element) in self.elements.iter().enumerate() {
+            self.index_by_id.insert(element.id, index);
+        }
+    }
+
+    fn cached_index(&self, id: u64) -> Option<usize> {
+        self.index_by_id.get(&id).copied().filter(|&index| {
+            self.elements
+                .get(index)
+                .map(|element| element.id == id)
+                .unwrap_or(false)
+        })
+    }
+
+    fn position_of_id(&self, id: u64) -> Option<usize> {
+        self.cached_index(id)
+            .or_else(|| self.elements.iter().position(|element| element.id == id))
+    }
+
+    fn position_of_id_mut(&mut self, id: u64) -> Option<usize> {
+        if let Some(index) = self.cached_index(id) {
+            return Some(index);
+        }
+
+        let index = self.elements.iter().position(|element| element.id == id)?;
+        self.rebuild_index_by_id();
+        Some(index)
+    }
+
+    fn remove_element_by_id(&mut self, id: u64) {
+        let Some(index) = self.position_of_id_mut(id) else {
+            return;
+        };
+        self.elements.remove(index);
+        self.rebuild_index_by_id();
+    }
+
+    fn upsert_element(&mut self, element: Element) {
+        self.remove_element_by_id(element.id);
+        self.elements.push(element);
+        let index = self.elements.len() - 1;
+        let id = self.elements[index].id;
+        self.index_by_id.insert(id, index);
+    }
+
+    fn ordered_candidate_indices(
+        &self,
+        candidate_ids: Option<&std::collections::HashSet<u64>>,
+    ) -> Vec<usize> {
+        match candidate_ids {
+            Some(candidate_ids) => {
+                let mut indices: Vec<usize> = candidate_ids
+                    .iter()
+                    .filter_map(|id| self.position_of_id(*id))
+                    .collect();
+                indices.sort_unstable();
+                indices
+            }
+            None => (0..self.elements.len()).collect(),
+        }
+    }
+
     pub fn restore_snapshot(&mut self, data: crate::snapshot::SnapshotData) {
         let mut elements = data.elements;
         for element in &mut elements {
@@ -93,6 +160,7 @@ impl Board {
             }
         }
         self.connected_lines = connected_lines;
+        self.rebuild_index_by_id();
         
         self.next_id = data.next_id.max(1);
         self.undo_stack.clear();
@@ -100,6 +168,7 @@ impl Board {
         self.emitted_ops.clear();
     }
 
+    #[allow(dead_code)]
     pub fn update_connected_lines(&mut self, target_id: u64) {
         // [HOT] Updating connected lines 
         self.update_connected_lines_filtered(target_id, None);
@@ -297,59 +366,72 @@ impl Board {
         match op {
             BoardOperation::AddElement(element) => {
                 self.next_id = self.next_id.max(element.id.saturating_add(1));
-                self.elements.retain(|existing| existing.id != element.id);
-                self.elements.push(element.clone());
+                self.upsert_element(element.clone());
             }
             BoardOperation::DeleteElement(element) => {
-                self.elements.retain(|existing| existing.id != element.id);
+                self.remove_element_by_id(element.id);
             }
             BoardOperation::MoveElements { ids, delta } => {
+                let mut affected_targets = Vec::with_capacity(ids.len());
                 for id in ids {
-                    if let Some(element) = self.elements.iter_mut().find(|element| &element.id == id) {
+                    if let Some(index) = self.position_of_id_mut(*id) {
+                        let element = &mut self.elements[index];
                         move_element(element, *delta);
+                        affected_targets.push(*id);
                     }
-                    self.update_connected_lines(*id);
                 }
+                self.update_connected_lines_for_targets(affected_targets);
             }
             BoardOperation::RotateElements { ids, center, angle } => {
+                let mut affected_targets = Vec::with_capacity(ids.len());
                 for id in ids {
-                    if let Some(element) = self.elements.iter_mut().find(|element| &element.id == id) {
+                    if let Some(index) = self.position_of_id_mut(*id) {
+                        let element = &mut self.elements[index];
                         rotate_element(element, *center, *angle);
+                        affected_targets.push(*id);
                     }
-                    self.update_connected_lines(*id);
                 }
+                self.update_connected_lines_for_targets(affected_targets);
             }
             BoardOperation::SetElementRotations { changes } => {
+                let mut affected_targets = Vec::with_capacity(changes.len());
                 for change in changes {
-                    if let Some(element) = self.elements.iter_mut().find(|element| element.id == change.id)
-                    {
+                    if let Some(index) = self.position_of_id_mut(change.id) {
+                        let element = &mut self.elements[index];
                         element.rotation = change.after;
+                        affected_targets.push(change.id);
                     }
-                    self.update_connected_lines(change.id);
                 }
+                self.update_connected_lines_for_targets(affected_targets);
             }
             BoardOperation::SetProperty {
                 changes,
                 sync_connected_lines,
             } => {
+                let mut connected_line_targets = Vec::new();
                 for change in changes {
                     let (before, after) = match &change.patch {
                         ElementPropertyPatch::Transform { before, after } => (Some(*before), *after),
                         ElementPropertyPatch::Style { .. } | ElementPropertyPatch::Text { .. } => continue,
                     };
-                    if let Some(element) = self.elements.iter_mut().find(|e| e.id == change.id) {
+                    if let Some(index) = self.position_of_id_mut(change.id) {
+                        let element = &mut self.elements[index];
                         apply_transform(element, before, after);
+                        if *sync_connected_lines {
+                            connected_line_targets.push(change.id);
+                        }
                     }
-                    if *sync_connected_lines {
-                        self.update_connected_lines(change.id);
-                    }
+                }
+                if *sync_connected_lines {
+                    self.update_connected_lines_for_targets(connected_line_targets);
                 }
                 for change in changes {
                     let after = match &change.patch {
                         ElementPropertyPatch::Style { after, .. } => after,
                         ElementPropertyPatch::Transform { .. } | ElementPropertyPatch::Text { .. } => continue,
                     };
-                    if let Some(element) = self.elements.iter_mut().find(|e| e.id == change.id) {
+                    if let Some(index) = self.position_of_id_mut(change.id) {
+                        let element = &mut self.elements[index];
                         element.apply_style_snapshot(*after);
                     }
                 }
@@ -358,7 +440,8 @@ impl Board {
                         ElementPropertyPatch::Text { after, .. } => after,
                         ElementPropertyPatch::Transform { .. } | ElementPropertyPatch::Style { .. } => continue,
                     };
-                    if let Some(element) = self.elements.iter_mut().find(|e| e.id == change.id) {
+                    if let Some(index) = self.position_of_id_mut(change.id) {
+                        let element = &mut self.elements[index];
                         element.text = after.clone();
                         element.bump_text_generation();
                     }
@@ -509,24 +592,23 @@ impl Board {
     }
 
     pub fn is_selected(&self, id: u64) -> bool {
-        self.elements
-            .iter()
-            .find(|element| element.id == id)
+        self.element(id)
             .map(|element| element.selected)
             .unwrap_or(false)
     }
 
     pub fn toggle_selected(&mut self, id: u64) {
-        if let Some(element) = self.elements.iter_mut().find(|element| element.id == id) {
+        if let Some(element) = self.element_mut(id) {
             element.selected = !element.selected;
         }
     }
 
     pub fn bring_to_front(&mut self, id: u64) -> bool {
-        if let Some(index) = self.elements.iter().position(|element| element.id == id) {
+        if let Some(index) = self.position_of_id_mut(id) {
             if index < self.elements.len() - 1 {
                 let element = self.elements.remove(index);
                 self.elements.push(element);
+                self.rebuild_index_by_id();
                 return true;
             }
         }
@@ -534,10 +616,11 @@ impl Board {
     }
 
     pub fn send_to_back(&mut self, id: u64) -> bool {
-        if let Some(index) = self.elements.iter().position(|element| element.id == id) {
+        if let Some(index) = self.position_of_id_mut(id) {
             if index > 0 {
                 let element = self.elements.remove(index);
                 self.elements.insert(0, element);
+                self.rebuild_index_by_id();
                 return true;
             }
         }
@@ -558,7 +641,17 @@ impl Board {
         bounds.map(|(min, max)| SelectionBounds::new(min, max - min))
     }
 
+    #[allow(dead_code)]
     pub fn select_intersecting_bounds(&mut self, bounds: SelectionBounds, additive: bool) {
+        self.select_intersecting_bounds_filtered(bounds, additive, None);
+    }
+
+    pub fn select_intersecting_bounds_filtered(
+        &mut self,
+        bounds: SelectionBounds,
+        additive: bool,
+        candidate_ids: Option<&std::collections::HashSet<u64>>,
+    ) {
         let min = bounds.min();
         let max = bounds.max();
 
@@ -566,14 +659,35 @@ impl Board {
             self.deselect_all();
         }
 
-        for element in &mut self.elements {
-            let (element_min, element_max) = element.aabb();
-            let intersects = element_min.x <= max.x
-                && element_max.x >= min.x
-                && element_min.y <= max.y
-                && element_max.y >= min.y;
-            if intersects {
-                element.selected = true;
+        match candidate_ids {
+            Some(candidate_ids) => {
+                let ids: Vec<u64> = candidate_ids.iter().copied().collect();
+                for id in ids {
+                    let Some(index) = self.position_of_id_mut(id) else {
+                        continue;
+                    };
+                    let element = &mut self.elements[index];
+                    let (element_min, element_max) = element.aabb();
+                    let intersects = element_min.x <= max.x
+                        && element_max.x >= min.x
+                        && element_min.y <= max.y
+                        && element_max.y >= min.y;
+                    if intersects {
+                        element.selected = true;
+                    }
+                }
+            }
+            None => {
+                for element in &mut self.elements {
+                    let (element_min, element_max) = element.aabb();
+                    let intersects = element_min.x <= max.x
+                        && element_max.x >= min.x
+                        && element_min.y <= max.y
+                        && element_max.y >= min.y;
+                    if intersects {
+                        element.selected = true;
+                    }
+                }
             }
         }
     }
@@ -607,14 +721,32 @@ impl Board {
             .collect()
     }
 
+    #[allow(dead_code)]
     pub fn hit_test(&self, p: Vec2) -> Option<u64> {
-        for element in self.elements.iter().rev() {
+        self.hit_test_filtered(p, None)
+    }
+
+    #[allow(dead_code)]
+    pub fn hit_test_all(&self, p: Vec2) -> Vec<u64> {
+        self.hit_test_all_filtered(p, None)
+    }
+
+    pub fn hit_test_filtered(
+        &self,
+        p: Vec2,
+        candidate_ids: Option<&std::collections::HashSet<u64>>,
+    ) -> Option<u64> {
+        let ordered_indices = self.ordered_candidate_indices(candidate_ids);
+
+        for &index in ordered_indices.iter().rev() {
+            let element = &self.elements[index];
             if element.shape != ShapeType::Image && element_hit(element, p) {
                 return Some(element.id);
             }
         }
 
-        for element in self.elements.iter().rev() {
+        for &index in ordered_indices.iter().rev() {
+            let element = &self.elements[index];
             if element.shape == ShapeType::Image && element_hit(element, p) {
                 return Some(element.id);
             }
@@ -623,16 +755,24 @@ impl Board {
         None
     }
 
-    pub fn hit_test_all(&self, p: Vec2) -> Vec<u64> {
+    pub fn hit_test_all_filtered(
+        &self,
+        p: Vec2,
+        candidate_ids: Option<&std::collections::HashSet<u64>>,
+    ) -> Vec<u64> {
         let mut hits = Vec::new();
-        
-        for element in self.elements.iter().rev() {
+
+        let ordered_indices = self.ordered_candidate_indices(candidate_ids);
+
+        for &index in ordered_indices.iter().rev() {
+            let element = &self.elements[index];
             if element.shape != ShapeType::Image && element_hit(element, p) {
                 hits.push(element.id);
             }
         }
 
-        for element in self.elements.iter().rev() {
+        for &index in ordered_indices.iter().rev() {
+            let element = &self.elements[index];
             if element.shape == ShapeType::Image && element_hit(element, p) {
                 hits.push(element.id);
             }
@@ -642,10 +782,12 @@ impl Board {
     }
 
     pub fn element(&self, id: u64) -> Option<&Element> {
-        self.elements.iter().find(|element| element.id == id)
+        self.position_of_id(id)
+            .and_then(|index| self.elements.get(index))
     }
 
     pub fn element_mut(&mut self, id: u64) -> Option<&mut Element> {
-        self.elements.iter_mut().find(|element| element.id == id)
+        let index = self.position_of_id_mut(id)?;
+        self.elements.get_mut(index)
     }
 }

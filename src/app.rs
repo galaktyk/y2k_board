@@ -183,7 +183,12 @@ impl App {
         // [HOT] Rebuilding spatial grid
         self.spatial.clear();
         for e in &self.board.elements {
-            let (min, max) = e.aabb();
+            let (mut min, mut max) = e.aabb();
+            if e.shape == ShapeType::Line {
+                let padding = Vec2::splat(f32::from(e.stroke_width.max(1)) * 0.5 + 8.0);
+                min -= padding;
+                max += padding;
+            }
             self.spatial.insert(e.id, min, max);
         }
     }
@@ -332,13 +337,30 @@ impl App {
         self.request_redraw();
     }
 
+    fn ids_affect_text(&self, ids: &[u64]) -> bool {
+        ids.iter().copied().any(|id| {
+            self.input.active_text_id == Some(id)
+                || self
+                    .board
+                    .element(id)
+                    .and_then(|element| element.text.as_ref())
+                    .is_some()
+        })
+    }
+
     fn mark_elements_dirty<I>(&mut self, ids: I)
     where
         I: IntoIterator<Item = u64>,
     {
+        let ids: Vec<u64> = ids.into_iter().collect();
+        if ids.is_empty() {
+            return;
+        }
+
+        let text_dirty = self.ids_affect_text(&ids);
         self.dirty_element_ids.extend(ids);
         self.board_scene_dirty = true;
-        self.text_dirty = true;
+        self.text_dirty |= text_dirty;
         self.request_redraw();
     }
 
@@ -905,6 +927,7 @@ impl EventHandler for App {
         let order_changed = input::on_mouse_down(
             &mut self.input,
             &mut self.board,
+            &self.spatial,
             &self.camera,
             self.toolbar.active_tool,
             self.screen_size,
@@ -963,6 +986,7 @@ impl EventHandler for App {
         if let Some(tool) = input::on_mouse_up(
             &mut self.input,
             &mut self.board,
+            &self.spatial,
             &self.camera,
             &self.tool_style_defaults,
             self.toolbar.active_tool,
@@ -1048,6 +1072,7 @@ impl EventHandler for App {
         input::on_mouse_move(
             &mut self.input,
             &mut self.board,
+            &self.spatial,
             &mut self.camera,
             &self.tool_style_defaults,
             self.toolbar.active_tool,

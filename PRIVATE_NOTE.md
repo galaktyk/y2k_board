@@ -1,7 +1,4 @@
 
----
-support border resize, also change cursor when hovering on border
-
 
 ---
 wasm
