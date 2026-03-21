@@ -1,7 +1,7 @@
 use glam::Vec2;
 
 use crate::board::{Element, ShapeType};
-use crate::input::state::SelectionBounds;
+use crate::input::state::{HandleDir, SelectionBounds};
 use crate::palette;
 use crate::rendering::renderer::InstanceData;
 
@@ -9,6 +9,7 @@ const HANDLE_SIZE_PX: f32 = 10.0;
 const ROTATION_HANDLE_OFFSET_PX: f32 = 30.0;
 const CONNECTION_HELPER_SIZE_PX: f32 = 12.0;
 const CONNECTION_HELPER_OFFSET_PX: f32 = 20.0;
+const EDGE_HIT_MARGIN_PX: f32 = 10.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ConnectionHelper {
@@ -22,6 +23,10 @@ fn world_units_per_screen_px(zoom: f32) -> f32 {
 
 pub fn handle_hit_radius(zoom: f32) -> f32 {
     15.0 * world_units_per_screen_px(zoom)
+}
+
+pub fn edge_hit_margin(zoom: f32) -> f32 {
+    EDGE_HIT_MARGIN_PX * world_units_per_screen_px(zoom)
 }
 
 fn push_circle_handle_instances(
@@ -177,4 +182,51 @@ pub fn connection_helpers_to_instances(e: &Element, zoom: f32) -> Vec<InstanceDa
     }
 
     out
+}
+
+pub fn element_resize_bounds(element: &Element) -> Option<SelectionBounds> {
+    (element.shape != ShapeType::Line).then_some(SelectionBounds {
+        pos: element.pos,
+        size: element.size.abs().max(Vec2::splat(1.0)),
+        rotation: element.rotation,
+    })
+}
+
+pub fn edge_handle_hit(bounds: SelectionBounds, world: Vec2, zoom: f32) -> Option<HandleDir> {
+    let center = bounds.center();
+    let offset = world - center;
+    let c = bounds.rotation.cos();
+    let s = bounds.rotation.sin();
+    let local = Vec2::new(offset.x * c + offset.y * s, -offset.x * s + offset.y * c);
+    let half = bounds.size.max(Vec2::splat(1.0)) * 0.5;
+    let margin = edge_hit_margin(zoom);
+
+    if local.x < -half.x - margin
+        || local.x > half.x + margin
+        || local.y < -half.y - margin
+        || local.y > half.y + margin
+    {
+        return None;
+    }
+
+    let dist_left = (local.x + half.x).abs();
+    let dist_right = (local.x - half.x).abs();
+    let dist_top = (local.y + half.y).abs();
+    let dist_bottom = (local.y - half.y).abs();
+
+    let inside_vertical_span = local.y >= -half.y - margin && local.y <= half.y + margin;
+    let inside_horizontal_span = local.x >= -half.x - margin && local.x <= half.x + margin;
+
+    let candidates = [
+        (dist_left, HandleDir::Left, inside_vertical_span),
+        (dist_right, HandleDir::Right, inside_vertical_span),
+        (dist_top, HandleDir::Top, inside_horizontal_span),
+        (dist_bottom, HandleDir::Bottom, inside_horizontal_span),
+    ];
+
+    candidates
+        .into_iter()
+        .filter(|(distance, _, inside_span)| *inside_span && *distance <= margin)
+        .min_by(|(distance_a, _, _), (distance_b, _, _)| distance_a.total_cmp(distance_b))
+        .map(|(_, dir, _)| dir)
 }

@@ -1,5 +1,4 @@
 
-when drag line from helper, line should start from the shape edge, not the helper circle
 ---
 support border resize, also change cursor when hovering on border
 

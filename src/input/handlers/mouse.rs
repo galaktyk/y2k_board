@@ -8,7 +8,8 @@ use crate::board::{
 };
 use crate::camera::Camera;
 use crate::input::handles::{
-    get_connection_helpers, get_element_handles, get_selection_bounds_handles, handle_hit_radius,
+    edge_handle_hit, element_resize_bounds, get_connection_helpers, get_element_handles,
+    get_selection_bounds_handles, handle_hit_radius,
 };
 use crate::input::state::{ConnectionDrag, DragMode, HandleDir, InputState, SelectionBounds};
 use crate::ui::tool::Tool;
@@ -204,6 +205,63 @@ fn selection_handle_hit(state: &InputState, board: &Board, world: Vec2, zoom: f3
     }
 
     None
+}
+
+fn selection_edge_hit(state: &InputState, board: &Board, world: Vec2, zoom: f32) -> Option<DragMode> {
+    if board.selected_count() > 1 {
+        let bounds = current_multi_selection_bounds(state, board)?;
+        return edge_handle_hit(bounds, world, zoom).map(DragMode::ResizingHandle);
+    }
+
+    for element in board.elements.iter().filter(|element| element.selected).rev() {
+        let Some(bounds) = element_resize_bounds(element) else {
+            continue;
+        };
+
+        if let Some(dir) = edge_handle_hit(bounds, world, zoom) {
+            return Some(DragMode::ResizingHandle(dir));
+        }
+    }
+
+    None
+}
+
+fn resize_cursor(dir: HandleDir) -> miniquad::CursorIcon {
+    match dir {
+        HandleDir::TL | HandleDir::BR => miniquad::CursorIcon::NWSEResize,
+        HandleDir::TR | HandleDir::BL => miniquad::CursorIcon::NESWResize,
+        HandleDir::Left | HandleDir::Right => miniquad::CursorIcon::EWResize,
+        HandleDir::Top | HandleDir::Bottom => miniquad::CursorIcon::NSResize,
+        HandleDir::LineStart | HandleDir::LineEnd => miniquad::CursorIcon::Default,
+    }
+}
+
+pub fn hover_cursor(
+    state: &InputState,
+    board: &Board,
+    camera: &Camera,
+    active_tool: Tool,
+    screen_size: Vec2,
+) -> miniquad::CursorIcon {
+    if active_tool != Tool::Select {
+        return miniquad::CursorIcon::Default;
+    }
+
+    if let DragMode::ResizingHandle(dir) = state.drag_mode {
+        return resize_cursor(dir);
+    }
+
+    let world = camera.screen_to_world(state.mouse_pos, screen_size);
+
+    if let Some(DragMode::ResizingHandle(dir)) = selection_handle_hit(state, board, world, camera.zoom) {
+        return resize_cursor(dir);
+    }
+
+    if let Some(DragMode::ResizingHandle(dir)) = selection_edge_hit(state, board, world, camera.zoom) {
+        return resize_cursor(dir);
+    }
+
+    miniquad::CursorIcon::Default
 }
 
 fn connection_helper_hit(board: &Board, world: Vec2, zoom: f32) -> Option<ConnectionDrag> {
@@ -531,15 +589,46 @@ fn new_line_connections(board: &Board, line_id: u64) -> Option<LineConnectionCha
 fn resized_selection_bounds(bounds: SelectionBounds, dir: HandleDir, world: Vec2) -> Option<SelectionBounds> {
     let center = bounds.center();
     let local_world = inverse_rotate_point(world, center, bounds.rotation);
+    let min = bounds.min();
+    let max = bounds.max();
     let anchor = match dir {
-        HandleDir::TL => bounds.max(),
-        HandleDir::TR => Vec2::new(bounds.min().x, bounds.max().y),
-        HandleDir::BR => bounds.min(),
-        HandleDir::BL => Vec2::new(bounds.max().x, bounds.min().y),
+        HandleDir::TL => max,
+        HandleDir::TR => Vec2::new(min.x, max.y),
+        HandleDir::BR => min,
+        HandleDir::BL => Vec2::new(max.x, min.y),
+        HandleDir::Top => Vec2::new(bounds.center().x, max.y),
+        HandleDir::Right => Vec2::new(min.x, bounds.center().y),
+        HandleDir::Bottom => Vec2::new(bounds.center().x, min.y),
+        HandleDir::Left => Vec2::new(max.x, bounds.center().y),
         _ => return None,
     };
-    let local_min = local_world.min(anchor);
-    let local_max = local_world.max(anchor);
+    let mut local_min = min;
+    let mut local_max = max;
+
+    match dir {
+        HandleDir::TL | HandleDir::TR | HandleDir::BR | HandleDir::BL => {
+            local_min = local_world.min(anchor);
+            local_max = local_world.max(anchor);
+        }
+        HandleDir::Top => {
+            local_min.y = local_world.y.min(anchor.y - 1.0);
+            local_max.y = anchor.y;
+        }
+        HandleDir::Right => {
+            local_min.x = anchor.x;
+            local_max.x = local_world.x.max(anchor.x + 1.0);
+        }
+        HandleDir::Bottom => {
+            local_min.y = anchor.y;
+            local_max.y = local_world.y.max(anchor.y + 1.0);
+        }
+        HandleDir::Left => {
+            local_min.x = local_world.x.min(anchor.x - 1.0);
+            local_max.x = anchor.x;
+        }
+        _ => return None,
+    }
+
     Some(SelectionBounds {
         pos: local_min,
         size: (local_max - local_min).max(Vec2::splat(1.0)),
@@ -564,6 +653,10 @@ fn group_resize_from_handle(
         HandleDir::TR => Some((rotate_point(Vec2::new(min.x, max.y), center, bounds.rotation), (local_world.x - min.x) / width, (max.y - local_world.y) / height)),
         HandleDir::BR => Some((rotate_point(min, center, bounds.rotation), (local_world.x - min.x) / width, (local_world.y - min.y) / height)),
         HandleDir::BL => Some((rotate_point(Vec2::new(max.x, min.y), center, bounds.rotation), (max.x - local_world.x) / width, (local_world.y - min.y) / height)),
+        HandleDir::Top => Some((rotate_point(Vec2::new((min.x + max.x) * 0.5, max.y), center, bounds.rotation), 1.0, (max.y - local_world.y) / height)),
+        HandleDir::Right => Some((rotate_point(Vec2::new(min.x, (min.y + max.y) * 0.5), center, bounds.rotation), (local_world.x - min.x) / width, 1.0)),
+        HandleDir::Bottom => Some((rotate_point(Vec2::new((min.x + max.x) * 0.5, min.y), center, bounds.rotation), 1.0, (local_world.y - min.y) / height)),
+        HandleDir::Left => Some((rotate_point(Vec2::new(max.x, (min.y + max.y) * 0.5), center, bounds.rotation), (max.x - local_world.x) / width, 1.0)),
         _ => None,
     }
 }
@@ -615,6 +708,12 @@ pub fn on_mouse_down(
                 return false;
             }
             if let Some(drag_mode) = selection_handle_hit(state, board, world, camera.zoom) {
+                state.active_text_id = None;
+                state.text_selecting = false;
+                begin_transform_drag(state, board, drag_mode, world);
+                return false;
+            }
+            if let Some(drag_mode) = selection_edge_hit(state, board, world, camera.zoom) {
                 state.active_text_id = None;
                 state.text_selecting = false;
                 begin_transform_drag(state, board, drag_mode, world);
@@ -1133,6 +1232,20 @@ pub fn on_mouse_move(
                                     }
                                     HandleDir::BR => {
                                         new_size += Vec2::new(l_dx, l_dy);
+                                    }
+                                    HandleDir::Top => {
+                                        new_pos.y += l_dy;
+                                        new_size.y -= l_dy;
+                                    }
+                                    HandleDir::Right => {
+                                        new_size.x += l_dx;
+                                    }
+                                    HandleDir::Bottom => {
+                                        new_size.y += l_dy;
+                                    }
+                                    HandleDir::Left => {
+                                        new_pos.x += l_dx;
+                                        new_size.x -= l_dx;
                                     }
                                     _ => {}
                                 }

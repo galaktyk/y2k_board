@@ -1,4 +1,4 @@
-pub const MAX_SHAPE_INSTANCES: usize = 100_000;
+pub const MAX_SHAPE_INSTANCES: usize = 50_000;
 pub const MAX_TEXT_INSTANCES: usize = 200_000;
 pub const MAX_IMAGE_INSTANCES: usize = 8_192;
 

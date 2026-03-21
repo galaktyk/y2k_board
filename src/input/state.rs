@@ -128,6 +128,10 @@ pub enum HandleDir {
     TR,
     BR,
     BL,
+    Top,
+    Right,
+    Bottom,
+    Left,
     LineStart,
     LineEnd,
 }

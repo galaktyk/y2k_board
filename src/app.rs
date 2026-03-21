@@ -108,6 +108,7 @@ pub struct App {
     tool_style_defaults: ToolStyleDefaults,
     property_panel_target: ColorTarget,
     property_width_drag: Option<WidthDragState>,
+    current_cursor: CursorIcon,
     text_edit: Option<TextEditSession>,
     // ── text cache ────────────────────────────────────────────────────────
     cached_text_draw: Option<PreparedTextDraw>,
@@ -158,6 +159,7 @@ impl App {
             tool_style_defaults: ToolStyleDefaults::default(),
             property_panel_target: ColorTarget::Fill,
             property_width_drag: None,
+            current_cursor: CursorIcon::Default,
             text_edit: None,
             cached_text_draw: None,
             text_dirty: true,
@@ -203,6 +205,69 @@ impl App {
 
     fn request_redraw(&self) {
         window::schedule_update();
+    }
+
+    fn set_cursor_icon(&mut self, cursor: CursorIcon) {
+        if self.current_cursor != cursor {
+            window::set_mouse_cursor(cursor);
+            self.current_cursor = cursor;
+        }
+    }
+
+    fn desired_cursor_icon(&mut self) -> CursorIcon {
+        if self.property_width_drag.is_some() {
+            return CursorIcon::EWResize;
+        }
+
+        if self
+            .toolbar
+            .hovered_action(self.screen_size, self.input.mouse_pos.x, self.input.mouse_pos.y)
+            .is_some()
+        {
+            return CursorIcon::Pointer;
+        }
+
+        if let Some(panel) = self.resolve_property_panel() {
+            if let Some(hit) = property_panel::hit_test(
+                self.screen_size,
+                &panel.view,
+                self.input.mouse_pos.x,
+                self.input.mouse_pos.y,
+            ) {
+                return match hit {
+                    property_panel::PropertyPanelHit::Width(_, _) => CursorIcon::EWResize,
+                    _ => CursorIcon::Pointer,
+                };
+            }
+        }
+
+        let board_cursor = input::hover_cursor(
+            &self.input,
+            &self.board,
+            &self.camera,
+            self.toolbar.active_tool,
+            self.screen_size,
+        );
+        if board_cursor != CursorIcon::Default {
+            return board_cursor;
+        }
+
+        if let Some(id) = self.input.active_text_id {
+            if self.text_edit.is_some()
+                && self
+                    .text_cursor_from_screen(id, self.input.mouse_pos)
+                    .is_some()
+            {
+                return CursorIcon::Text;
+            }
+        }
+
+        CursorIcon::Default
+    }
+
+    fn refresh_mouse_cursor(&mut self) {
+        let cursor = self.desired_cursor_icon();
+        self.set_cursor_icon(cursor);
     }
 
     fn flush_image_ram_cache(&mut self, trigger: ImageRamFlushTrigger) {
@@ -828,6 +893,8 @@ impl EventHandler for App {
             if let Some(action) = self.toolbar.hit_test(self.screen_size, x, y) {
                 self.handle_toolbar_action(action);
             }
+            self.input.mouse_pos = Vec2::new(x, y);
+            self.refresh_mouse_cursor();
             self.request_redraw();
             return;
         }
@@ -875,6 +942,7 @@ impl EventHandler for App {
             }
         }
 
+        self.refresh_mouse_cursor();
         self.request_redraw();
     }
 
@@ -882,6 +950,7 @@ impl EventHandler for App {
         if button == MouseButton::Left && self.property_width_drag.is_some() {
             self.input.mouse_pos = Vec2::new(x, y);
             self.finish_property_width_drag();
+            self.refresh_mouse_cursor();
             return;
         }
 
@@ -922,6 +991,8 @@ impl EventHandler for App {
             }
         }
 
+        self.refresh_mouse_cursor();
+
         if had_drag || had_preview {
             self.spatial_dirty = true;
         }
@@ -955,6 +1026,7 @@ impl EventHandler for App {
                     }
                 }
             }
+            self.refresh_mouse_cursor();
             return;
         }
 
@@ -963,6 +1035,7 @@ impl EventHandler for App {
                 self.input.mouse_pos = mouse_pos;
                 if let Some(cursor_byte) = self.text_cursor_from_screen(id, mouse_pos) {
                     self.set_text_cursor(cursor_byte, true);
+                    self.refresh_mouse_cursor();
                     self.request_redraw();
                     return;
                 }
@@ -989,6 +1062,7 @@ impl EventHandler for App {
         let current_panel_hover = self
             .resolve_property_panel()
             .and_then(|panel| property_panel::hit_test(self.screen_size, &panel.view, self.input.mouse_pos.x, self.input.mouse_pos.y));
+        self.refresh_mouse_cursor();
         if previous_hover != current_hover || previous_panel_hover != current_panel_hover {
             self.request_redraw();
             return;
