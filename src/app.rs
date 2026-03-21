@@ -14,7 +14,9 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
-use std::thread::{self, JoinHandle};
+#[cfg(not(target_arch = "wasm32"))]
+use std::thread;
+use std::thread::JoinHandle;
 use std::time::Duration;
 use crate::board::{
     Board, Element, ElementPropertyChange, ElementPropertyPatch, ElementStyleSnapshot,
@@ -157,7 +159,7 @@ impl App {
             text_system: TextSystem::new(),
             image_manager,
             image_ram_flush_stop,
-            image_ram_flush_thread: Some(image_ram_flush_thread),
+            image_ram_flush_thread,
             image_ram_flush_deadline: now + IMAGE_RAM_FLUSH_INTERVAL_SECS,
             tool_style_defaults: ToolStyleDefaults::default(),
             property_panel_target: ColorTarget::Fill,
@@ -1155,9 +1157,16 @@ impl Drop for App {
     }
 }
 
-fn spawn_image_ram_flush_waker() -> (Arc<(Mutex<bool>, Condvar)>, JoinHandle<()>) {
+fn spawn_image_ram_flush_waker() -> (Arc<(Mutex<bool>, Condvar)>, Option<JoinHandle<()>>) {
     let stop = Arc::new((Mutex::new(false), Condvar::new()));
+    #[cfg(target_arch = "wasm32")]
+    {
+        return (stop, None);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     let stop_clone = Arc::clone(&stop);
+    #[cfg(not(target_arch = "wasm32"))]
     let thread = thread::Builder::new()
         .name("image-ram-flush-waker".to_string())
         .spawn(move || loop {
@@ -1175,7 +1184,10 @@ fn spawn_image_ram_flush_waker() -> (Arc<(Mutex<bool>, Condvar)>, JoinHandle<()>
             }
         })
         .expect("image RAM flush waker thread should start");
-    (stop, thread)
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        (stop, Some(thread))
+    }
 }
 
 fn stop_image_ram_flush_waker(
