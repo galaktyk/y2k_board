@@ -30,6 +30,9 @@ const THUMB_SLOT_COUNT: usize = THUMB_SLOTS_PER_ROW * THUMB_SLOTS_PER_ROW;
 const BASE_WEBP_QUALITY: f32 = 40.0;
 const HIRES_WEBP_QUALITY: f32 = 40.0;
 
+
+
+
 #[derive(Debug)]
 pub enum ImageImportError {
     #[cfg(target_arch = "wasm32")]

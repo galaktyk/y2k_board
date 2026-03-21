@@ -1,28 +1,12 @@
-use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
 use std::collections::HashSet;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
 use crate::board::Element;
-use crate::snapshot;
 
-pub fn pick_save_path(snapshot_path: &Path) -> Option<PathBuf> {
-    let default_name = snapshot_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("snapshot.bin");
-
-    rfd::FileDialog::new()
-        .add_filter("miniGalaktyk Snapshots", &["bin"])
-        .set_directory(snapshot::snapshot_root(snapshot_path))
-        .set_file_name(default_name)
-        .save_file()
-}
-
-pub fn pick_load_path(snapshot_path: &Path) -> Option<PathBuf> {
-    rfd::FileDialog::new()
-        .add_filter("miniGalaktyk Snapshots", &["bin"])
-        .set_directory(snapshot::snapshot_root(snapshot_path))
-        .pick_file()
-}
-
+#[cfg(not(target_arch = "wasm32"))]
 pub fn copy_assets(elements: &[Element], source_root: &Path, target_root: &Path) -> std::io::Result<()> {
     if source_root == target_root {
         return Ok(());

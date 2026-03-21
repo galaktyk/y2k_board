@@ -10,7 +10,9 @@ mod text_editing;
 use miniquad::*;
 use glam::Vec2;
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -21,6 +23,7 @@ use crate::board::{
 use crate::camera::Camera;
 use crate::images::ImageManager;
 use crate::input::{self, DragMode, InputState};
+use crate::platform::snapshot::{PlatformSnapshotDialogAdapter, SnapshotDialogAdapter};
 use crate::rendering::renderer::Renderer;
 use crate::rendering::cache::BoardRenderCache;
 use crate::{snapshot as snapshot_io, ui};
@@ -193,14 +196,12 @@ impl App {
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn pick_snapshot_save_path(&self) -> Option<PathBuf> {
-        snapshot::pick_save_path(&self.snapshot_path)
+        PlatformSnapshotDialogAdapter::new().pick_save_path(&self.snapshot_path)
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn pick_snapshot_load_path(&self) -> Option<PathBuf> {
-        snapshot::pick_load_path(&self.snapshot_path)
+        PlatformSnapshotDialogAdapter::new().pick_load_path(&self.snapshot_path)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -790,7 +791,6 @@ impl App {
     }
 
     fn save_snapshot(&mut self) {
-        #[cfg(not(target_arch = "wasm32"))]
         let target_path = if self.snapshot_path_user_selected {
             self.snapshot_path.clone()
         } else {
@@ -799,9 +799,6 @@ impl App {
             };
             path
         };
-
-        #[cfg(target_arch = "wasm32")]
-        let target_path = self.snapshot_path.clone();
 
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -826,13 +823,9 @@ impl App {
     }
 
     fn load_snapshot(&mut self) {
-        #[cfg(not(target_arch = "wasm32"))]
         let Some(path) = self.pick_snapshot_load_path() else {
             return;
         };
-
-        #[cfg(target_arch = "wasm32")]
-        let path = self.snapshot_path.clone();
 
         match snapshot_io::load_from_path(&path) {
             Ok(loaded) => {

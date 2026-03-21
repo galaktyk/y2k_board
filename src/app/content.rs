@@ -9,7 +9,7 @@ use crate::board::{
     BoardOperation, Element, LineAnchor, LineConnectionChange, LineEndpoints, ShapeType, TextData,
     DEFAULT_TEXT_COLOR,
 };
-use crate::clipboard::{self, BoardClipboardData, ClipboardPaste};
+use crate::clipboard::{self, BoardClipboardData};
 use crate::images::{ImageImportError, ImportedImage};
 use crate::rendering::renderer::PreparedImageDraw;
 use crate::rendering::cache::element_in_expanded_view;
