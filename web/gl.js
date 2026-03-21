@@ -15,6 +15,8 @@ var gl;
 
 var clipboard = null;
 var browserFileInput = null;
+var browserImageStorage = null;
+var browserImageStorageWarned = false;
 
 var plugins = [];
 var wasm_memory;
@@ -259,6 +261,245 @@ function downloadBrowserBytes(name, mime, bytes) {
     setTimeout(function () {
         URL.revokeObjectURL(url);
     }, 0);
+}
+
+function forwardEmbeddedAssetToWasm(relativePath, bytes) {
+    if (!wasm_exports || typeof wasm_exports.allocate_vec_u8 !== "function" || typeof wasm_exports.mg_embedded_asset_loaded !== "function") {
+        return;
+    }
+
+    const encoder = new TextEncoder();
+    const nameBytes = encoder.encode(relativePath || "");
+    const assetBytes = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || 0);
+
+    const nameVec = wasm_exports.allocate_vec_u8(nameBytes.length);
+    const nameHeap = new Uint8Array(wasm_memory.buffer, nameVec, nameBytes.length);
+    nameHeap.set(nameBytes, 0);
+
+    const dataVec = wasm_exports.allocate_vec_u8(assetBytes.length);
+    const dataHeap = new Uint8Array(wasm_memory.buffer, dataVec, assetBytes.length);
+    dataHeap.set(assetBytes, 0);
+
+    wasm_exports.mg_embedded_asset_loaded(nameVec, nameBytes.length, dataVec, assetBytes.length);
+}
+
+function createBrowserImageStorage() {
+    if (browserImageStorage !== null) {
+        return browserImageStorage;
+    }
+
+    if (typeof Worker !== "function" || typeof OffscreenCanvas !== "function" || typeof indexedDB === "undefined") {
+        browserImageStorage = {
+            ready: Promise.resolve(),
+            persistAsset: function () {
+                if (!browserImageStorageWarned) {
+                    browserImageStorageWarned = true;
+                    console.warn("Browser image persistence is unavailable; uploaded images will remain memory-only for this session.");
+                }
+            }
+        };
+        return browserImageStorage;
+    }
+
+    const workerSource = `
+        "use strict";
+
+        const DB_NAME = "minigalaktyk-image-assets";
+        const STORE_NAME = "image-assets";
+        let dbPromise = null;
+
+        function openDatabase() {
+            if (dbPromise !== null) {
+                return dbPromise;
+            }
+
+            dbPromise = new Promise(function (resolve, reject) {
+                const request = indexedDB.open(DB_NAME, 1);
+                request.onupgradeneeded = function () {
+                    const db = request.result;
+                    if (!db.objectStoreNames.contains(STORE_NAME)) {
+                        db.createObjectStore(STORE_NAME, { keyPath: "relativePath" });
+                    }
+                };
+                request.onsuccess = function () {
+                    resolve(request.result);
+                };
+                request.onerror = function () {
+                    reject(request.error || new Error("Failed to open IndexedDB image store."));
+                };
+            });
+
+            return dbPromise;
+        }
+
+        function loadAllAssets() {
+            return openDatabase().then(function (db) {
+                return new Promise(function (resolve, reject) {
+                    const tx = db.transaction(STORE_NAME, "readonly");
+                    const store = tx.objectStore(STORE_NAME);
+                    const request = store.getAll();
+                    request.onsuccess = function () {
+                        resolve(request.result || []);
+                    };
+                    request.onerror = function () {
+                        reject(request.error || new Error("Failed to read IndexedDB image assets."));
+                    };
+                });
+            });
+        }
+
+        function saveAsset(relativePath, bytes) {
+            return openDatabase().then(function (db) {
+                return new Promise(function (resolve, reject) {
+                    const tx = db.transaction(STORE_NAME, "readwrite");
+                    const store = tx.objectStore(STORE_NAME);
+                    store.put({ relativePath: relativePath, bytes: bytes });
+                    tx.oncomplete = function () {
+                        resolve();
+                    };
+                    tx.onerror = function () {
+                        reject(tx.error || new Error("Failed to store IndexedDB image asset."));
+                    };
+                    tx.onabort = function () {
+                        reject(tx.error || new Error("IndexedDB image asset transaction aborted."));
+                    };
+                });
+            });
+        }
+
+        async function encodeWebp(width, height, rgbaBuffer, quality) {
+            const canvas = new OffscreenCanvas(width, height);
+            const context = canvas.getContext("2d");
+            if (!context) {
+                throw new Error("OffscreenCanvas 2D context is unavailable.");
+            }
+
+            const pixels = new Uint8ClampedArray(rgbaBuffer);
+            context.putImageData(new ImageData(pixels, width, height), 0, 0);
+            const blob = await canvas.convertToBlob({
+                type: "image/webp",
+                quality: quality,
+            });
+            return new Uint8Array(await blob.arrayBuffer());
+        }
+
+        self.onmessage = async function (event) {
+            const message = event.data || {};
+
+            try {
+                if (message.type === "bootstrap") {
+                    const assets = await loadAllAssets();
+                    for (const asset of assets) {
+                        const bytes = asset.bytes instanceof Uint8Array ? asset.bytes : new Uint8Array(asset.bytes || 0);
+                        self.postMessage(
+                            {
+                                type: "bootstrapAsset",
+                                relativePath: asset.relativePath,
+                                bytes: bytes.buffer,
+                            },
+                            [bytes.buffer]
+                        );
+                    }
+                    self.postMessage({ type: "bootstrapComplete" });
+                    return;
+                }
+
+                if (message.type === "store") {
+                    const bytes = await encodeWebp(message.width, message.height, message.rgba, message.quality);
+                    await saveAsset(message.relativePath, bytes);
+                    self.postMessage(
+                        {
+                            type: "stored",
+                            relativePath: message.relativePath,
+                            bytes: bytes.buffer,
+                        },
+                        [bytes.buffer]
+                    );
+                }
+            } catch (error) {
+                self.postMessage({
+                    type: "error",
+                    stage: message.type || "unknown",
+                    message: error && error.message ? error.message : String(error),
+                });
+                if (message.type === "bootstrap") {
+                    self.postMessage({ type: "bootstrapComplete" });
+                }
+            }
+        };
+    `;
+
+    const workerUrl = URL.createObjectURL(new Blob([workerSource], { type: "text/javascript" }));
+    const worker = new Worker(workerUrl);
+    URL.revokeObjectURL(workerUrl);
+
+    let resolveReady;
+    const ready = new Promise(function (resolve) {
+        resolveReady = resolve;
+    });
+    let bootstrapFinished = false;
+
+    function finishBootstrap() {
+        if (bootstrapFinished) {
+            return;
+        }
+        bootstrapFinished = true;
+        resolveReady();
+    }
+
+    worker.onmessage = function (event) {
+        const message = event.data || {};
+
+        if (message.type === "bootstrapAsset" || message.type === "stored") {
+            forwardEmbeddedAssetToWasm(message.relativePath, new Uint8Array(message.bytes || 0));
+            return;
+        }
+
+        if (message.type === "bootstrapComplete") {
+            finishBootstrap();
+            return;
+        }
+
+        if (message.type === "error") {
+            console.warn("Browser image storage error (" + message.stage + "): " + message.message);
+            if (message.stage === "bootstrap") {
+                finishBootstrap();
+            }
+        }
+    };
+
+    worker.onerror = function (event) {
+        console.warn("Browser image storage worker failed:", event.message || event);
+        finishBootstrap();
+    };
+
+    worker.postMessage({ type: "bootstrap" });
+
+    browserImageStorage = {
+        ready: ready,
+        persistAsset: function (relativePath, width, height, rgbaBytes, quality) {
+            worker.postMessage(
+                {
+                    type: "store",
+                    relativePath: relativePath,
+                    width: width,
+                    height: height,
+                    quality: Math.max(0, Math.min(1, (quality || 0) / 100.0)),
+                    rgba: rgbaBytes.buffer,
+                },
+                [rgbaBytes.buffer]
+            );
+        }
+    };
+    return browserImageStorage;
+}
+
+function bootstrapBrowserImageStorage() {
+    return createBrowserImageStorage().ready;
+}
+
+function persistBrowserImageAsset(relativePath, width, height, rgbaBytes, quality) {
+    createBrowserImageStorage().persistAsset(relativePath, width, height, rgbaBytes, quality);
 }
 var FS = {
     loaded_files: [],
@@ -718,6 +959,15 @@ var importObject = {
         },
         mg_request_image_upload: function () {
             requestBrowserFiles(2, "image/png,image/jpeg,image/webp,image/bmp,image/gif", true);
+        },
+        mg_store_webp_asset: function (relative_path_ptr, relative_path_len, rgba_ptr, rgba_len, width, height, quality) {
+            const relativePath = UTF8ToString(relative_path_ptr, relative_path_len);
+            if (!relativePath || rgba_len === 0) {
+                return;
+            }
+
+            const rgbaBytes = new Uint8Array(wasm_memory.buffer, rgba_ptr, rgba_len).slice();
+            persistBrowserImageAsset(relativePath, width, height, rgbaBytes, quality);
         },
         mg_download_bytes: function (name_ptr, name_len, mime_ptr, mime_len, data_ptr, data_len) {
             const name = UTF8ToString(name_ptr, name_len) || "snapshot.bin";
@@ -1636,7 +1886,7 @@ function load(wasm_path) {
                 return WebAssembly.instantiate(obj, importObject);
             })
             .then(
-                obj => {
+                async obj => {
                     wasm_memory = obj.exports.memory;
                     wasm_exports = obj.exports;
 
@@ -1646,6 +1896,7 @@ function load(wasm_path) {
                             "Version mismatch: gl.js version is: " + version +
                             ", miniquad crate version is: " + crate_version);
                     }
+                            await bootstrapBrowserImageStorage();
                     init_plugins(plugins);
                     obj.exports.main();
                 })
@@ -1660,7 +1911,7 @@ function load(wasm_path) {
                 add_missing_functions_stabs(obj);
                 return WebAssembly.instantiate(obj, importObject);
             })
-            .then(function (obj) {
+            .then(async function (obj) {
                 wasm_memory = obj.exports.memory;
                 wasm_exports = obj.exports;
 
@@ -1670,6 +1921,7 @@ function load(wasm_path) {
                         "Version mismatch: gl.js version is: " + version +
                         ", rust sapp-wasm crate version is: " + crate_version);
                 }
+                    await bootstrapBrowserImageStorage();
                 init_plugins(plugins);
                 obj.exports.main();
             })

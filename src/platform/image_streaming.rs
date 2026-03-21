@@ -18,13 +18,26 @@ use image::GenericImageView;
 use crate::images::{decoded_from_image, DecodedImage, ImageImportError};
 
 #[cfg(target_arch = "wasm32")]
+unsafe extern "C" {
+    fn mg_store_webp_asset(
+        relative_path_ptr: *const u8,
+        relative_path_len: usize,
+        rgba_ptr: *const u8,
+        rgba_len: usize,
+        width: u32,
+        height: u32,
+        quality: f32,
+    );
+}
+
+#[cfg(target_arch = "wasm32")]
 fn web_asset_store() -> &'static Mutex<HashMap<String, Vec<u8>>> {
     static WEB_ASSET_STORE: OnceLock<Mutex<HashMap<String, Vec<u8>>>> = OnceLock::new();
     WEB_ASSET_STORE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 #[cfg(target_arch = "wasm32")]
-fn encode_browser_asset(image: &DynamicImage) -> Result<Vec<u8>, ImageImportError> {
+fn encode_browser_fallback_asset(image: &DynamicImage) -> Result<Vec<u8>, ImageImportError> {
     let mut bytes = Vec::new();
     image
         .write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)
@@ -33,40 +46,39 @@ fn encode_browser_asset(image: &DynamicImage) -> Result<Vec<u8>, ImageImportErro
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn collect_embedded_assets<I>(relative_paths: I) -> Vec<(String, Vec<u8>)>
-where
-    I: IntoIterator<Item = String>,
-{
-    let store = web_asset_store()
-        .lock()
-        .expect("web asset store mutex should not be poisoned");
-
-    relative_paths
-        .into_iter()
-        .filter_map(|relative_path| {
-            store
-                .get(&relative_path)
-                .cloned()
-                .map(|bytes| (relative_path, bytes))
-        })
-        .collect()
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn replace_embedded_assets(assets: Vec<(String, Vec<u8>)>) {
+fn store_web_asset(relative_path: String, bytes: Vec<u8>) {
     let mut store = web_asset_store()
         .lock()
         .expect("web asset store mutex should not be poisoned");
-    store.clear();
-    store.extend(assets);
+    store.insert(relative_path, bytes);
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn clear_embedded_assets() {
-    let mut store = web_asset_store()
-        .lock()
-        .expect("web asset store mutex should not be poisoned");
-    store.clear();
+#[unsafe(no_mangle)]
+pub extern "C" fn mg_embedded_asset_loaded(
+    relative_path_ptr: *mut u8,
+    relative_path_len: usize,
+    data_ptr: *mut u8,
+    data_len: usize,
+) {
+    let relative_path = if relative_path_len == 0 {
+        String::new()
+    } else {
+        let bytes = unsafe {
+            Vec::from_raw_parts(relative_path_ptr, relative_path_len, relative_path_len)
+        };
+        String::from_utf8(bytes)
+            .unwrap_or_else(|err| String::from_utf8_lossy(&err.into_bytes()).into_owned())
+    };
+
+    let bytes = if data_len == 0 {
+        Vec::new()
+    } else {
+        unsafe { Vec::from_raw_parts(data_ptr, data_len, data_len) }
+    };
+
+    store_web_asset(relative_path, bytes);
+    miniquad::window::schedule_update();
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -138,21 +150,32 @@ impl WebImageStreamingAdapter {
         &self,
         relative_path: &str,
         image: &DynamicImage,
-        _quality: f32,
+        quality: f32,
     ) -> Result<(), ImageImportError> {
-        let encoded = encode_browser_asset(image)?;
-        let mut store = web_asset_store()
-            .lock()
-            .expect("web asset store mutex should not be poisoned");
-        store.insert(relative_path.to_string(), encoded);
+        let encoded = encode_browser_fallback_asset(image)?;
+        store_web_asset(relative_path.to_string(), encoded);
+
+        let rgba = image.to_rgba8();
+        let rgba_bytes = rgba.as_raw();
+        unsafe {
+            mg_store_webp_asset(
+                relative_path.as_ptr(),
+                relative_path.len(),
+                rgba_bytes.as_ptr(),
+                rgba_bytes.len(),
+                image.width(),
+                image.height(),
+                quality,
+            );
+        }
         Ok(())
     }
 
-    pub(crate) fn load_decoded(&self, _relative_path: &str) -> Option<DecodedImage> {
+    pub(crate) fn load_decoded(&self, relative_path: &str) -> Option<DecodedImage> {
         let store = web_asset_store()
             .lock()
             .expect("web asset store mutex should not be poisoned");
-        let bytes = store.get(_relative_path)?.clone();
+        let bytes = store.get(relative_path)?.clone();
         let decoded = image::load_from_memory(&bytes).ok()?;
         Some(decoded_from_image(&decoded))
     }

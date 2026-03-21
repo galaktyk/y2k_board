@@ -32,43 +32,21 @@ pub(crate) trait SnapshotPersistenceAdapter {
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct EmbeddedSnapshotAsset {
+struct LegacyEmbeddedSnapshotAsset {
     relative_path: String,
     bytes: Vec<u8>,
 }
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct SnapshotBundle {
+struct LegacySnapshotBundle {
     format_version: u32,
     data: SnapshotData,
-    assets: Vec<EmbeddedSnapshotAsset>,
+    assets: Vec<LegacyEmbeddedSnapshotAsset>,
 }
 
 #[cfg(target_arch = "wasm32")]
-const SNAPSHOT_BUNDLE_VERSION: u32 = 1;
-
-#[cfg(target_arch = "wasm32")]
-fn snapshot_asset_paths(snapshot: &SnapshotData) -> Vec<String> {
-    let mut seen = std::collections::HashSet::new();
-    let mut relative_paths = Vec::new();
-
-    for element in &snapshot.elements {
-        let Some(image) = element.image.as_ref() else {
-            continue;
-        };
-
-        for relative_path in std::iter::once(image.asset_path.as_str())
-            .chain(image.hires_asset_path.iter().map(String::as_str))
-        {
-            if seen.insert(relative_path.to_string()) {
-                relative_paths.push(relative_path.to_string());
-            }
-        }
-    }
-
-    relative_paths
-}
+const LEGACY_SNAPSHOT_BUNDLE_VERSION: u32 = 1;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn default_snapshot_name(snapshot_path: &Path) -> &str {
@@ -196,28 +174,12 @@ impl SnapshotPersistenceAdapter for WebSnapshotAdapter {
     }
 
     fn save_to_bytes(&self, snapshot: &SnapshotData) -> Result<Vec<u8>, SnapshotError> {
-        let assets = crate::platform::image_streaming::collect_embedded_assets(snapshot_asset_paths(snapshot))
-            .into_iter()
-            .map(|(relative_path, bytes)| EmbeddedSnapshotAsset { relative_path, bytes })
-            .collect();
-        let bundle = SnapshotBundle {
-            format_version: SNAPSHOT_BUNDLE_VERSION,
-            data: snapshot.clone(),
-            assets,
-        };
-        Ok(bincode::serialize(&bundle)?)
+        Ok(bincode::serialize(snapshot)?)
     }
 
     fn load_from_bytes(&self, bytes: &[u8], path: &Path) -> Result<LoadedSnapshot, SnapshotError> {
-        if let Ok(bundle) = bincode::deserialize::<SnapshotBundle>(bytes) {
-            if bundle.format_version == SNAPSHOT_BUNDLE_VERSION {
-                crate::platform::image_streaming::replace_embedded_assets(
-                    bundle
-                        .assets
-                        .into_iter()
-                        .map(|asset| (asset.relative_path, asset.bytes))
-                        .collect(),
-                );
+        if let Ok(bundle) = bincode::deserialize::<LegacySnapshotBundle>(bytes) {
+            if bundle.format_version == LEGACY_SNAPSHOT_BUNDLE_VERSION {
                 return Ok(LoadedSnapshot {
                     data: bundle.data,
                     path: path.to_path_buf(),
@@ -225,7 +187,6 @@ impl SnapshotPersistenceAdapter for WebSnapshotAdapter {
             }
         }
 
-        crate::platform::image_streaming::clear_embedded_assets();
         Ok(LoadedSnapshot {
             data: bincode::deserialize(bytes)?,
             path: path.to_path_buf(),

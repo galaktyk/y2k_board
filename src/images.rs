@@ -47,7 +47,7 @@ impl fmt::Display for ImageImportError {
         match self {
             #[cfg(target_arch = "wasm32")]
             ImageImportError::UnsupportedPlatform => {
-                write!(f, "web image streaming is TODO; image import is only implemented for native desktop builds")
+                write!(f, "importing directly from a filesystem path is not available in the browser build")
             }
             ImageImportError::InvalidData(message) => write!(f, "{message}"),
             ImageImportError::Io(err) => write!(f, "{err}"),
