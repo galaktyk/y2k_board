@@ -202,6 +202,12 @@ impl InputState {
         self.pan_velocity.length_squared() > 0.0
     }
 
+
+    /** IMPORTANT: Enqueue a text element for resize recomputation.
+     * This should fix the lag when resizing multiple text elements
+     * might took some time to complete all in the queue, but worth it.
+     * No one gonna notice this unless they are resizing like 100+ text elements at once.😈
+    */
     pub fn enqueue_resize_text_recompute(&mut self, id: u64) -> bool {
         self.pending_resize_text_recompute_seq =
             self.pending_resize_text_recompute_seq.wrapping_add(1);

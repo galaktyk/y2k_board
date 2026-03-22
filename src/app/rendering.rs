@@ -24,6 +24,9 @@ const PAN_GLIDE_STOP_SPEED_SCREEN: f32 = 8.0;
 
 // Maximum delta time to apply pan glide, to prevent large jumps after long frames or when resuming from a paused state.
 const PAN_GLIDE_MAX_DT_SECS: f32 = 1.0 / 50.0;
+
+// When resizing multiple text elements, 
+// we only process a limited number per frame to avoid UI jank.
 const RESIZE_TEXT_RECOMPUTE_BATCH: usize = 8;
 
 impl App {
