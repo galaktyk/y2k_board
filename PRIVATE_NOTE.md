@@ -1,11 +1,19 @@
 
 
 ---
+wasm nit
 cursor image is not change  when web inactive e.g. resize box cursor not change
+cant type ime
+emoji helper show wrong position
+
 
 ---
 copy/paste is working wrong working on wasm
 
+---
+colab spreadsheet snapshot,
+spreadsheet signaling
+ webrtc
 
 ---
 wasm

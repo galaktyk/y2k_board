@@ -9,7 +9,7 @@ use crate::rendering::transform::{
     rotate_point,
 };
 use crate::stats;
-use crate::text::{PreparedTextDraw, TextEditSession, TextEditSnapshot};
+use crate::text::{PreparedTextDraw, TextEditSession};
 use crate::ui::overlay;
 
 use super::App;
@@ -255,18 +255,20 @@ impl App {
     }
 
     fn refresh_text_cache_if_needed(&mut self) {
-        let current_edit_snapshot = self.text_edit.as_ref().map(TextEditSession::snapshot);
         let text_cache_valid = !self.text_dirty
             && self.cached_text_draw.is_some()
-            && self.cached_text_edit_snapshot == current_edit_snapshot;
+            && match (&self.cached_text_edit_snapshot, self.text_edit.as_ref()) {
+                (None, None) => true,
+                (Some(snapshot), Some(edit)) => snapshot.matches_session(edit),
+                _ => false,
+            };
 
         if text_cache_valid {
             return;
         }
 
-        let active_text_edit = current_edit_snapshot
-            .as_ref()
-            .map(TextEditSnapshot::as_active_edit);
+        let active_text_edit = self.text_edit.as_ref().map(TextEditSession::as_active_edit);
+        let current_edit_snapshot = self.text_edit.as_ref().map(TextEditSession::snapshot);
 
         let prepared = self.text_system.build_text_instances(
             &mut *self.ctx,

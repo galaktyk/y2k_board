@@ -1,11 +1,12 @@
 use crate::board::TextData;
 
-use super::ActiveTextEdit;
+use super::{ActiveTextEdit, LineOffsets};
 
 pub struct TextEditSession {
     element_id: u64,
     original_text: Option<TextData>,
     buffer: String,
+    line_offsets: LineOffsets,
     cursor_byte: usize,
     selection_anchor_byte: Option<usize>,
     preferred_x: Option<i32>,
@@ -21,11 +22,13 @@ impl TextEditSession {
             .as_ref()
             .map(|text| text.content.clone())
             .unwrap_or_default();
+        let line_offsets = LineOffsets::build(&buffer);
 
         Self {
             element_id,
             original_text,
             buffer,
+            line_offsets,
             cursor_byte,
             selection_anchor_byte: None,
             preferred_x: None,
@@ -44,6 +47,10 @@ impl TextEditSession {
         &self.buffer
     }
 
+    pub fn line_offsets(&self) -> &LineOffsets {
+        &self.line_offsets
+    }
+
     pub fn cursor_byte(&self) -> usize {
         self.cursor_byte
     }
@@ -60,10 +67,21 @@ impl TextEditSession {
         self.preferred_x = None;
     }
 
+    pub fn as_active_edit(&self) -> ActiveTextEdit<'_> {
+        ActiveTextEdit {
+            element_id: self.element_id,
+            content: &self.buffer,
+            line_offsets: &self.line_offsets,
+            cursor_byte: self.cursor_byte,
+            selection_anchor_byte: self.selection_anchor_byte,
+        }
+    }
+
     pub fn snapshot(&self) -> TextEditSnapshot {
         TextEditSnapshot {
             element_id: self.element_id,
             content: self.buffer.clone(),
+            line_offsets: self.line_offsets.clone(),
             cursor_byte: self.cursor_byte,
             selection_anchor_byte: self.selection_anchor_byte,
         }
@@ -111,6 +129,7 @@ impl TextEditSession {
             return false;
         }
         self.buffer.clear();
+        self.rebuild_line_offsets();
         self.cursor_byte = 0;
         self.clear_selection();
         self.preferred_x = None;
@@ -122,6 +141,7 @@ impl TextEditSession {
             return false;
         };
         self.buffer.replace_range(start..end, "");
+        self.rebuild_line_offsets();
         self.cursor_byte = start;
         self.clear_selection();
         self.preferred_x = None;
@@ -131,6 +151,7 @@ impl TextEditSession {
     pub fn insert_text(&mut self, inserted: &str) -> bool {
         let cursor = self.cursor_byte.min(self.buffer.len());
         self.buffer.insert_str(cursor, inserted);
+        self.rebuild_line_offsets();
         self.cursor_byte = cursor + inserted.len();
         self.clear_selection();
         self.preferred_x = None;
@@ -143,6 +164,7 @@ impl TextEditSession {
         }
         let previous = previous_char_boundary(&self.buffer, self.cursor_byte);
         self.buffer.replace_range(previous..self.cursor_byte, "");
+        self.rebuild_line_offsets();
         self.cursor_byte = previous;
         self.preferred_x = None;
         true
@@ -154,8 +176,13 @@ impl TextEditSession {
         }
         let next = next_char_boundary(&self.buffer, self.cursor_byte);
         self.buffer.replace_range(self.cursor_byte..next, "");
+        self.rebuild_line_offsets();
         self.preferred_x = None;
         true
+    }
+
+    fn rebuild_line_offsets(&mut self) {
+        self.line_offsets = LineOffsets::build(&self.buffer);
     }
 }
 
@@ -163,18 +190,17 @@ impl TextEditSession {
 pub struct TextEditSnapshot {
     pub element_id: u64,
     pub content: String,
+    pub line_offsets: LineOffsets,
     pub cursor_byte: usize,
     pub selection_anchor_byte: Option<usize>,
 }
 
 impl TextEditSnapshot {
-    pub fn as_active_edit(&self) -> ActiveTextEdit<'_> {
-        ActiveTextEdit {
-            element_id: self.element_id,
-            content: &self.content,
-            cursor_byte: self.cursor_byte,
-            selection_anchor_byte: self.selection_anchor_byte,
-        }
+    pub fn matches_session(&self, session: &TextEditSession) -> bool {
+        self.element_id == session.element_id
+            && self.cursor_byte == session.cursor_byte
+            && self.selection_anchor_byte == session.selection_anchor_byte
+            && self.content == session.buffer
     }
 }
 

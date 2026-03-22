@@ -68,7 +68,13 @@ impl App {
             .map(TextEditSession::content)
             .or_else(|| element.text.as_ref().map(|text| text.content.as_str()))
             .unwrap_or_default();
-        self.text_system.hit_test_cursor(element, is_active_edit, content, world)
+        let line_offsets = self
+            .text_edit
+            .as_ref()
+            .filter(|edit| edit.element_id() == id)
+            .map(TextEditSession::line_offsets);
+        self.text_system
+            .hit_test_cursor(element, is_active_edit, content, line_offsets, world)
     }
 
     pub(super) fn set_text_cursor(&mut self, cursor_byte: usize, extend_selection: bool) {
@@ -88,6 +94,7 @@ impl App {
         if let Some((cursor_byte, preferred_x)) = self.text_system.move_cursor(
             element,
             edit.content(),
+            Some(edit.line_offsets()),
             edit.cursor_byte(),
             edit.preferred_x(),
             motion,

@@ -92,6 +92,7 @@ impl UiTextSpec {
 pub struct ActiveTextEdit<'a> {
     pub element_id: u64,
     pub content: &'a str,
+    pub line_offsets: &'a LineOffsets,
     pub cursor_byte: usize,
     pub selection_anchor_byte: Option<usize>,
 }
@@ -115,6 +116,15 @@ pub struct PreparedTextDraw {
     pub color_instances: Vec<TextInstanceData>,
     pub caret_pos: Option<Vec2>,
     pub element_ranges: Vec<TextElementRange>,
+    element_range_index: HashMap<u64, usize>,
+}
+
+impl PreparedTextDraw {
+    fn push_element_range(&mut self, range: TextElementRange) {
+        let index = self.element_ranges.len();
+        self.element_range_index.insert(range.element_id, index);
+        self.element_ranges.push(range);
+    }
 }
 
 /// Cached layout for a single element, keyed by element id.
@@ -407,14 +417,12 @@ impl TextSystem {
             // Attempt to reuse from previous draw
             if !is_active_edit {
                 if let Some(prev) = previous_draw {
-                    if let Some(prev_range) = prev.element_ranges.iter().find(|r| r.element_id == element.id) {
+                    if let Some(&prev_range_index) = prev.element_range_index.get(&element.id) {
+                        let prev_range = &prev.element_ranges[prev_range_index];
                         if prev_range.generation == element.text_layout_generation && !prev_range.was_active_edit {
                             let pos_diff = element.pos - Vec2::from(prev_range.element_pos);
                             let rot_diff = element.rotation - prev_range.element_rotation;
-                            
-                            let mut mono = prev.mono_instances[prev_range.mono_start..prev_range.mono_end].to_vec();
-                            let mut color = prev.color_instances[prev_range.color_start..prev_range.color_end].to_vec();
-                            
+
                             let new_selected = if element.selected { 1 } else { 0 };
                             let text_color = element.text.as_ref().map(|t| t.color).unwrap_or(palette::BLACK);
                             let new_color_u8 = [
@@ -427,7 +435,17 @@ impl TextSystem {
                             let origin_f32 = (element.pos + element.size * 0.5).to_array();
                             let origin_i16 = [origin_f32[0] as i16, origin_f32[1] as i16];
 
-                            for inst in &mut mono {
+                            prepared.mono_instances.extend_from_slice(
+                                &prev.mono_instances[prev_range.mono_start..prev_range.mono_end],
+                            );
+                            prepared.color_instances.extend_from_slice(
+                                &prev.color_instances[prev_range.color_start..prev_range.color_end],
+                            );
+
+                            let mono_end = prepared.mono_instances.len();
+                            let color_end = prepared.color_instances.len();
+
+                            for inst in &mut prepared.mono_instances[mono_start..mono_end] {
                                 if pos_diff != Vec2::ZERO || rot_diff != 0.0 {
                                     inst.pos[0] += pos_diff.x;
                                     inst.pos[1] += pos_diff.y;
@@ -437,8 +455,8 @@ impl TextSystem {
                                 inst.selected = new_selected;
                                 inst.color = new_color_u8;
                             }
-                            
-                            for inst in &mut color {
+
+                            for inst in &mut prepared.color_instances[color_start..color_end] {
                                 if pos_diff != Vec2::ZERO || rot_diff != 0.0 {
                                     inst.pos[0] += pos_diff.x;
                                     inst.pos[1] += pos_diff.y;
@@ -449,19 +467,16 @@ impl TextSystem {
                                 inst.color[3] = new_color_u8[3];
                             }
 
-                            prepared.mono_instances.extend(mono);
-                            prepared.color_instances.extend(color);
-                            
-                            prepared.element_ranges.push(TextElementRange {
+                            prepared.push_element_range(TextElementRange {
                                 element_id: element.id,
                                 generation: element.text_layout_generation,
                                 was_active_edit: false,
                                 element_pos: element.pos.to_array(),
                                 element_rotation: element.rotation,
                                 mono_start,
-                                mono_end: prepared.mono_instances.len(),
+                                mono_end,
                                 color_start,
-                                color_end: prepared.color_instances.len(),
+                                color_end,
                             });
                             continue;
                         }
@@ -589,7 +604,7 @@ impl TextSystem {
                 }
             }
 
-            prepared.element_ranges.push(TextElementRange {
+            prepared.push_element_range(TextElementRange {
                 element_id: element.id,
                 generation: element.text_layout_generation,
                 was_active_edit: is_active_edit,
@@ -607,6 +622,7 @@ impl TextSystem {
                 let (overlay, caret_pos) = self.build_edit_overlay_instances(
                     element,
                     edit.content,
+                    edit.line_offsets,
                     edit.cursor_byte,
                     edit.selection_anchor_byte,
                 );
@@ -623,6 +639,7 @@ impl TextSystem {
         element: &Element,
         is_active_edit: bool,
         content: &str,
+        line_offsets: Option<&LineOffsets>,
         world_pos: Vec2,
     ) -> Option<usize> {
         let generation = if is_active_edit {
@@ -636,13 +653,17 @@ impl TextSystem {
         let (_, cached) = self.layout_cache.as_ref()?;
         let local = inverse_rotate_point(element, world_pos) - cached.world_min;
         let cursor = cached.buffer.hit(local.x, local.y)?;
-        Some(cursor_to_global_byte(content, cursor))
+        Some(match line_offsets {
+            Some(offsets) => offsets.cursor_to_byte(content, cursor),
+            None => cursor_to_global_byte(content, cursor),
+        })
     }
 
     pub fn move_cursor(
         &mut self,
         element: &Element,
         content: &str,
+        line_offsets: Option<&LineOffsets>,
         cursor_byte: usize,
         preferred_x: Option<i32>,
         motion: Motion,
@@ -652,18 +673,26 @@ impl TextSystem {
             return None;
         }
         let (_, cached) = self.layout_cache.as_mut()?;
-        let cursor = global_byte_to_cursor(content, cursor_byte);
+        let cursor = match line_offsets {
+            Some(offsets) => offsets.byte_to_cursor(content, cursor_byte),
+            None => global_byte_to_cursor(content, cursor_byte),
+        };
         let (next, next_preferred_x) =
             cached
                 .buffer
                 .cursor_motion(&mut self.font_system, cursor, preferred_x, motion)?;
-        Some((cursor_to_global_byte(content, next), next_preferred_x))
+        let next_byte = match line_offsets {
+            Some(offsets) => offsets.cursor_to_byte(content, next),
+            None => cursor_to_global_byte(content, next),
+        };
+        Some((next_byte, next_preferred_x))
     }
 
     pub fn build_edit_overlay_instances(
         &mut self,
         element: &Element,
         content: &str,
+        line_offsets: &LineOffsets,
         cursor_byte: usize,
         selection_anchor_byte: Option<usize>,
     ) -> (Vec<TextInstanceData>, Option<Vec2>) {
@@ -681,8 +710,8 @@ impl TextSystem {
         let (_, cached) = self.layout_cache.as_ref().unwrap();
 
         if let Some((start_byte, end_byte)) = selection_range(cursor_byte, selection_anchor_byte) {
-            let start = global_byte_to_cursor(content, start_byte);
-            let end = global_byte_to_cursor(content, end_byte);
+            let start = line_offsets.byte_to_cursor(content, start_byte);
+            let end = line_offsets.byte_to_cursor(content, end_byte);
             for run in cached.buffer.layout_runs() {
                 if let Some((x, width)) = run.highlight(start, end) {
                     if width <= 0.0 {
@@ -701,7 +730,7 @@ impl TextSystem {
             }
         }
 
-        let cursor = global_byte_to_cursor(content, cursor_byte);
+        let cursor = line_offsets.byte_to_cursor(content, cursor_byte);
         if let Some((x, line_top, line_height)) = caret_geometry(&cached.buffer, cursor) {
             let world_pos = cached.world_min + Vec2::new((x - 1.0).max(0.0), line_top);
             instances.push(TextInstanceData::new(
@@ -736,7 +765,7 @@ impl TextSystem {
         }
 
         // Cache miss — do full shaping
-        println!("[text] Case 2 Compute layout for element id={}", element.id);
+        // println!("[text] Case 2 Compute layout for element id={}", element.id);
         let Some((world_min, world_max)) = element.text_bounds() else {
             return false;
         };
@@ -1181,7 +1210,8 @@ fn rgba_to_cosmic_color(color: [f32; 4]) -> Color {
 
 /// Cached line byte-offset table for a string, used to convert between a
 /// flat byte index and a (line, column) `Cursor` without repeated scanning.
-struct LineOffsets {
+#[derive(Clone, Default, PartialEq, Eq)]
+pub(super) struct LineOffsets {
     /// Byte offset of the first character on each line.
     starts: Vec<usize>,
     /// Byte offset one past the last character on each line (excluding `\n`).
