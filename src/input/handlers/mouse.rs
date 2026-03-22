@@ -1148,33 +1148,31 @@ pub fn on_mouse_move(
             return;
         }
 
-        for element in &mut board.elements {
-            if element.selected {
-                if let Some(&(_, orig_pos, orig_size, orig_rot)) = state
-                    .move_origin
-                    .iter()
-                    .find(|&&(id, _, _, _)| id == element.id)
-                {
-                    match state.drag_mode {
-                        DragMode::Rotating => {
-                            if !is_group_transform {
-                                let center = orig_pos + orig_size * 0.5;
-                                let angle_diff = rotation_angle_delta(state.move_start_world, world, center);
-                                element.rotation = orig_rot + angle_diff;
-                            }
-                        }
-                        DragMode::ResizingHandle(dir) => {
-                            if is_group_transform {
-                                let Some(bounds) = state.transform_bounds_origin else {
-                                    continue;
-                                };
-                                let Some((anchor, scale_x, scale_y)) =
-                                    group_resize_from_handle(bounds, dir, world)
-                                else {
-                                    continue;
-                                };
+        let origins = state.move_origin.clone();
+        for (id, orig_pos, orig_size, orig_rot) in origins {
+            let Some(element) = board.element_mut(id) else { continue; };
+            if !element.selected { continue; }
 
-                                if element.shape == ShapeType::Line {
+            match state.drag_mode {
+                DragMode::Rotating => {
+                    if !is_group_transform {
+                        let center = orig_pos + orig_size * 0.5;
+                        let angle_diff = rotation_angle_delta(state.move_start_world, world, center);
+                        element.rotation = orig_rot + angle_diff;
+                    }
+                }
+                DragMode::ResizingHandle(dir) => {
+                    if is_group_transform {
+                        let Some(bounds) = state.transform_bounds_origin else {
+                            continue;
+                        };
+                        let Some((anchor, scale_x, scale_y)) =
+                            group_resize_from_handle(bounds, dir, world)
+                        else {
+                            continue;
+                        };
+
+                        if element.shape == ShapeType::Line {
                                     let start = scale_point_from_anchor_in_frame(
                                         orig_pos,
                                         anchor,
@@ -1284,8 +1282,6 @@ pub fn on_mouse_move(
                         | DragMode::CreatingConnection
                         | DragMode::None => {}
                     }
-                }
-            }
         }
         if is_group_transform {
             if let DragMode::ResizingHandle(dir) = state.drag_mode {
