@@ -1,3 +1,5 @@
+use std::collections::{HashMap, VecDeque};
+
 use glam::Vec2;
 
 use crate::board::Element;
@@ -119,6 +121,9 @@ pub struct InputState {
     pub text_selecting: bool,
     pub last_click_id: Option<u64>,
     pub last_click_at: Option<f64>,
+    pending_resize_text_recompute: VecDeque<(u64, u64)>,
+    pending_resize_text_recompute_latest: HashMap<u64, u64>,
+    pending_resize_text_recompute_seq: u64,
     pub last_resize_text_bump: f64,
 }
 
@@ -182,6 +187,9 @@ impl InputState {
             text_selecting: false,
             last_click_id: None,
             last_click_at: None,
+            pending_resize_text_recompute: VecDeque::new(),
+            pending_resize_text_recompute_latest: HashMap::new(),
+            pending_resize_text_recompute_seq: 0,
             last_resize_text_bump: 0.0,
         }
     }
@@ -192,5 +200,34 @@ impl InputState {
 
     pub fn has_pan_glide(&self) -> bool {
         self.pan_velocity.length_squared() > 0.0
+    }
+
+    pub fn enqueue_resize_text_recompute(&mut self, id: u64) -> bool {
+        self.pending_resize_text_recompute_seq =
+            self.pending_resize_text_recompute_seq.wrapping_add(1);
+        let seq = self.pending_resize_text_recompute_seq;
+        let is_new = self
+            .pending_resize_text_recompute_latest
+            .insert(id, seq)
+            .is_none();
+        self.pending_resize_text_recompute.push_back((id, seq));
+        is_new
+    }
+
+    pub fn pop_resize_text_recompute(&mut self) -> Option<u64> {
+        while let Some((id, seq)) = self.pending_resize_text_recompute.pop_front() {
+            match self.pending_resize_text_recompute_latest.get(&id).copied() {
+                Some(latest_seq) if latest_seq == seq => {
+                    self.pending_resize_text_recompute_latest.remove(&id);
+                    return Some(id);
+                }
+                _ => continue,
+            }
+        }
+        None
+    }
+
+    pub fn has_pending_resize_text_recompute(&self) -> bool {
+        !self.pending_resize_text_recompute_latest.is_empty()
     }
 }

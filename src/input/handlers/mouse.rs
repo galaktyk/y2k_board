@@ -17,7 +17,7 @@ use crate::ui::tool::Tool;
 
 const MARQUEE_MIN_SIZE: f32 = 4.0;
 const DRAG_START_DISTANCE: f32 = 3.0;
-const COMPUTE_TEXT_LAYOUT_DEBOUNCE: f64 = 0.05;
+pub const COMPUTE_TEXT_LAYOUT_DEBOUNCE: f64 = 0.10;
 
 // The pan velocity smoothing factor, between 0 and 1. 
 // Higher values make the velocity change more smoothly but also more slowly.
@@ -1275,11 +1275,8 @@ pub fn on_mouse_move(
                                 element.size = new_size;
                                 element.pos = w_center - new_size * 0.5;
                             }
-                            
-                            let now = miniquad::date::now();
-                            if now - state.last_resize_text_bump > COMPUTE_TEXT_LAYOUT_DEBOUNCE {
-                                element.bump_text_generation();
-                                state.last_resize_text_bump = now;
+                            if element.text.is_some() {
+                                state.enqueue_resize_text_recompute(element.id);
                             }
                         }
                         DragMode::MoveSelected

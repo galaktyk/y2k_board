@@ -2,7 +2,7 @@ use glam::Vec2;
 use miniquad::PassAction;
 
 use crate::board::ElementTransform;
-use crate::input::DragMode;
+use crate::input::{DragMode, COMPUTE_TEXT_LAYOUT_DEBOUNCE};
 use crate::rendering::renderer::Renderer;
 use crate::rendering::transform::{
     offset_instance, rotate_instance,
@@ -24,6 +24,7 @@ const PAN_GLIDE_STOP_SPEED_SCREEN: f32 = 8.0;
 
 // Maximum delta time to apply pan glide, to prevent large jumps after long frames or when resuming from a paused state.
 const PAN_GLIDE_MAX_DT_SECS: f32 = 1.0 / 50.0;
+const RESIZE_TEXT_RECOMPUTE_BATCH: usize = 8;
 
 impl App {
     pub(super) fn draw_frame(&mut self) {
@@ -255,6 +256,8 @@ impl App {
     }
 
     fn refresh_text_cache_if_needed(&mut self) {
+        self.promote_resize_text_recompute_if_due();
+
         let text_cache_valid = !self.text_dirty
             && self.cached_text_draw.is_some()
             && match (&self.cached_text_edit_snapshot, self.text_edit.as_ref()) {
@@ -287,6 +290,38 @@ impl App {
         self.cached_text_draw = Some(prepared);
         self.cached_text_edit_snapshot = current_edit_snapshot;
         self.text_dirty = false;
+    }
+
+    fn promote_resize_text_recompute_if_due(&mut self) {
+        if !self.input.has_pending_resize_text_recompute() {
+            return;
+        }
+
+        let now = miniquad::date::now();
+        if now - self.input.last_resize_text_bump < COMPUTE_TEXT_LAYOUT_DEBOUNCE {
+            return;
+        }
+
+        let mut promoted = 0usize;
+        while promoted < RESIZE_TEXT_RECOMPUTE_BATCH {
+            let Some(id) = self.input.pop_resize_text_recompute() else {
+                break;
+            };
+            let Some(element) = self.board.element_mut(id) else {
+                continue;
+            };
+            if element.text.is_none() {
+                continue;
+            }
+
+            element.bump_text_generation();
+            promoted += 1;
+        }
+
+        if promoted > 0 {
+            self.input.last_resize_text_bump = now;
+            self.text_dirty = true;
+        }
     }
 
     fn transformed_caret_position(

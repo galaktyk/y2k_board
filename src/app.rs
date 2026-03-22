@@ -384,6 +384,7 @@ impl App {
             || self.input.has_pan_glide()
             || self.input.drag_mode != DragMode::None
             || self.input.dragging_tool
+            || self.input.has_pending_resize_text_recompute()
     }
 
     fn rebuild_board_cache(&mut self) {

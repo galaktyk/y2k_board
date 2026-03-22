@@ -5,7 +5,7 @@ use crate::input::SelectionBounds;
 use crate::palette;
 use crate::rendering::renderer::InstanceData;
 
-const MARQUEE_COLOR: [f32; 4] = palette::BLUE;
+const MARQUEE_COLOR: [f32; 4] = palette::DARK_BLUE;
 const CREATION_OUTLINE_COLOR: [f32; 4] = palette::BLUE;
 const MULTI_SELECTION_BOUNDS_COLOR: [f32; 4] = palette::BLUE;
 
