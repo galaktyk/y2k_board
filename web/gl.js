@@ -17,6 +17,12 @@ var clipboard = null;
 var browserFileInput = null;
 var browserImageStorage = null;
 var browserImageStorageWarned = false;
+var browserTextInput = null;
+var browserTextInputActive = false;
+var browserTextInputComposing = false;
+var browserTextInputSuppressNextInput = false;
+var browserTextInputCandidateX = 0;
+var browserTextInputCandidateY = 0;
 
 var plugins = [];
 var wasm_memory;
@@ -232,6 +238,356 @@ function getBrowserFileInput() {
     browserFileInput.style.display = "none";
     document.body.appendChild(browserFileInput);
     return browserFileInput;
+}
+
+function browserTextInputReady() {
+    return wasm_exports
+        && typeof wasm_exports.allocate_vec_u8 === "function"
+        && typeof wasm_exports.mg_browser_text_input_insert === "function"
+        && typeof wasm_exports.mg_browser_text_input_delete_backward === "function"
+        && typeof wasm_exports.mg_browser_text_input_delete_forward === "function";
+}
+
+function pushBrowserTextInputInsert(text) {
+    if (!browserTextInputReady() || !text) {
+        return;
+    }
+
+    const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    if (!normalized) {
+        return;
+    }
+
+    const bytes = new TextEncoder().encode(normalized);
+    const ptr = wasm_exports.allocate_vec_u8(bytes.length);
+    const heap = new Uint8Array(wasm_memory.buffer, ptr, bytes.length);
+    heap.set(bytes, 0);
+    wasm_exports.mg_browser_text_input_insert(ptr, bytes.length);
+}
+
+function pushBrowserTextInputDeleteBackward() {
+    if (browserTextInputReady()) {
+        wasm_exports.mg_browser_text_input_delete_backward();
+    }
+}
+
+function pushBrowserTextInputDeleteForward() {
+    if (browserTextInputReady()) {
+        wasm_exports.mg_browser_text_input_delete_forward();
+    }
+}
+
+function updateBrowserTextInputPosition() {
+    if (browserTextInput === null) {
+        return;
+    }
+
+    const targetRect = canvas.getBoundingClientRect();
+    const scale = dpi_scale();
+    browserTextInput.style.left = (targetRect.left + browserTextInputCandidateX / scale) + "px";
+    browserTextInput.style.top = (targetRect.top + browserTextInputCandidateY / scale) + "px";
+}
+
+function refreshBrowserTextInputPresentation() {
+    if (browserTextInput === null) {
+        return;
+    }
+
+    const showCompositionPreview = browserTextInputActive && browserTextInputComposing;
+    const previewText = showCompositionPreview ? (browserTextInput.value || "") : "";
+
+    browserTextInput.style.opacity = showCompositionPreview ? "1" : "0";
+    browserTextInput.style.color = showCompositionPreview ? "#111111" : "transparent";
+    browserTextInput.style.caretColor = showCompositionPreview ? "#111111" : "transparent";
+    browserTextInput.style.background = showCompositionPreview ? "transparent" : "transparent";
+    browserTextInput.style.boxShadow = showCompositionPreview ? "none" : "none";
+    browserTextInput.style.borderRadius = showCompositionPreview ? "0" : "0";
+    browserTextInput.style.padding = showCompositionPreview ? "0" : "0";
+    browserTextInput.style.minWidth = showCompositionPreview ? "3em" : "1px";
+
+    if (showCompositionPreview) {
+        browserTextInput.style.width = "1px";
+        const measuredWidth = Math.max(18, browserTextInput.scrollWidth + 2);
+        browserTextInput.style.width = measuredWidth + "px";
+        browserTextInput.style.height = Math.max(18, browserTextInput.scrollHeight) + "px";
+    } else {
+        browserTextInput.style.width = "1px";
+        browserTextInput.style.height = "1.2em";
+    }
+}
+
+function clearBrowserTextInputValue() {
+    if (browserTextInput === null) {
+        return;
+    }
+
+    browserTextInput.value = "";
+    refreshBrowserTextInputPresentation();
+    try {
+        browserTextInput.setSelectionRange(0, 0);
+    } catch (_error) {
+    }
+}
+
+function focusBrowserTextInput() {
+    if (!browserTextInputActive) {
+        return;
+    }
+
+    const input = getBrowserTextInput();
+    updateBrowserTextInputPosition();
+    refreshBrowserTextInputPresentation();
+    try {
+        input.focus({ preventScroll: true });
+        input.setSelectionRange(input.value.length, input.value.length);
+    } catch (_error) {
+        input.focus();
+    }
+}
+
+function shouldForwardBrowserTextKeyDown(sapp_key_code, event) {
+    const ctrlLike = event.ctrlKey || event.metaKey;
+
+    switch (sapp_key_code) {
+        case 256:
+        case 258:
+        case 262:
+        case 263:
+        case 264:
+        case 265:
+        case 268:
+        case 269:
+        case 340:
+        case 341:
+        case 342:
+        case 344:
+        case 345:
+        case 346:
+            return true;
+        case 65:
+        case 67:
+        case 86:
+        case 88:
+            return ctrlLike;
+        default:
+            return false;
+    }
+}
+
+function shouldForwardBrowserTextKeyUp(sapp_key_code) {
+    switch (sapp_key_code) {
+        case 340:
+        case 341:
+        case 342:
+        case 344:
+        case 345:
+        case 346:
+            return true;
+        default:
+            return false;
+    }
+}
+
+function forwardBrowserTextKeyDown(event) {
+    if (!browserTextInputActive) {
+        return;
+    }
+
+    const sapp_key_code = into_sapp_keycode(event.code);
+    if (typeof sapp_key_code !== "number" || !shouldForwardBrowserTextKeyDown(sapp_key_code, event)) {
+        return;
+    }
+
+    let modifiers = 0;
+    if (event.ctrlKey) {
+        modifiers |= SAPP_MODIFIER_CTRL;
+    }
+    if (event.shiftKey) {
+        modifiers |= SAPP_MODIFIER_SHIFT;
+    }
+    if (event.altKey) {
+        modifiers |= SAPP_MODIFIER_ALT;
+    }
+
+    event.preventDefault();
+    wasm_exports.key_down(sapp_key_code, modifiers, event.repeat);
+}
+
+function forwardBrowserTextKeyUp(event) {
+    if (!browserTextInputActive) {
+        return;
+    }
+
+    const sapp_key_code = into_sapp_keycode(event.code);
+    if (typeof sapp_key_code !== "number" || !shouldForwardBrowserTextKeyUp(sapp_key_code)) {
+        return;
+    }
+
+    let modifiers = 0;
+    if (event.ctrlKey) {
+        modifiers |= SAPP_MODIFIER_CTRL;
+    }
+    if (event.shiftKey) {
+        modifiers |= SAPP_MODIFIER_SHIFT;
+    }
+    if (event.altKey) {
+        modifiers |= SAPP_MODIFIER_ALT;
+    }
+
+    wasm_exports.key_up(sapp_key_code, modifiers);
+}
+
+function handleBrowserTextBeforeInput(event) {
+    if (!browserTextInputActive) {
+        return;
+    }
+
+    switch (event.inputType) {
+        case "deleteContentBackward":
+            event.preventDefault();
+            pushBrowserTextInputDeleteBackward();
+            clearBrowserTextInputValue();
+            return;
+        case "deleteContentForward":
+            event.preventDefault();
+            pushBrowserTextInputDeleteForward();
+            clearBrowserTextInputValue();
+            return;
+        case "insertLineBreak":
+        case "insertParagraph":
+            event.preventDefault();
+            pushBrowserTextInputInsert("\n");
+            clearBrowserTextInputValue();
+            return;
+        case "insertText":
+        case "insertReplacementText":
+        case "insertFromPaste":
+        case "insertFromDrop":
+            if (browserTextInputComposing || event.isComposing) {
+                return;
+            }
+            event.preventDefault();
+            pushBrowserTextInputInsert(event.data || browserTextInput.value || "");
+            clearBrowserTextInputValue();
+            return;
+    }
+}
+
+function handleBrowserTextInputEvent(event) {
+    if (!browserTextInputActive || browserTextInputComposing || event.isComposing) {
+        return;
+    }
+
+    if (browserTextInputSuppressNextInput) {
+        browserTextInputSuppressNextInput = false;
+        clearBrowserTextInputValue();
+        return;
+    }
+
+    const value = browserTextInput.value;
+    if (!value) {
+        refreshBrowserTextInputPresentation();
+        return;
+    }
+
+    pushBrowserTextInputInsert(value);
+    clearBrowserTextInputValue();
+}
+
+function getBrowserTextInput() {
+    if (browserTextInput !== null) {
+        return browserTextInput;
+    }
+
+    browserTextInput = document.createElement("textarea");
+    browserTextInput.setAttribute("aria-label", "Canvas text input");
+    browserTextInput.setAttribute("autocomplete", "off");
+    browserTextInput.setAttribute("autocorrect", "off");
+    browserTextInput.setAttribute("autocapitalize", "off");
+    browserTextInput.setAttribute("spellcheck", "false");
+    browserTextInput.style.position = "fixed";
+    browserTextInput.style.left = "0px";
+    browserTextInput.style.top = "0px";
+    browserTextInput.style.width = "1px";
+    browserTextInput.style.height = "1.2em";
+    browserTextInput.style.padding = "0";
+    browserTextInput.style.margin = "0";
+    browserTextInput.style.border = "0";
+    browserTextInput.style.outline = "none";
+    browserTextInput.style.opacity = "0";
+    browserTextInput.style.background = "transparent";
+    browserTextInput.style.color = "transparent";
+    browserTextInput.style.caretColor = "transparent";
+    browserTextInput.style.font = "16px sans-serif";
+    browserTextInput.style.lineHeight = "1.2";
+    browserTextInput.style.resize = "none";
+    browserTextInput.style.overflow = "hidden";
+    browserTextInput.style.whiteSpace = "pre";
+    browserTextInput.style.pointerEvents = "none";
+    browserTextInput.style.zIndex = "2147483647";
+    browserTextInput.rows = 1;
+    browserTextInput.wrap = "off";
+
+    browserTextInput.addEventListener("keydown", forwardBrowserTextKeyDown);
+    browserTextInput.addEventListener("keyup", forwardBrowserTextKeyUp);
+    browserTextInput.addEventListener("beforeinput", handleBrowserTextBeforeInput);
+    browserTextInput.addEventListener("input", handleBrowserTextInputEvent);
+    browserTextInput.addEventListener("compositionstart", function () {
+        browserTextInputComposing = true;
+        browserTextInputSuppressNextInput = false;
+        refreshBrowserTextInputPresentation();
+    });
+    browserTextInput.addEventListener("compositionupdate", function () {
+        refreshBrowserTextInputPresentation();
+    });
+    browserTextInput.addEventListener("compositionend", function (event) {
+        browserTextInputComposing = false;
+        refreshBrowserTextInputPresentation();
+
+        const committed = event.data || browserTextInput.value || "";
+        if (committed) {
+            pushBrowserTextInputInsert(committed);
+            browserTextInputSuppressNextInput = true;
+        }
+
+        clearBrowserTextInputValue();
+    });
+    browserTextInput.addEventListener("blur", function () {
+        if (!browserTextInputActive) {
+            return;
+        }
+
+        window.setTimeout(function () {
+            if (browserTextInputActive && document.activeElement !== browserTextInput) {
+                focusBrowserTextInput();
+            }
+        }, 0);
+    });
+
+    document.body.appendChild(browserTextInput);
+    return browserTextInput;
+}
+
+function setBrowserTextInputActive(active) {
+    browserTextInputActive = !!active;
+    browserTextInputComposing = false;
+    browserTextInputSuppressNextInput = false;
+
+    if (browserTextInputActive) {
+        getBrowserTextInput();
+        clearBrowserTextInputValue();
+        updateBrowserTextInputPosition();
+        refreshBrowserTextInputPresentation();
+        focusBrowserTextInput();
+        return;
+    }
+
+    if (browserTextInput !== null) {
+        clearBrowserTextInputValue();
+        refreshBrowserTextInputPresentation();
+        browserTextInput.blur();
+    }
+    canvas.focus();
 }
 
 async function forwardBrowserFilesToWasm(kind, files) {
@@ -1011,6 +1367,14 @@ var importObject = {
             const bytes = new Uint8Array(wasm_memory.buffer, data_ptr, data_len).slice();
             downloadBrowserBytes(name, mime, bytes);
         },
+        mg_set_text_input_active: function (active) {
+            setBrowserTextInputActive(active !== 0);
+        },
+        mg_set_ime_candidate_pos: function (x, y) {
+            browserTextInputCandidateX = x;
+            browserTextInputCandidateY = y;
+            updateBrowserTextInputPosition();
+        },
         canvas_width: function () {
             return Math.floor(canvas.width);
         },
@@ -1542,7 +1906,11 @@ var importObject = {
                 dispatch_mouse_move(event);
             };
             canvas.onmouseenter = function (event) {
-                canvas.focus();
+                if (browserTextInputActive) {
+                    focusBrowserTextInput();
+                } else {
+                    canvas.focus();
+                }
                 dispatch_mouse_move(event);
             };
             canvas.onmousedown = function (event) {
@@ -1552,6 +1920,11 @@ var importObject = {
 
                 var btn = into_sapp_mousebutton(event.button);
                 wasm_exports.mouse_down(x, y, btn);
+                if (browserTextInputActive) {
+                    focusBrowserTextInput();
+                } else {
+                    canvas.focus();
+                }
             };
             // SO WEB SO CONSISTENT
             canvas.addEventListener('wheel',

@@ -14,12 +14,14 @@ impl App {
         let original_text = element.text.clone();
         self.input.active_text_id = Some(id);
         self.text_edit = Some(TextEditSession::new(id, original_text));
+        crate::platform::ime::set_text_input_active(true);
         self.text_dirty = true;
         self.text_system.bump_edit_generation();
     }
 
     pub(super) fn finish_text_edit(&mut self, commit: bool) {
         let Some(edit) = self.text_edit.take() else {
+            crate::platform::ime::set_text_input_active(false);
             self.input.active_text_id = None;
             self.input.text_selecting = false;
             return;
@@ -27,6 +29,7 @@ impl App {
 
         self.input.active_text_id = None;
         self.input.text_selecting = false;
+        crate::platform::ime::set_text_input_active(false);
         self.text_dirty = true;
 
         if commit {

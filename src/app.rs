@@ -27,6 +27,8 @@ use crate::images::ImageManager;
 use crate::input::{self, DragMode, InputState};
 #[cfg(target_arch = "wasm32")]
 use crate::platform::browser_io::{self, BrowserFileKind};
+#[cfg(target_arch = "wasm32")]
+use crate::platform::ime::{self, BrowserTextInputEvent};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::platform::snapshot::{PlatformSnapshotDialogAdapter, SnapshotDialogAdapter};
 use crate::rendering::renderer::Renderer;
@@ -321,6 +323,40 @@ impl App {
 
         for pasted_text in pasted_texts {
             self.handle_browser_clipboard_paste(&pasted_text);
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn process_browser_text_input_events(&mut self) {
+        let events = ime::take_text_input_events();
+        if events.is_empty() {
+            return;
+        }
+
+        let mut changed = false;
+        for event in events {
+            if self.input.active_text_id.is_none() {
+                break;
+            }
+
+            match event {
+                BrowserTextInputEvent::Insert(text) => {
+                    let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+                    if !normalized.is_empty() {
+                        changed |= self.insert_text(&normalized);
+                    }
+                }
+                BrowserTextInputEvent::DeleteBackward => {
+                    changed |= self.delete_backward();
+                }
+                BrowserTextInputEvent::DeleteForward => {
+                    changed |= self.delete_forward();
+                }
+            }
+        }
+
+        if changed {
+            self.request_redraw();
         }
     }
 
@@ -999,6 +1035,7 @@ impl EventHandler for App {
         {
             browser_io::mark_app_ready();
             self.process_browser_clipboard_events();
+            self.process_browser_text_input_events();
             self.process_browser_file_events();
             if self.text_system.apply_browser_font_updates() {
                 self.text_dirty = true;
