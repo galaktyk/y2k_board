@@ -220,6 +220,19 @@ impl App {
         window::schedule_update();
     }
 
+    fn hard_release_runtime_memory(&mut self) {
+        if let Some(mut draw) = self.cached_text_draw.take() {
+            draw.release_memory();
+        }
+        self.cached_text_edit_snapshot = None;
+        self.text_edit = None;
+        self.board_render_cache.hard_reset();
+        self.text_system.hard_reset_runtime_caches();
+        self.image_manager.hard_reset_runtime_caches(&mut *self.ctx);
+        self.spatial = SpatialGrid::new();
+        self.dirty_element_ids = HashSet::new();
+    }
+
     fn reset_transient_app_state(&mut self) {
         self.camera = Camera::new();
         self.input = InputState::new();
@@ -243,10 +256,10 @@ impl App {
     }
 
     fn apply_loaded_snapshot(&mut self, loaded: snapshot_io::LoadedSnapshot) {
+        self.hard_release_runtime_memory();
         self.snapshot_path = loaded.path.clone();
         self.snapshot_path_user_selected = true;
         let asset_root = snapshot_io::snapshot_root(&self.snapshot_path);
-        self.image_manager.reset_runtime_caches(&mut *self.ctx);
         self.image_manager.set_asset_root(&mut *self.ctx, asset_root);
         self.board = Board::new();
         self.board.restore_snapshot(loaded.data);

@@ -183,8 +183,14 @@ impl ImageManager {
         self.clear_runtime_caches(ctx);
     }
 
-    pub fn reset_runtime_caches(&mut self, ctx: &mut dyn RenderingBackend) {
+    pub fn hard_reset_runtime_caches(&mut self, ctx: &mut dyn RenderingBackend) {
         self.clear_runtime_caches(ctx);
+        self.ram_cache.shrink_to_fit();
+        self.ram_lru.shrink_to_fit();
+        self.gpu_cache.shrink_to_fit();
+        self.gpu_lru.shrink_to_fit();
+        self.atlas_entries.shrink_to_fit();
+        self.atlas_slot_owner.shrink_to_fit();
     }
 
     pub fn import_from_source(&mut self, source_path: &Path) -> Result<ImportedImage, ImageImportError> {

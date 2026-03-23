@@ -27,6 +27,18 @@ pub struct BoardRenderCache {
 }
 
 impl BoardRenderCache {
+    pub fn hard_reset(&mut self) {
+        self.all_instances.clear();
+        self.all_instances.shrink_to_fit();
+        self.element_ranges.clear();
+        self.element_ranges.shrink_to_fit();
+        self.id_by_index.clear();
+        self.id_by_index.shrink_to_fit();
+        self.index_by_id.clear();
+        self.index_by_id.shrink_to_fit();
+        self.visible_range = None;
+    }
+
     pub fn rebuild_all(&mut self, board: &Board) {
         self.all_instances.clear();
         self.element_ranges.clear();

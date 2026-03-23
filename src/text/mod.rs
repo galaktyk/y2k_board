@@ -125,6 +125,18 @@ impl PreparedTextDraw {
         self.element_range_index.insert(range.element_id, index);
         self.element_ranges.push(range);
     }
+
+    pub fn release_memory(&mut self) {
+        self.mono_instances.clear();
+        self.mono_instances.shrink_to_fit();
+        self.color_instances.clear();
+        self.color_instances.shrink_to_fit();
+        self.element_ranges.clear();
+        self.element_ranges.shrink_to_fit();
+        self.element_range_index.clear();
+        self.element_range_index.shrink_to_fit();
+        self.caret_pos = None;
+    }
 }
 
 /// Cached layout for a single element, keyed by element id.
@@ -209,6 +221,10 @@ impl TextSystem {
         self.emoji_atlas = Atlas::new(EMOJI_ATLAS_SIZE, false);
         self.overlay_ready = false;
         self.layout_cache = None;
+    }
+
+    pub fn hard_reset_runtime_caches(&mut self) {
+        self.reset_runtime_caches();
     }
 
     pub fn measure_text_box(&mut self, content: &str, text: &TextData, max_width: f32) -> Vec2 {
