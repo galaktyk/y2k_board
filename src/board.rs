@@ -17,7 +17,7 @@ pub use element::{
 };
 pub use operation::{
     BoardOperation, ElementPropertyChange, ElementPropertyPatch, ElementRotationChange,
-    ElementTransform, LineConnectionChange, apply_transform, inverse, log_operation,
+    ElementTransform, LineConnectionChange, apply_transform, log_operation,
     move_element, rotate_element,
 };
 pub use geometry::{rotate_point, world_to_local_norm};
@@ -62,10 +62,7 @@ impl Board {
     }
 
     pub fn apply_operation(&mut self, op: BoardOperation) {
-        let entry = HistoryEntry {
-            undo: inverse(&op),
-            redo: op.clone(),
-        };
+        let entry = HistoryEntry::from_operation(&op);
         self.execute(&op);
         self.undo_stack.push(entry);
         self.redo_stack.clear();
@@ -496,16 +493,35 @@ impl Board {
         }
     }
 
+    fn replay_add_delete_history(&mut self, element: &Element, add: bool) {
+        if add {
+            self.next_id = self.next_id.max(element.id.saturating_add(1));
+            self.upsert_element(element.clone());
+        } else {
+            self.remove_element_by_id(element.id);
+        }
+    }
+
     pub fn undo(&mut self) {
         if let Some(entry) = self.undo_stack.pop() {
-            self.execute(&entry.undo);
+            match &entry {
+                HistoryEntry::OperationPair { undo, .. } => self.execute(undo),
+                HistoryEntry::AddDelete { element, is_add } => {
+                    self.replay_add_delete_history(element, !is_add);
+                }
+            }
             self.redo_stack.push(entry);
         }
     }
 
     pub fn redo(&mut self) {
         if let Some(entry) = self.redo_stack.pop() {
-            self.execute(&entry.redo);
+            match &entry {
+                HistoryEntry::OperationPair { redo, .. } => self.execute(redo),
+                HistoryEntry::AddDelete { element, is_add } => {
+                    self.replay_add_delete_history(element, *is_add);
+                }
+            }
             self.undo_stack.push(entry);
         }
     }

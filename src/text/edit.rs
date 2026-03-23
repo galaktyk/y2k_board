@@ -7,6 +7,7 @@ pub struct TextEditSession {
     original_text: Option<TextData>,
     buffer: String,
     line_offsets: LineOffsets,
+    content_revision: u64,
     cursor_byte: usize,
     selection_anchor_byte: Option<usize>,
     preferred_x: Option<i32>,
@@ -29,6 +30,7 @@ impl TextEditSession {
             original_text,
             buffer,
             line_offsets,
+            content_revision: 0,
             cursor_byte,
             selection_anchor_byte: None,
             preferred_x: None,
@@ -41,6 +43,10 @@ impl TextEditSession {
 
     pub fn original_text_cloned(&self) -> Option<TextData> {
         self.original_text.clone()
+    }
+
+    pub fn content_revision(&self) -> u64 {
+        self.content_revision
     }
 
     pub fn content(&self) -> &str {
@@ -80,8 +86,7 @@ impl TextEditSession {
     pub fn snapshot(&self) -> TextEditSnapshot {
         TextEditSnapshot {
             element_id: self.element_id,
-            content: self.buffer.clone(),
-            line_offsets: self.line_offsets.clone(),
+            content_revision: self.content_revision,
             cursor_byte: self.cursor_byte,
             selection_anchor_byte: self.selection_anchor_byte,
         }
@@ -130,6 +135,7 @@ impl TextEditSession {
         }
         self.buffer.clear();
         self.rebuild_line_offsets();
+        self.content_revision = self.content_revision.wrapping_add(1);
         self.cursor_byte = 0;
         self.clear_selection();
         self.preferred_x = None;
@@ -142,6 +148,7 @@ impl TextEditSession {
         };
         self.buffer.replace_range(start..end, "");
         self.rebuild_line_offsets();
+        self.content_revision = self.content_revision.wrapping_add(1);
         self.cursor_byte = start;
         self.clear_selection();
         self.preferred_x = None;
@@ -152,6 +159,7 @@ impl TextEditSession {
         let cursor = self.cursor_byte.min(self.buffer.len());
         self.buffer.insert_str(cursor, inserted);
         self.rebuild_line_offsets();
+        self.content_revision = self.content_revision.wrapping_add(1);
         self.cursor_byte = cursor + inserted.len();
         self.clear_selection();
         self.preferred_x = None;
@@ -165,6 +173,7 @@ impl TextEditSession {
         let previous = previous_char_boundary(&self.buffer, self.cursor_byte);
         self.buffer.replace_range(previous..self.cursor_byte, "");
         self.rebuild_line_offsets();
+        self.content_revision = self.content_revision.wrapping_add(1);
         self.cursor_byte = previous;
         self.preferred_x = None;
         true
@@ -177,6 +186,7 @@ impl TextEditSession {
         let next = next_char_boundary(&self.buffer, self.cursor_byte);
         self.buffer.replace_range(self.cursor_byte..next, "");
         self.rebuild_line_offsets();
+        self.content_revision = self.content_revision.wrapping_add(1);
         self.preferred_x = None;
         true
     }
@@ -189,8 +199,7 @@ impl TextEditSession {
 #[derive(Clone, PartialEq)]
 pub struct TextEditSnapshot {
     pub element_id: u64,
-    pub content: String,
-    pub line_offsets: LineOffsets,
+    pub content_revision: u64,
     pub cursor_byte: usize,
     pub selection_anchor_byte: Option<usize>,
 }
@@ -200,7 +209,7 @@ impl TextEditSnapshot {
         self.element_id == session.element_id
             && self.cursor_byte == session.cursor_byte
             && self.selection_anchor_byte == session.selection_anchor_byte
-            && self.content == session.buffer
+            && self.content_revision == session.content_revision()
     }
 }
 

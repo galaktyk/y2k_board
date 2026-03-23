@@ -94,9 +94,34 @@ pub enum BoardOperation {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct HistoryEntry {
-    pub undo: BoardOperation,
-    pub redo: BoardOperation,
+pub(super) enum HistoryEntry {
+    OperationPair {
+        undo: BoardOperation,
+        redo: BoardOperation,
+    },
+    AddDelete {
+        element: Element,
+        is_add: bool,
+    },
+}
+
+impl HistoryEntry {
+    pub(super) fn from_operation(op: &BoardOperation) -> Self {
+        match op {
+            BoardOperation::AddElement(element) => Self::AddDelete {
+                element: element.clone(),
+                is_add: true,
+            },
+            BoardOperation::DeleteElement(element) => Self::AddDelete {
+                element: element.clone(),
+                is_add: false,
+            },
+            _ => Self::OperationPair {
+                undo: inverse(op),
+                redo: op.clone(),
+            },
+        }
+    }
 }
 
 pub fn inverse(op: &BoardOperation) -> BoardOperation {

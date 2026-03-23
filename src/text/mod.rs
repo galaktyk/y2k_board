@@ -131,7 +131,7 @@ impl PreparedTextDraw {
 struct CachedLayout {
     buffer: Buffer,
     world_min: Vec2,
-    text: TextData,
+    default_color: [f32; 4],
     /// Generation at which this layout was created.
     generation: u64,
 }
@@ -510,7 +510,7 @@ impl TextSystem {
                         _ => continue,
                     };
                     let world_min = cached.world_min;
-                    let default_color = cached.text.color;
+                    let default_color = cached.default_color;
                     let glyph_data = cached
                         .buffer
                         .layout_runs()
@@ -769,7 +769,8 @@ impl TextSystem {
         let Some((world_min, world_max)) = element.text_bounds() else {
             return false;
         };
-        let text = element.text.clone().unwrap_or_default();
+        let default_text = TextData::default();
+        let text = element.text.as_ref().unwrap_or(&default_text);
         let width = (world_max.x - world_min.x).max(1.0);
         let height = (world_max.y - world_min.y).max(1.0);
 
@@ -792,7 +793,7 @@ impl TextSystem {
         self.layout_cache = Some((element.id, CachedLayout {
             buffer,
             world_min,
-            text,
+            default_color: text.color,
             generation,
         }));
 
