@@ -183,6 +183,10 @@ impl ImageManager {
         self.clear_runtime_caches(ctx);
     }
 
+    pub fn reset_runtime_caches(&mut self, ctx: &mut dyn RenderingBackend) {
+        self.clear_runtime_caches(ctx);
+    }
+
     pub fn import_from_source(&mut self, source_path: &Path) -> Result<ImportedImage, ImageImportError> {
         #[cfg(target_arch = "wasm32")]
         {

@@ -220,26 +220,37 @@ impl App {
         window::schedule_update();
     }
 
-    fn apply_loaded_snapshot(&mut self, loaded: snapshot_io::LoadedSnapshot) {
-        self.snapshot_path = loaded.path.clone();
-        self.snapshot_path_user_selected = true;
-        let asset_root = snapshot_io::snapshot_root(&self.snapshot_path);
-        self.image_manager.set_asset_root(&mut *self.ctx, asset_root);
-        self.board.restore_snapshot(loaded.data);
+    fn reset_transient_app_state(&mut self) {
         self.camera = Camera::new();
         self.input = InputState::new();
         self.toolbar = Toolbar::new();
         self.tool_style_defaults = ToolStyleDefaults::default();
         self.property_panel_target = ColorTarget::Fill;
         self.property_width_drag = None;
-        self.board_cache_dirty = true;
-        self.spatial_dirty = true;
-        self.visibility_dirty = true;
-        self.dirty_element_ids.clear();
+        self.current_cursor = CursorIcon::Default;
+        self.spatial = SpatialGrid::new();
+        self.board_render_cache = BoardRenderCache::default();
+        self.dirty_element_ids = HashSet::new();
         self.text_edit = None;
-        self.text_dirty = true;
         self.cached_text_draw = None;
         self.cached_text_edit_snapshot = None;
+        self.text_system = TextSystem::new();
+        self.text_dirty = true;
+        self.board_cache_dirty = true;
+        self.board_scene_dirty = true;
+        self.spatial_dirty = true;
+        self.visibility_dirty = true;
+    }
+
+    fn apply_loaded_snapshot(&mut self, loaded: snapshot_io::LoadedSnapshot) {
+        self.snapshot_path = loaded.path.clone();
+        self.snapshot_path_user_selected = true;
+        let asset_root = snapshot_io::snapshot_root(&self.snapshot_path);
+        self.image_manager.reset_runtime_caches(&mut *self.ctx);
+        self.image_manager.set_asset_root(&mut *self.ctx, asset_root);
+        self.board = Board::new();
+        self.board.restore_snapshot(loaded.data);
+        self.reset_transient_app_state();
         self.request_redraw();
         println!("Loaded snapshot from {}", self.snapshot_path.display());
     }
@@ -893,6 +904,8 @@ impl App {
                 self.snapshot_path_user_selected = true;
                 let asset_root = snapshot_io::snapshot_root(&self.snapshot_path);
                 self.image_manager.set_asset_root(&mut *self.ctx, asset_root);
+                self.board.clear_transient_state(true);
+                self.request_redraw();
                 println!("Saved snapshot to {}", path.display());
             }
             Err(err) => eprintln!("Failed to save snapshot: {err}"),

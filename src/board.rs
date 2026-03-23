@@ -160,9 +160,19 @@ impl Board {
         self.rebuild_index_by_id();
         
         self.next_id = data.next_id.max(1);
-        self.undo_stack.clear();
-        self.redo_stack.clear();
-        self.emitted_ops.clear();
+        self.clear_transient_state(true);
+    }
+
+    pub fn clear_transient_state(&mut self, release_memory: bool) {
+        if release_memory {
+            self.undo_stack = Vec::new();
+            self.redo_stack = Vec::new();
+            self.emitted_ops = Vec::new();
+        } else {
+            self.undo_stack.clear();
+            self.redo_stack.clear();
+            self.emitted_ops.clear();
+        }
     }
 
     #[allow(dead_code)]
