@@ -1732,7 +1732,7 @@ var importObject = {
                     var msg = wasm_exports.allocate_vec_u8(len);
                     var heap = new Uint8Array(wasm_memory.buffer, msg, len);
                     stringToUTF8(pastedData, heap, 0, len);
-                    wasm_exports.on_clipboard_paste(msg, len);
+                    wasm_exports.mg_browser_clipboard_paste(msg, len);
                 }
             });
 

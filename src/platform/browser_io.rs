@@ -33,6 +33,12 @@ fn browser_font_queue() -> &'static Mutex<Vec<Vec<u8>>> {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn browser_clipboard_queue() -> &'static Mutex<Vec<String>> {
+    static CLIPBOARD_QUEUE: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+    CLIPBOARD_QUEUE.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+#[cfg(target_arch = "wasm32")]
 fn browser_app_ready() -> &'static AtomicBool {
     static APP_READY: AtomicBool = AtomicBool::new(false);
     &APP_READY
@@ -125,6 +131,19 @@ pub(crate) fn take_loaded_fonts() -> Vec<Vec<u8>> {
 }
 
 #[cfg(target_arch = "wasm32")]
+pub(crate) fn take_clipboard_pastes() -> Vec<String> {
+    let mut queue = browser_clipboard_queue()
+        .lock()
+        .expect("browser clipboard queue mutex should not be poisoned");
+    mem::take(&mut *queue)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn take_clipboard_pastes() -> Vec<String> {
+    Vec::new()
+}
+
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn mark_app_ready() {
     browser_app_ready().store(true, Ordering::Release);
 }
@@ -201,5 +220,31 @@ pub extern "C" fn mg_browser_font_loaded(data_ptr: *mut u8, data_len: usize) {
         miniquad::window::schedule_update();
     } else {
         println!("[font] app not ready yet; deferred redraw request for queued browser font");
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[unsafe(no_mangle)]
+pub extern "C" fn mg_browser_clipboard_paste(data_ptr: *mut u8, data_len: usize) {
+    let text = if data_len == 0 {
+        String::new()
+    } else {
+        let bytes = unsafe { Vec::from_raw_parts(data_ptr, data_len, data_len) };
+        String::from_utf8(bytes)
+            .unwrap_or_else(|err| String::from_utf8_lossy(&err.into_bytes()).into_owned())
+    };
+
+    if text.is_empty() {
+        return;
+    }
+
+    let mut queue = browser_clipboard_queue()
+        .lock()
+        .expect("browser clipboard queue mutex should not be poisoned");
+    queue.push(text);
+    drop(queue);
+
+    if browser_app_ready().load(Ordering::Acquire) {
+        miniquad::window::schedule_update();
     }
 }

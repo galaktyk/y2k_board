@@ -1,9 +1,8 @@
 
 
 ---
-wasm nit
-cursor image is not change  when web inactive e.g. resize box cursor not change
-cant type ime
+wasm bug
+cant type japanese through ime, cant switch keyboard to hiragana when editing text box
 emoji helper show wrong position
 
 

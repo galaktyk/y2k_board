@@ -264,6 +264,7 @@ impl App {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub(super) fn handle_board_paste(&mut self) -> bool {
         // Check for a board-object clipboard payload first (works on all platforms).
         if let Some(text) = clipboard::get_clipboard_text() {
@@ -307,6 +308,27 @@ impl App {
         }
 
         false
+    }
+
+    pub(super) fn handle_browser_clipboard_paste(&mut self, text: &str) -> bool {
+        if self.text_edit.is_some() {
+            let clipboard = normalize_pasted_text(text);
+            if self.insert_text(&clipboard) {
+                self.request_redraw();
+                return true;
+            }
+            return false;
+        }
+
+        if let Some(data) = clipboard::detect_board_clipboard(text) {
+            return self.paste_board_clipboard(data);
+        }
+
+        let pasted = self.insert_pasted_text_box(text);
+        if pasted {
+            self.request_redraw();
+        }
+        pasted
     }
 
     fn paste_board_clipboard(&mut self, data: BoardClipboardData) -> bool {

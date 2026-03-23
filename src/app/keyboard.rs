@@ -4,6 +4,7 @@ use miniquad::{window, KeyCode, KeyMods};
 
 use crate::board::{BoardOperation, ElementRotationChange};
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::content::normalize_pasted_text;
 use super::App;
 
@@ -101,6 +102,11 @@ impl App {
             }
             return;
         }
+        #[cfg(target_arch = "wasm32")]
+        if keymods.ctrl && keycode == KeyCode::V {
+            return;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
         if keymods.ctrl && keycode == KeyCode::V && self.handle_board_paste() {
             return;
         }
@@ -194,6 +200,9 @@ impl App {
                     self.request_redraw();
                 }
             }
+            #[cfg(target_arch = "wasm32")]
+            KeyCode::V if keymods.ctrl => {}
+            #[cfg(not(target_arch = "wasm32"))]
             KeyCode::V if keymods.ctrl => {
                 if let Some(clipboard) = window::clipboard_get() {
                     let clipboard = normalize_pasted_text(&clipboard);

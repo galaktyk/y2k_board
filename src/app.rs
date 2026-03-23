@@ -312,6 +312,18 @@ impl App {
         }
     }
 
+    #[cfg(target_arch = "wasm32")]
+    fn process_browser_clipboard_events(&mut self) {
+        let pasted_texts = browser_io::take_clipboard_pastes();
+        if pasted_texts.is_empty() {
+            return;
+        }
+
+        for pasted_text in pasted_texts {
+            self.handle_browser_clipboard_paste(&pasted_text);
+        }
+    }
+
     fn set_cursor_icon(&mut self, cursor: CursorIcon) {
         if self.current_cursor != cursor {
             window::set_mouse_cursor(cursor);
@@ -986,6 +998,7 @@ impl EventHandler for App {
         #[cfg(target_arch = "wasm32")]
         {
             browser_io::mark_app_ready();
+            self.process_browser_clipboard_events();
             self.process_browser_file_events();
             if self.text_system.apply_browser_font_updates() {
                 self.text_dirty = true;
