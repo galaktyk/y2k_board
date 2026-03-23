@@ -116,6 +116,28 @@ function assert(flag, message) {
     }
 }
 
+var last_mouse_position = null;
+
+function dispatch_mouse_move(event) {
+    var relative_position = mouse_relative_position(event.clientX, event.clientY);
+    var x = Math.floor(relative_position.x);
+    var y = Math.floor(relative_position.y);
+
+    last_mouse_position = { x: x, y: y };
+    wasm_exports.mouse_move(x, y);
+
+    // TODO: check that mouse is captured?
+    if (event.movementX != 0 || event.movementY != 0) {
+        wasm_exports.raw_mouse_move(Math.floor(event.movementX), Math.floor(event.movementY));
+    }
+}
+
+function refresh_hover_from_last_mouse() {
+    if (last_mouse_position != null) {
+        wasm_exports.mouse_move(last_mouse_position.x, last_mouse_position.y);
+    }
+}
+
 function getArray(ptr, arr, n) {
     return new arr(wasm_memory.buffer, ptr, n);
 }
@@ -1517,17 +1539,11 @@ var importObject = {
         },
         run_animation_loop: function (blocking) {
             canvas.onmousemove = function (event) {
-                var relative_position = mouse_relative_position(event.clientX, event.clientY);
-                var x = relative_position.x;
-                var y = relative_position.y;
-
-                // TODO: do not send mouse_move when cursor is captured
-                wasm_exports.mouse_move(Math.floor(x), Math.floor(y));
-
-                // TODO: check that mouse is captured?
-                if (event.movementX != 0 || event.movementY != 0) {
-                    wasm_exports.raw_mouse_move(Math.floor(event.movementX), Math.floor(event.movementY));
-                }
+                dispatch_mouse_move(event);
+            };
+            canvas.onmouseenter = function (event) {
+                canvas.focus();
+                dispatch_mouse_move(event);
             };
             canvas.onmousedown = function (event) {
                 var relative_position = mouse_relative_position(event.clientX, event.clientY);
@@ -1732,9 +1748,14 @@ var importObject = {
             let lastFocus = document.hasFocus();
             var checkFocus = function () {
                 let hasFocus = document.hasFocus();
-                if (lastFocus == hasFocus) {
+                if (lastFocus != hasFocus) {
                     wasm_exports.focus(hasFocus);
                     lastFocus = hasFocus;
+                }
+
+                if (hasFocus) {
+                    canvas.focus();
+                    refresh_hover_from_last_mouse();
                 }
             }
             document.addEventListener("visibilitychange", checkFocus);

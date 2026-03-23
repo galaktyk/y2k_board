@@ -8,6 +8,10 @@ emoji helper show wrong position
 
 
 ---
+touch pad or mouse
+
+
+---
 copy/paste is working wrong working on wasm
 
 ---

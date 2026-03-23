@@ -316,6 +316,8 @@ impl App {
         if self.current_cursor != cursor {
             window::set_mouse_cursor(cursor);
             self.current_cursor = cursor;
+            #[cfg(target_arch = "wasm32")]
+            self.request_redraw();
         }
     }
 
@@ -1258,6 +1260,14 @@ impl EventHandler for App {
 
     fn files_dropped_event(&mut self) {
         self.import_dropped_files();
+    }
+
+    fn window_minimized_event(&mut self) {
+        self.current_cursor = CursorIcon::Default;
+    }
+
+    fn window_restored_event(&mut self) {
+        self.refresh_mouse_cursor();
     }
 }
 
