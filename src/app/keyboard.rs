@@ -115,6 +115,11 @@ impl App {
             self.mark_board_structure_dirty();
             return;
         }
+        if keycode == KeyCode::G && keymods.alt {
+            self.input.touchpad_mode = !self.input.touchpad_mode;
+            self.request_redraw();
+            return;
+        }
         if keycode == KeyCode::F8 && keymods.alt {
             match crate::debug::spawn_debug_images(
                 &mut self.board,

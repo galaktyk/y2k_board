@@ -1,17 +1,11 @@
 
 
 ---
-wasm bug
-cant type japanese through ime, cant switch keyboard to hiragana when editing text box
-emoji helper show wrong position
-
+better ime preview inline
 
 ---
 touch pad or mouse
 
-
----
-copy/paste is working wrong working on wasm
 
 ---
 colab spreadsheet snapshot,
@@ -24,9 +18,13 @@ wasm
 ---
 
 ro sprite player
-
+---
+post-it
 ---
 laser tool
+---
+
+
 
 ---
 add frame tool

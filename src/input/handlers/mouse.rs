@@ -1064,6 +1064,13 @@ pub fn on_mouse_move(
     let delta_screen = state.mouse_pos - prev;
 
     if state.panning {
+        if state.touchpad_mode {
+            // In touchpad mode, pan-drag (Space+Drag) becomes zoom
+            let factor = if delta_screen.y < 0.0 { 1.05f32 } else { 1.0 / 1.05 };
+            camera.zoom_toward(state.mouse_pos, screen_size, factor);
+            return;
+        }
+
         let pan_delta = -delta_screen / camera.zoom;
         camera.pan += pan_delta;
 
