@@ -59,7 +59,7 @@ fn default_snapshot_name(snapshot_path: &Path) -> &str {
 #[cfg(not(target_arch = "wasm32"))]
 fn pick_save_path_with_rfd(snapshot_path: &Path) -> Option<PathBuf> {
     rfd::FileDialog::new()
-        .add_filter("miniGalaktyk Snapshots", &["bin"])
+        .add_filter("Y2KBoard Snapshots", &["bin"])
         .set_directory(crate::snapshot::snapshot_root(snapshot_path))
         .set_file_name(default_snapshot_name(snapshot_path))
         .save_file()
@@ -68,7 +68,7 @@ fn pick_save_path_with_rfd(snapshot_path: &Path) -> Option<PathBuf> {
 #[cfg(not(target_arch = "wasm32"))]
 fn pick_load_path_with_rfd(snapshot_path: &Path) -> Option<PathBuf> {
     rfd::FileDialog::new()
-        .add_filter("miniGalaktyk Snapshots", &["bin"])
+        .add_filter("Y2KBoard Snapshots", &["bin"])
         .set_directory(crate::snapshot::snapshot_root(snapshot_path))
         .pick_file()
 }

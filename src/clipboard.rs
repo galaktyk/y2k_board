@@ -55,7 +55,7 @@ pub fn preferred_paste_contents() -> Result<Option<ClipboardPaste>, String> {
 
 // ── Board object clipboard ────────────────────────────────────────────────────
 
-const BOARD_CLIP_TYPE: &str = "miniGalaktyk/clipboard/v1";
+const BOARD_CLIP_TYPE: &str = "Y2KBoard/clipboard/v1";
 
 /// JSON payload written to the system clipboard when copying board elements.
 ///
@@ -95,7 +95,7 @@ impl BoardClipboardData {
 }
 
 /// Try to parse a board clipboard payload from a plain-text clipboard string.
-/// Returns `None` if the text isn't a recognised miniGalaktyk board clipboard.
+/// Returns `None` if the text isn't a recognised Y2KBoard board clipboard.
 pub fn detect_board_clipboard(text: &str) -> Option<BoardClipboardData> {
     if !text.contains(BOARD_CLIP_TYPE) {
         return None;

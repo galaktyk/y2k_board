@@ -1126,28 +1126,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "minigalaktyk"
-version = "0.1.0"
-dependencies = [
- "arboard",
- "base64",
- "bincode",
- "cosmic-text",
- "glam",
- "image",
- "miniquad",
- "rfd",
- "serde",
- "serde_json",
- "ttf-parser",
- "unicode-script",
- "webp",
- "winapi",
- "winres",
- "woff2-patched",
-]
-
-[[package]]
 name = "miniquad"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2588,6 +2566,28 @@ name = "x11rb-protocol"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
+
+[[package]]
+name = "y2kboard"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "base64",
+ "bincode",
+ "cosmic-text",
+ "glam",
+ "image",
+ "miniquad",
+ "rfd",
+ "serde",
+ "serde_json",
+ "ttf-parser",
+ "unicode-script",
+ "webp",
+ "winapi",
+ "winres",
+ "woff2-patched",
+]
 
 [[package]]
 name = "yazi"

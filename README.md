@@ -1,6 +1,6 @@
 for compress
 
-upx --best --lzma target/release/minigalaktyk.exe
+upx --best --lzma target/release/y2kboard.exe
 
 
 

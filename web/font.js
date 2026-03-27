@@ -1,7 +1,7 @@
 "use strict";
 
 (function () {
-    const LOG_PREFIX = "[miniGalaktyk/fonts]";
+    const LOG_PREFIX = "[Y2KBoard/fonts]";
     const CACHE_KEY = "app-fonts-v1";
 
     const FONT_FILES = Object.freeze({
@@ -135,7 +135,7 @@
         console.info(LOG_PREFIX, "font cache cleared");
     }
 
-    window.miniGalaktykFonts = {
+    window.Y2KBoardFonts = {
         fontFiles: FONT_FILES,
         startupFontUrls: STARTUP_FONT_URLS.slice(),
         bootstrapFonts: bootstrapFonts,

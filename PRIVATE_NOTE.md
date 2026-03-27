@@ -1,23 +1,25 @@
+fix touchpad
 
+---
+
+add support for text size adjustment for rect, ellipse
+
+text size change on subtool with two button "A" and "a" for increase and decrease text size, beside it show the current text size in px
+
+how text size works:
+just use the same atlas just scale it up and down, on the whole rect
+
+
+---
+
+gdrive adapter for web version and desktop version,
 
 ---
 better ime preview inline
 
----
-touch pad or mouse
 
 
----
-colab spreadsheet snapshot,
-spreadsheet signaling
- webrtc
 
----
-wasm
-
----
-
-ro sprite player
 ---
 post-it
 ---
@@ -26,7 +28,6 @@ laser tool
 
 
 
----
 add frame tool
 
 ---

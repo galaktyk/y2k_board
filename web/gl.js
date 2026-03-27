@@ -682,7 +682,7 @@ function createBrowserImageStorage() {
     const workerSource = `
         "use strict";
 
-        const DB_NAME = "minigalaktyk-image-assets";
+        const DB_NAME = "y2kboard-image-assets";
         const STORE_NAME = "image-assets";
         let dbPromise = null;
 
@@ -881,7 +881,7 @@ function persistBrowserImageAsset(relativePath, width, height, rgbaBytes, qualit
 }
 
 async function bootstrapBrowserFonts() {
-    if (!window.miniGalaktykFonts || typeof window.miniGalaktykFonts.bootstrapFonts !== "function") {
+    if (!window.Y2KBoardFonts || typeof window.Y2KBoardFonts.bootstrapFonts !== "function") {
         return;
     }
 
@@ -889,10 +889,10 @@ async function bootstrapBrowserFonts() {
         return;
     }
 
-    await window.miniGalaktykFonts.bootstrapFonts(wasm_exports, wasm_memory);
+    await window.Y2KBoardFonts.bootstrapFonts(wasm_exports, wasm_memory);
 }
 
-window.miniGalaktykDebugLoadFonts = bootstrapBrowserFonts;
+window.Y2KBoardDebugLoadFonts = bootstrapBrowserFonts;
 var FS = {
     loaded_files: [],
     unique_id: 0
@@ -2297,9 +2297,9 @@ function load(wasm_path) {
                 async obj => {
                     wasm_memory = obj.exports.memory;
                     wasm_exports = obj.exports;
-                    window.__miniGalaktykWasmExports = wasm_exports;
-                    window.__miniGalaktykWasmMemory = wasm_memory;
-                    console.info("[miniGalaktyk/fonts] wasm initialized; debug hook ready as window.miniGalaktykDebugLoadFonts()");
+                    window.__Y2KBoardWasmExports = wasm_exports;
+                    window.__Y2KBoardWasmMemory = wasm_memory;
+                    console.info("[Y2KBoard/fonts] wasm initialized; debug hook ready as window.Y2KBoardDebugLoadFonts()");
 
                     var crate_version = wasm_exports.crate_version();
                     if (version != crate_version) {
@@ -2326,8 +2326,8 @@ function load(wasm_path) {
             .then(async function (obj) {
                 wasm_memory = obj.exports.memory;
                 wasm_exports = obj.exports;
-                window.__miniGalaktykWasmExports = wasm_exports;
-                window.__miniGalaktykWasmMemory = wasm_memory;
+                window.__Y2KBoardWasmExports = wasm_exports;
+                window.__Y2KBoardWasmMemory = wasm_memory;
 
                 var crate_version = wasm_exports.crate_version();
                 if (version != crate_version) {
