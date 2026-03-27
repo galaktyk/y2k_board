@@ -2,6 +2,10 @@ fix touchpad
 
 ---
 
+fix ellipse border
+
+---
+
 add support for text size adjustment for rect, ellipse
 
 text size change on subtool with two button "A" and "a" for increase and decrease text size, beside it show the current text size in px

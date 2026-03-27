@@ -48,8 +48,8 @@ pub enum LineArrowTarget {
 impl LineArrowTarget {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Start => "START",
-            Self::End => "END",
+            Self::Start => "🡠",
+            Self::End => "🡢",
         }
     }
 }
@@ -347,7 +347,7 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
         let enabled = arrow_enabled(view, *target).unwrap_or(false);
         let is_hovered = hovered == Some(PropertyPanelHit::Arrow(*target));
         let background = if enabled {
-            PANEL_SLIDER_FILL_COLOR
+            palette::GREEN_YELLOW
         } else if is_hovered {
             PANEL_HOVER_COLOR
         } else {
@@ -446,7 +446,7 @@ pub fn build_text_specs(screen_size: Vec2, view: &PropertyPanelView) -> Vec<UiTe
         let enabled = arrow_enabled(view, *target).unwrap_or(false);
         out.push(
             UiTextSpec::top_center(
-                if enabled { format!("> {}", target.label()) } else { target.label().to_string() },
+                target.label().to_string(),
                 Vec2::new(rect.x + rect.w * 0.5, rect.y + 4.0),
                 PANEL_TEXT_SIZE,
                 PANEL_TEXT_COLOR,
