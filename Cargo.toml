@@ -19,7 +19,7 @@ unicode-script = "0.5"
 winres = "0.1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-winapi = { version = "0.3", features = ["winuser", "imm"] }
+winapi = { version = "0.3", features = ["winuser", "imm", "wingdi"] }
 arboard = "3.6"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

@@ -30,14 +30,25 @@ fn wasm_output_dir() -> PathBuf {
 fn sync_wasm_web_assets() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("manifest dir should be set"));
     let web_dir = manifest_dir.join("web");
+    let cursor_dir = manifest_dir.join("assets").join("cursor");
     let output_dir = wasm_output_dir();
 
     copy_if_different(&web_dir.join("gl.js"), &output_dir.join("gl.js"));
     copy_if_different(&web_dir.join("index.html"), &output_dir.join("index.html"));
+    copy_if_different(
+        &cursor_dir.join("default_cursor.png"),
+        &output_dir.join("cursor").join("default_cursor.png"),
+    );
+    copy_if_different(
+        &cursor_dir.join("pointer_cursor.png"),
+        &output_dir.join("cursor").join("pointer_cursor.png"),
+    );
 }
 
 fn main() {
     println!("cargo:rerun-if-changed=assets/icon.ico");
+    println!("cargo:rerun-if-changed=assets/cursor/default_cursor.png");
+    println!("cargo:rerun-if-changed=assets/cursor/pointer_cursor.png");
     println!("cargo:rerun-if-changed=web/gl.js");
     println!("cargo:rerun-if-changed=web/index.html");
 

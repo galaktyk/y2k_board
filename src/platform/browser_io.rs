@@ -57,6 +57,7 @@ fn browser_file_kind_from_raw(value: u32) -> Option<BrowserFileKind> {
 unsafe extern "C" {
     fn mg_request_snapshot_load();
     fn mg_request_image_upload();
+    fn mg_set_cursor_css(cursor_ptr: *const u8, cursor_len: usize);
     fn mg_download_bytes(
         name_ptr: *const u8,
         name_len: usize,
@@ -86,6 +87,16 @@ pub(crate) fn request_image_upload() {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn request_image_upload() {}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn set_cursor_css(cursor_css: &str) {
+    unsafe {
+        mg_set_cursor_css(cursor_css.as_ptr(), cursor_css.len());
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn set_cursor_css(_cursor_css: &str) {}
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn download_bytes(name: &str, mime: &str, data: &[u8]) {

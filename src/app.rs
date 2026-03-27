@@ -27,6 +27,7 @@ use crate::images::ImageManager;
 use crate::input::{self, DragMode, InputState};
 #[cfg(target_arch = "wasm32")]
 use crate::platform::browser_io::{self, BrowserFileKind};
+use crate::platform::cursor as platform_cursor;
 #[cfg(target_arch = "wasm32")]
 use crate::platform::ime::{self, BrowserTextInputEvent};
 #[cfg(not(target_arch = "wasm32"))]
@@ -118,7 +119,7 @@ pub struct App {
     tool_style_defaults: ToolStyleDefaults,
     property_panel_target: ColorTarget,
     property_width_drag: Option<WidthDragState>,
-    current_cursor: CursorIcon,
+    current_cursor: Option<CursorIcon>,
     text_edit: Option<TextEditSession>,
     // ── text cache ────────────────────────────────────────────────────────
     cached_text_draw: Option<PreparedTextDraw>,
@@ -143,7 +144,7 @@ impl App {
         let (w, h) = window::screen_size();
         let now = miniquad::date::now();
         let (image_ram_flush_stop, image_ram_flush_thread) = spawn_image_ram_flush_waker();
-        let app = Self {
+        let mut app = Self {
             ctx,
             renderer,
             board: Board::new(),
@@ -169,7 +170,7 @@ impl App {
             tool_style_defaults: ToolStyleDefaults::default(),
             property_panel_target: ColorTarget::Fill,
             property_width_drag: None,
-            current_cursor: CursorIcon::Default,
+            current_cursor: None,
             text_edit: None,
             cached_text_draw: None,
             text_dirty: true,
@@ -180,6 +181,7 @@ impl App {
             fps_accum:   0.0,
             fps_frames:  0,
         };
+        app.refresh_mouse_cursor();
         app.request_redraw();
         app
     }
@@ -242,7 +244,7 @@ impl App {
         self.tool_style_defaults = ToolStyleDefaults::default();
         self.property_panel_target = ColorTarget::Fill;
         self.property_width_drag = None;
-        self.current_cursor = CursorIcon::Default;
+        self.current_cursor = None;
         self.spatial = SpatialGrid::new();
         self.board_render_cache = BoardRenderCache::default();
         self.dirty_element_ids = HashSet::new();
@@ -266,6 +268,7 @@ impl App {
         self.board = Board::new();
         self.board.restore_snapshot(loaded.data);
         self.reset_transient_app_state();
+        self.refresh_mouse_cursor();
         self.request_redraw();
         println!("Loaded snapshot from {}", self.snapshot_path.display());
     }
@@ -361,9 +364,10 @@ impl App {
     }
 
     fn set_cursor_icon(&mut self, cursor: CursorIcon) {
-        if self.current_cursor != cursor {
-            window::set_mouse_cursor(cursor);
-            self.current_cursor = cursor;
+        if self.current_cursor != Some(cursor) {
+            if platform_cursor::set_cursor(cursor) {
+                self.current_cursor = Some(cursor);
+            }
             #[cfg(target_arch = "wasm32")]
             self.request_redraw();
         }
@@ -371,7 +375,7 @@ impl App {
 
     fn desired_cursor_icon(&mut self) -> CursorIcon {
         if self.property_width_drag.is_some() {
-            return CursorIcon::EWResize;
+            return CursorIcon::Default;
         }
 
         if self
@@ -390,7 +394,7 @@ impl App {
                 self.input.mouse_pos.y,
             ) {
                 return match hit {
-                    property_panel::PropertyPanelHit::Width(_, _) => CursorIcon::EWResize,
+                    property_panel::PropertyPanelHit::Width(_, _) => CursorIcon::Pointer,
                     _ => CursorIcon::Pointer,
                 };
             }
@@ -1031,6 +1035,10 @@ impl App {
 
 impl EventHandler for App {
     fn update(&mut self) {
+        if self.current_cursor.is_none() {
+            self.refresh_mouse_cursor();
+        }
+
         #[cfg(target_arch = "wasm32")]
         {
             browser_io::mark_app_ready();
@@ -1313,7 +1321,7 @@ impl EventHandler for App {
     }
 
     fn window_minimized_event(&mut self) {
-        self.current_cursor = CursorIcon::Default;
+        self.current_cursor = None;
     }
 
     fn window_restored_event(&mut self) {

@@ -2193,6 +2193,9 @@ var importObject = {
         sapp_set_cursor: function (ptr, len) {
             canvas.style.cursor = UTF8ToString(ptr, len);
         },
+        mg_set_cursor_css: function (ptr, len) {
+            canvas.style.cursor = UTF8ToString(ptr, len);
+        },
         sapp_is_fullscreen: function () {
             let fullscreenElement = document.fullscreenElement;
 
