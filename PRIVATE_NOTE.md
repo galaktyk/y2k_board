@@ -1,26 +1,28 @@
 
 
+current app using text layout cache?
+layout float16? uint? since textbox is not gonna be that big
 
-
+---
 fix touchpad
 
 ---
+arrow snapping
+current implement tation have two behaviour,
+1. when create it preview snap to element edge
+2. when drag it's preview not snap but when release it snap to element edge
+
+make it use same behaviour by
+1. line drag preview snap BUT! only snap when near 12px to edge
 
 
+---
 
+nit on line and arrow renderering
+1. dont make line end round, just leave it as simple line
+2. add antialias (simple one)
+3. arrow head size should fix with the line, current is fix pixel so when zoom out it looks weird
 
-add support for sticky tool 
-
-## Toolbar button:
--  assets/cursor/sticky_cursor.png position it before text tool
-
-## Tool behavior:
-1. when tool active change cursor image to sticky_cursor.png (can't do the drag create like other tool, just click to create)
-2. when click on board, it will create a sticky note at the position
-
-## sticky note element:
-- it basically a rect element but with special parameters when created
-- default have no border, background color is palette:yellow_pale, and text color is black, default size when create is 256x256px
 
 
 ---

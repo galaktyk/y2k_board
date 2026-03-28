@@ -43,12 +43,11 @@ void main() {
         vec2 u = dir / len;
         vec2 v = vec2(-u.y, u.x);
 
-        // The fixed-screen outline only needs a few pixels of extra room.
-        float line_half_width = max(i_stroke_width * u_world_per_px, u_world_per_px);
-        float arrow_half_width = max(line_half_width * 2.5, u_world_per_px * 4.0);
+        // Shape 6 (selection overlay) needs only a small screen-space margin.
+        // Shape 2 (line with arrows) needs enough room for the world-space arrow head.
         float margin = (i_shape > 5.5 && i_shape < 6.5)
-            ? max(u_world_per_px * 3.0, 0.0001)
-            : max(8.0, arrow_half_width + u_world_per_px * 2.0);
+            ? u_world_per_px * 3.0
+            : i_stroke_width * 4.0 + u_world_per_px * 2.0;
 
         vec2 p = vec2(
             mix(-margin, len + margin, a_pos.x),
@@ -135,14 +134,39 @@ float line_segment_distance(vec2 p, float len) {
     return length(vec2(dx, p.y));
 }
 
-float arrow_triangle_alpha(float axial, float lateral, float arrow_length, float arrow_half_width, float aa) {
+float line_segment_alpha(vec2 p, float start, float end, float thickness, float aa) {
+    float len = max(end - start, 0.0);
+    if (len <= 0.0001) {
+        return 0.0;
+    }
+
+    float d = line_segment_distance(vec2(p.x - start, p.y), len);
+    return 1.0 - smoothstep(thickness - aa, thickness + aa, d);
+}
+
+// Simple triangular arrowhead (not rounded).
+// Tip at (0,0), base at (arrow_length, +-arrow_half_width).
+float arrow_triangle_alpha(
+    float axial,
+    float lateral,
+    float arrow_length,
+    float arrow_half_width,
+    float aa
+) {
     if (arrow_length <= 0.0001 || arrow_half_width <= 0.0001) {
         return 0.0;
     }
 
-    float inside_axial = step(0.0, axial) * step(axial, arrow_length);
-    float edge = abs(lateral) - (axial / arrow_length) * arrow_half_width;
-    return inside_axial * (1.0 - smoothstep(0.0, aa, edge));
+    float L = arrow_length;
+    float W = arrow_half_width;
+    float hyp = length(vec2(L, W));
+
+    // Signed distances from the three edges (positive = outside).
+    float d_top  = (-W * axial + L * abs(lateral)) / hyp;
+    float d_base = axial - L;
+    float sdf = max(d_top, d_base);
+
+    return 1.0 - smoothstep(-aa, aa, sdf);
 }
 
 float fixed_stroke_width() {
@@ -180,14 +204,26 @@ void main() {
         gl_FragColor = vec4(v_color.rgb, alpha * a);
     } else if (v_shape < 2.5) {
         vec2 p = v_line_p;
-        float d = line_segment_distance(p, v_line_len);
-        float thickness = max(v_stroke_width * u_world_per_px, u_world_per_px);
         float aa = max(u_world_per_px * 0.75, 0.0001);
-        float a = 1.0 - step(thickness, d);
-        float arrow_count = v_line_arrows.x + v_line_arrows.y;
-        float arrow_half_width = max(thickness * 2.5, u_world_per_px * 4.0);
-        float max_arrow_length = arrow_count > 1.5 ? v_line_len * 0.5 : v_line_len;
-        float arrow_length = min(max(arrow_half_width * 1.75, thickness * 4.0), max_arrow_length);
+        // Line body thickness is screen-space (constant pixel width).
+        float thickness = max(v_stroke_width * u_world_per_px, u_world_per_px);
+        // Arrow head is pure world-space so it scales with zoom like normal elements.
+        float arrow_half_width = v_stroke_width * 2.5;
+        float arrow_length = v_stroke_width * 5.0;
+
+        float max_arrow_length = v_line_len * 0.45;
+        if (arrow_length > max_arrow_length) {
+            float scale = max_arrow_length / arrow_length;
+            arrow_length = max_arrow_length;
+            arrow_half_width *= scale;
+        }
+
+        float body_start = (v_line_arrows.x > 0.5) ? arrow_length : 0.0;
+        float body_end = (v_line_arrows.y > 0.5) ? v_line_len - arrow_length : v_line_len;
+        float a = 0.0;
+        if (body_end > body_start) {
+            a = line_segment_alpha(p, body_start, body_end, thickness, aa);
+        }
 
         if (v_line_arrows.x > 0.5) {
             a = max(a, arrow_triangle_alpha(p.x, p.y, arrow_length, arrow_half_width, aa));
@@ -277,7 +313,7 @@ void main() {
         float sel_s = sin(u_rotate_angle);
         mat2 sel_rot = mat2(sel_c, sel_s, -sel_s, sel_c);
         world_pos += u_move_offset;
-        world_pos = u_rotate_center + sel_rot * (world_pos - u_rotate_center); 
+        world_pos = u_rotate_center + sel_rot * (world_pos - u_rotate_center);  
     }
 
     v_uv = mix(actual_uv_min, actual_uv_max, a_pos);
