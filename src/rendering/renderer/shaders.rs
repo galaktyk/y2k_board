@@ -206,10 +206,11 @@ void main() {
         vec2 p = v_line_p;
         float aa = max(u_world_per_px * 0.75, 0.0001);
         // Line body thickness is screen-space (constant pixel width).
-        float thickness = max(v_stroke_width * u_world_per_px, u_world_per_px);
+        float thickness = max(v_stroke_width * u_world_per_px, u_world_per_px * 1.0);
         // Arrow head is pure world-space so it scales with zoom like normal elements.
-        float arrow_half_width = v_stroke_width * 2.5;
-        float arrow_length = v_stroke_width * 5.0;
+        // We add a minimum screen-space size so it's visible when zoomed out.
+        float arrow_half_width = max(v_stroke_width * 3.125, u_world_per_px * 5.0);
+        float arrow_length = max(v_stroke_width * 6.25, u_world_per_px * 10.0);
 
         float max_arrow_length = v_line_len * 0.45;
         if (arrow_length > max_arrow_length) {
@@ -236,14 +237,14 @@ void main() {
     } else if (v_shape < 3.5) {
         vec2 dist = min(uv, 1.0 - uv) * v_size;
         float edge = min(dist.x, dist.y);
-        float width = max(v_stroke_width * u_world_per_px, 0.0001);
+        float width = max(v_stroke_width * u_world_per_px, u_world_per_px * 1.0);
         float aa = max(u_world_per_px * 0.75, 0.0001);
         float a = outline_alpha(edge, width, aa);
         gl_FragColor = vec4(v_color.rgb, alpha * a);
     } else if (v_shape < 4.5) {
         vec2 p = (uv - 0.5) * v_size;
         vec2 outer_r = abs(v_size) * 0.5;
-        float width = max(v_stroke_width * u_world_per_px, 0.0001);
+        float width = max(v_stroke_width * u_world_per_px, u_world_per_px * 1.0);
         float aa = max(u_world_per_px * 0.75, 0.0001);
         vec2 inner_r = max(outer_r - vec2(width), vec2(0.0001));
         float outer_sd = ellipse_signed_distance(p, outer_r);
