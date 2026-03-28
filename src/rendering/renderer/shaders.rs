@@ -62,8 +62,8 @@ void main() {
     } else {
         vec2 draw_pos = i_pos;
         vec2 draw_size = i_size;
-        if (i_shape > 2.5 && i_shape < 4.5) {
-            float margin = max(i_stroke_width * u_world_per_px, 0.0);
+        if (i_shape > 0.5 && i_shape < 4.5) {
+            float margin = max(u_world_per_px * 2.0, 0.0);
             draw_pos -= vec2(margin);
             draw_size += vec2(margin * 2.0);
         }
@@ -91,7 +91,7 @@ void main() {
     v_color = actual_color;
     v_shape = i_shape;
     v_alpha = i_alpha;
-    if (!((i_shape > 2.5 && i_shape < 4.5) || ((i_shape > 1.5 && i_shape < 2.5) || (i_shape > 5.5 && i_shape < 6.5)))) {
+    if (!((i_shape > 0.5 && i_shape < 4.5) || ((i_shape > 1.5 && i_shape < 2.5) || (i_shape > 5.5 && i_shape < 6.5)))) {
         v_size = i_size;
     }
     v_stroke_width = i_stroke_width;
@@ -198,9 +198,11 @@ void main() {
     if (v_shape < 0.5) {
         gl_FragColor = vec4(v_color.rgb, alpha);
     } else if (v_shape < 1.5) {
-        vec2 c = uv * 2.0 - 1.0;
-        float d = length(c) - 1.0;
-        float a = hard_edge_alpha(d);
+        vec2 p = (uv - 0.5) * v_size;
+        vec2 outer_r = abs(v_size) * 0.5;
+        float aa = max(u_world_per_px * 0.75, 0.0001);
+        float sd = ellipse_signed_distance(p, outer_r);
+        float a = smoothstep(0.0, aa, -sd);
         gl_FragColor = vec4(v_color.rgb, alpha * a);
     } else if (v_shape < 2.5) {
         vec2 p = v_line_p;
@@ -249,9 +251,9 @@ void main() {
         vec2 inner_r = max(outer_r - vec2(width), vec2(0.0001));
         float outer_sd = ellipse_signed_distance(p, outer_r);
         float inner_sd = ellipse_signed_distance(p, inner_r);
-        float outer_alpha = 1.0 - smoothstep(0.0, aa, outer_sd);
-        float inner_fill = 1.0 - smoothstep(0.0, aa, inner_sd);
-        float a = clamp(outer_alpha * (1.0 - inner_fill), 0.0, 1.0);
+        float outer_alpha = smoothstep(0.0, aa, -outer_sd);
+        float inner_alpha = smoothstep(0.0, aa, inner_sd);
+        float a = clamp(outer_alpha * inner_alpha, 0.0, 1.0);
         gl_FragColor = vec4(v_color.rgb, alpha * a);
     } else if (v_shape < 5.5) {
         vec2 dist = min(uv, 1.0 - uv) * v_size;

@@ -1,42 +1,44 @@
 
+i want sticky note to have soft shadow below it
+do we need to add shadow attribute to all element? 
+
+
+
+---
+
+
 
 current app using text layout cache?
+i see ram skyrocket when create 1000 text box, i think the string itself is not that big but RAM is huge
+what is taking so much RAM? maybe the layout cache?
+
+
+
 layout float16? uint? since textbox is not gonna be that big
 
 ---
 fix touchpad
 
----
-arrow snapping
-current implement tation have two behaviour,
-1. when create it preview snap to element edge
-2. when drag it's preview not snap but when release it snap to element edge
-
-make it use same behaviour by
-1. line drag preview snap BUT! only snap when near 12px to edge
-
-
----
-
-nit on line and arrow renderering
-1. dont make line end round, just leave it as simple line
-2. add antialias (simple one)
-3. arrow head size should fix with the line, current is fix pixel so when zoom out it looks weird
 
 
 
 ---
 
-fix ellipse border
+fix ellipse border rendering
+the ellipse itself doens't have good AA and have some gap with the border which have good AA,
+not sure what happenning here 
+but please make the ellispse fit with it's border
 
 ---
 
-add support for text size adjustment for rect, ellipse
+add support for text size adjustment for rect, ellipse, text box, and sticky
 
-text size change on subtool with two button "A" and "a" for increase and decrease text size, beside it show the current text size in px
+text size change on subtool with two button big "A" and (little bit) smaller "A" for increase and decrease text size, beside it show the current text size in px e.g.
+[A] [A] 24px
 
 how text size works:
-just use the same atlas just scale it up and down, on the whole rect
+just use the same atlas just scale it up and down, on every text in the whole container
+i don't care if text will be blurry
 
 
 ---
