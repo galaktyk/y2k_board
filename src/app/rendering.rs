@@ -3,13 +3,13 @@ use miniquad::PassAction;
 
 use crate::board::ElementTransform;
 use crate::input::{DragMode, COMPUTE_TEXT_LAYOUT_DEBOUNCE};
-use crate::rendering::renderer::Renderer;
+use crate::rendering::renderer::{Renderer, TextInstanceData};
 use crate::rendering::transform::{
     offset_instance, rotate_instance,
     rotate_point,
 };
 use crate::stats;
-use crate::text::{PreparedTextDraw, TextEditSession};
+use crate::text::TextEditSession;
 use crate::ui::overlay;
 
 use super::App;
@@ -234,9 +234,9 @@ impl App {
         rotate_drag_preview: Option<(f32, Vec2)>,
     ) {
         self.refresh_text_cache_if_needed();
-        let Some(text_draw) = self.cached_text_draw.as_ref() else {
+        if self.cached_text_draw.is_none() {
             return;
-        };
+        }
 
         self.renderer.draw_scene_text_instances(
             &mut *self.ctx,
@@ -251,7 +251,16 @@ impl App {
             rotate_drag_preview,
         );
 
-        let moved_caret_pos = self.transformed_caret_position(text_draw, move_drag_offset, rotate_drag_preview);
+        let (overlay_instances, caret_pos) = self.build_active_text_overlay();
+        self.renderer.draw_text_instances_with_transform(
+            &mut *self.ctx,
+            &overlay_instances,
+            board_mvp,
+            move_drag_offset,
+            rotate_drag_preview,
+        );
+
+        let moved_caret_pos = self.transformed_caret_position(caret_pos, move_drag_offset, rotate_drag_preview);
         if let Some(world_caret) = moved_caret_pos {
             let screen_caret = self.camera.world_to_screen(world_caret, self.screen_size);
             crate::platform::ime::set_ime_candidate_pos(screen_caret.x as i32, screen_caret.y as i32);
@@ -265,7 +274,7 @@ impl App {
             && self.cached_text_draw.is_some()
             && match (&self.cached_text_edit_snapshot, self.text_edit.as_ref()) {
                 (None, None) => true,
-                (Some(snapshot), Some(edit)) => snapshot.matches_session(edit),
+                (Some(snapshot), Some(edit)) => snapshot.matches_content(edit),
                 _ => false,
             };
 
@@ -330,12 +339,12 @@ impl App {
 
     fn transformed_caret_position(
         &self,
-        text_draw: &PreparedTextDraw,
+        caret_pos: Option<Vec2>,
         move_drag_offset: Option<Vec2>,
         rotate_drag_preview: Option<(f32, Vec2)>,
     ) -> Option<Vec2> {
         if let Some((angle, center)) = rotate_drag_preview {
-            return text_draw.caret_pos.map(|pos| {
+            return caret_pos.map(|pos| {
                 if self
                     .input
                     .active_text_id
@@ -351,7 +360,7 @@ impl App {
 
         move_drag_offset
             .map(|offset| {
-                text_draw.caret_pos.map(|pos| {
+                caret_pos.map(|pos| {
                     if self
                         .input
                         .active_text_id
@@ -364,7 +373,24 @@ impl App {
                     }
                 })
             })
-            .unwrap_or(text_draw.caret_pos)
+            .unwrap_or(caret_pos)
+    }
+
+    fn build_active_text_overlay(&mut self) -> (Vec<TextInstanceData>, Option<Vec2>) {
+        let Some(edit) = self.text_edit.as_ref() else {
+            return (Vec::new(), None);
+        };
+        let Some(element) = self.board.element(edit.element_id()) else {
+            return (Vec::new(), None);
+        };
+
+        self.text_system.build_edit_overlay_instances(
+            element,
+            edit.content(),
+            edit.line_offsets(),
+            edit.cursor_byte(),
+            edit.selection_anchor_byte(),
+        )
     }
 
     fn draw_overlay_layers(

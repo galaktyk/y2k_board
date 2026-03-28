@@ -61,6 +61,10 @@ impl TextEditSession {
         self.cursor_byte
     }
 
+    pub fn selection_anchor_byte(&self) -> Option<usize> {
+        self.selection_anchor_byte
+    }
+
     pub fn preferred_x(&self) -> Option<i32> {
         self.preferred_x
     }
@@ -77,9 +81,6 @@ impl TextEditSession {
         ActiveTextEdit {
             element_id: self.element_id,
             content: &self.buffer,
-            line_offsets: &self.line_offsets,
-            cursor_byte: self.cursor_byte,
-            selection_anchor_byte: self.selection_anchor_byte,
         }
     }
 
@@ -205,10 +206,8 @@ pub struct TextEditSnapshot {
 }
 
 impl TextEditSnapshot {
-    pub fn matches_session(&self, session: &TextEditSession) -> bool {
+    pub fn matches_content(&self, session: &TextEditSession) -> bool {
         self.element_id == session.element_id
-            && self.cursor_byte == session.cursor_byte
-            && self.selection_anchor_byte == session.selection_anchor_byte
             && self.content_revision == session.content_revision()
     }
 }

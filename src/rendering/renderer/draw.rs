@@ -122,8 +122,30 @@ impl Renderer {
         instances: &[TextInstanceData],
         mvp: glam::Mat4,
     ) {
+        self.draw_text_instances_with_transform(ctx, instances, mvp, None, None);
+    }
+
+    pub fn draw_text_instances_with_transform(
+        &mut self,
+        ctx: &mut dyn RenderingBackend,
+        instances: &[TextInstanceData],
+        mvp: glam::Mat4,
+        move_drag_offset: Option<Vec2>,
+        rotate_drag_preview: Option<(f32, Vec2)>,
+    ) {
         if instances.is_empty() {
             return;
+        }
+
+        let mut u_move_offset = [0.0, 0.0];
+        let mut u_rotate_center = [0.0, 0.0];
+        let mut u_rotate_angle = 0.0;
+
+        if let Some(offset) = move_drag_offset {
+            u_move_offset = offset.to_array();
+        } else if let Some((angle, center)) = rotate_drag_preview {
+            u_rotate_center = center.to_array();
+            u_rotate_angle = angle;
         }
 
         ctx.buffer_update(self.text_instance_buffer, BufferSource::slice(instances));
@@ -131,9 +153,9 @@ impl Renderer {
         ctx.apply_bindings(&self.text_bindings);
         ctx.apply_uniforms(UniformsSource::table(&TextUniforms {
             u_mvp: mvp.to_cols_array_2d(),
-            u_move_offset: [0.0, 0.0],
-            u_rotate_center: [0.0, 0.0],
-            u_rotate_angle: 0.0,
+            u_move_offset,
+            u_rotate_center,
+            u_rotate_angle,
         }));
         ctx.draw(0, 6, instances.len() as i32);
     }

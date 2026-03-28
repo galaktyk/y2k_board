@@ -92,9 +92,6 @@ impl UiTextSpec {
 pub struct ActiveTextEdit<'a> {
     pub element_id: u64,
     pub content: &'a str,
-    pub line_offsets: &'a LineOffsets,
-    pub cursor_byte: usize,
-    pub selection_anchor_byte: Option<usize>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -418,8 +415,6 @@ impl TextSystem {
             .element_range_index
             .reserve(prev_element_range_index.len());
         prepared.caret_pos = None;
-        let mut caret_pos = None;
-
         for element in &board.elements {
             let content = if let Some(edit) = active_edit.filter(|edit| edit.element_id == element.id) {
                 edit.content
@@ -678,21 +673,7 @@ impl TextSystem {
             });
         }
 
-        if let Some(edit) = active_edit {
-            if let Some(element) = board.element(edit.element_id) {
-                let (overlay, overlay_caret_pos) = self.build_edit_overlay_instances(
-                    element,
-                    edit.content,
-                    edit.line_offsets,
-                    edit.cursor_byte,
-                    edit.selection_anchor_byte,
-                );
-                prepared.mono_instances.extend(overlay);
-                caret_pos = overlay_caret_pos;
-            }
-        }
-
-        prepared.caret_pos = caret_pos;
+        prepared.caret_pos = None;
         prepared
     }
 
