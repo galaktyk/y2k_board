@@ -7,6 +7,7 @@ fn text_bounds_keep_inner_box_centered() {
     let element = Element {
         id: 1,
         shape: ShapeType::Rect,
+        kind: ElementKind::Generic,
         pos: Vec2::new(100.0, 50.0),
         size: Vec2::new(200.0, 120.0),
         rotation: 0.4,
@@ -37,6 +38,7 @@ fn bring_to_front_works() {
         Element {
             id: 1,
             shape: ShapeType::Rect,
+            kind: ElementKind::Generic,
             pos: Vec2::ZERO,
             size: Vec2::splat(10.0),
             rotation: 0.0,
@@ -54,6 +56,7 @@ fn bring_to_front_works() {
         Element {
             id: 2,
             shape: ShapeType::Image,
+            kind: ElementKind::Generic,
             pos: Vec2::ZERO,
             size: Vec2::splat(10.0),
             rotation: 0.0,
@@ -78,6 +81,7 @@ fn bring_to_front_works() {
         Element {
             id: 3,
             shape: ShapeType::Ellipse,
+            kind: ElementKind::Generic,
             pos: Vec2::ZERO,
             size: Vec2::splat(10.0),
             rotation: 0.0,
@@ -108,6 +112,7 @@ fn hit_test_prioritizes_shape_layer_over_images() {
         Element {
             id: 1,
             shape: ShapeType::Image,
+            kind: ElementKind::Generic,
             pos: Vec2::ZERO,
             size: Vec2::splat(20.0),
             rotation: 0.0,
@@ -132,6 +137,7 @@ fn hit_test_prioritizes_shape_layer_over_images() {
         Element {
             id: 2,
             shape: ShapeType::Rect,
+            kind: ElementKind::Generic,
             pos: Vec2::ZERO,
             size: Vec2::splat(20.0),
             rotation: 0.0,
@@ -158,6 +164,7 @@ fn hit_test_uses_board_order_within_shape_layer() {
         Element {
             id: 1,
             shape: ShapeType::Rect,
+            kind: ElementKind::Generic,
             pos: Vec2::ZERO,
             size: Vec2::splat(20.0),
             rotation: 0.0,
@@ -175,6 +182,7 @@ fn hit_test_uses_board_order_within_shape_layer() {
         Element {
             id: 2,
             shape: ShapeType::Ellipse,
+            kind: ElementKind::Generic,
             pos: Vec2::ZERO,
             size: Vec2::splat(20.0),
             rotation: 0.0,
@@ -201,6 +209,7 @@ fn hit_test_prioritizes_text_elements_over_images() {
         Element {
             id: 1,
             shape: ShapeType::Image,
+            kind: ElementKind::Generic,
             pos: Vec2::ZERO,
             size: Vec2::splat(20.0),
             rotation: 0.0,
@@ -225,6 +234,7 @@ fn hit_test_prioritizes_text_elements_over_images() {
         Element {
             id: 2,
             shape: ShapeType::Rect,
+            kind: ElementKind::Generic,
             pos: Vec2::ZERO,
             size: Vec2::splat(20.0),
             rotation: 0.0,
@@ -255,6 +265,7 @@ fn set_property_can_skip_connected_line_sync() {
         Element {
             id: 1,
             shape: ShapeType::Rect,
+            kind: ElementKind::Generic,
             pos: Vec2::ZERO,
             size: Vec2::splat(20.0),
             rotation: 0.0,
@@ -272,6 +283,7 @@ fn set_property_can_skip_connected_line_sync() {
         Element {
             id: 2,
             shape: ShapeType::Line,
+            kind: ElementKind::Generic,
             pos: Vec2::new(20.0, 10.0),
             size: Vec2::new(40.0, 0.0),
             rotation: 0.0,
@@ -412,6 +424,7 @@ fn rect_element(id: u64, pos: Vec2, size: Vec2) -> Element {
     Element {
         id,
         shape: ShapeType::Rect,
+        kind: ElementKind::Generic,
         pos,
         size,
         rotation: 0.0,
@@ -432,6 +445,7 @@ fn line_element(id: u64, pos: Vec2, size: Vec2) -> Element {
     Element {
         id,
         shape: ShapeType::Line,
+        kind: ElementKind::Generic,
         pos,
         size,
         rotation: 0.0,

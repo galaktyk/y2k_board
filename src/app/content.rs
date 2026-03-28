@@ -5,9 +5,9 @@ use glam::Vec2;
 use miniquad::window;
 
 use crate::board::{
-    default_border_width, default_line_stroke_width, default_stroke_color, default_text_box_color,
-    BoardOperation, Element, LineAnchor, LineConnectionChange, LineEndpoints, ShapeType, TextData,
-    DEFAULT_TEXT_COLOR,
+    default_border_width, default_line_stroke_width, default_stroke_color,
+    default_text_box_color, BoardOperation, Element, ElementKind, LineAnchor,
+    LineConnectionChange, LineEndpoints, ShapeType, TextData, DEFAULT_TEXT_COLOR,
 };
 use crate::clipboard::{self, BoardClipboardData};
 #[cfg(not(target_arch = "wasm32"))]
@@ -77,6 +77,7 @@ impl App {
         let element = Element {
             id: new_id,
             shape: ShapeType::Image,
+            kind: ElementKind::Generic,
             pos: anchor - size * 0.5,
             size,
             rotation: 0.0,
@@ -158,6 +159,7 @@ impl App {
         self.board.apply_operation(BoardOperation::AddElement(Element {
             id: new_id,
             shape: ShapeType::Rect,
+            kind: ElementKind::Generic,
             pos: anchor - size * 0.5,
             size,
             rotation: 0.0,

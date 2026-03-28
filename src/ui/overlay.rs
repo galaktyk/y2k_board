@@ -11,6 +11,11 @@ const MULTI_SELECTION_BOUNDS_COLOR: [f32; 4] = palette::BLUE;
 
 const FIXED_SCREEN_OUTLINE_SHAPE_TYPE: f32 = 5.0;
 const FIXED_SCREEN_LINE_OUTLINE_SHAPE_TYPE: f32 = 6.0;
+const STICKY_NOTE_SHADOW_SHAPE_TYPE: f32 = 7.0;
+const STICKY_NOTE_SHADOW_OFFSET_Y: f32 = 8.0;
+const STICKY_NOTE_SHADOW_EXPAND_X: f32 = 12.0;
+const STICKY_NOTE_SHADOW_EXPAND_Y: f32 = 14.0;
+const STICKY_NOTE_SHADOW_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.26];
 
 #[allow(dead_code)]
 pub fn element_instance(element: &Element, alpha: f32) -> InstanceData {
@@ -71,6 +76,7 @@ pub fn element_to_instances(element: &Element, alpha: f32) -> Vec<InstanceData> 
 
     match element.shape {
         ShapeType::Rect => {
+            push_sticky_note_shadow_instance(&mut out, element, alpha);
             push_fill_instance(&mut out, element, 0.0, element.color, alpha);
             push_border_instance(&mut out, element, 3.0, element.effective_stroke_color(), alpha);
         }
@@ -111,6 +117,32 @@ pub fn element_to_instances(element: &Element, alpha: f32) -> Vec<InstanceData> 
     }
 
     out
+}
+
+fn push_sticky_note_shadow_instance(
+    out: &mut Vec<InstanceData>,
+    element: &Element,
+    alpha: f32,
+) {
+    if !element.is_sticky_note() || element.color[3] <= 0.0 {
+        return;
+    }
+
+    out.push(InstanceData::new(
+        [
+            element.pos.x - STICKY_NOTE_SHADOW_EXPAND_X,
+            element.pos.y + STICKY_NOTE_SHADOW_OFFSET_Y - STICKY_NOTE_SHADOW_EXPAND_Y,
+        ],
+        [
+            element.size.x + STICKY_NOTE_SHADOW_EXPAND_X * 2.0,
+            element.size.y + STICKY_NOTE_SHADOW_EXPAND_Y * 2.0,
+        ],
+        element.rotation,
+        STICKY_NOTE_SHADOW_COLOR,
+        STICKY_NOTE_SHADOW_SHAPE_TYPE,
+        alpha,
+        element.selected,
+    ));
 }
 
 fn push_fill_instance(

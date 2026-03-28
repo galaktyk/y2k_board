@@ -190,6 +190,12 @@ float hard_edge_alpha(float signed_distance) {
     return 1.0 - step(0.0, signed_distance);
 }
 
+float sticky_note_shadow_alpha(vec2 uv, vec2 size, float softness) {
+    vec2 dist = min(uv, 1.0 - uv) * size;
+    float edge = min(dist.x, dist.y);
+    return smoothstep(0.0, softness, edge);
+}
+
 void main() {
     float alpha = v_color.a * v_alpha;
     vec2 uv = v_uv;
@@ -269,6 +275,10 @@ void main() {
         float half_width = fixed_centered_stroke_half_width();
         float aa = max(u_world_per_px * 0.5, 0.0001);
         float a = centered_stroke_alpha(d, half_width, aa);
+        gl_FragColor = vec4(v_color.rgb, alpha * a);
+    } else if (v_shape < 7.5) {
+        float softness = max(min(v_size.x, v_size.y) * 0.16, u_world_per_px * 10.0);
+        float a = sticky_note_shadow_alpha(uv, v_size, softness);
         gl_FragColor = vec4(v_color.rgb, alpha * a);
     }
     else {

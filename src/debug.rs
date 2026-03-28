@@ -241,6 +241,7 @@ pub fn spawn_debug_shapes(board: &mut Board, camera: &Camera, screen_size: Vec2)
         board.insert_element_untracked(Element {
             id,
             shape,
+            kind: crate::board::ElementKind::Generic,
             pos,
             size,
             rotation: 0.0,
@@ -307,6 +308,7 @@ pub fn spawn_debug_images(
         board.insert_element_untracked(Element {
             id,
             shape: ShapeType::Image,
+            kind: crate::board::ElementKind::Generic,
             pos,
             size,
             rotation: 0.0,

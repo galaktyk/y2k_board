@@ -1,12 +1,4 @@
 
-i want sticky note to have soft shadow below it
-do we need to add shadow attribute to all element? 
-
-
-
----
-
-
 
 current app using text layout cache?
 i see ram skyrocket when create 1000 text box, i think the string itself is not that big but RAM is huge

@@ -2,9 +2,9 @@ use glam::Vec2;
 
 
 use crate::board::{
-    world_to_local_norm, Board, BoardOperation, Element, ElementPropertyChange,
-    ElementPropertyPatch, ElementTransform, LineAnchor, LineConnectionChange, LineEndpoints,
-    ShapeType, ToolStyleDefaults,
+    world_to_local_norm, Board, BoardOperation, Element, ElementKind,
+    ElementPropertyChange, ElementPropertyPatch, ElementTransform, LineAnchor,
+    LineConnectionChange, LineEndpoints, ShapeType, ToolStyleDefaults,
 };
 use crate::camera::Camera;
 use crate::input::handles::{
@@ -65,6 +65,7 @@ fn sticky_note_element(tool_style_defaults: &ToolStyleDefaults, pos: Vec2) -> El
     Element {
         id: 0,
         shape: ShapeType::Rect,
+        kind: ElementKind::StickyNote,
         pos,
         size: Vec2::splat(STICKY_NOTE_SIZE),
         rotation: 0.0,
@@ -1081,6 +1082,7 @@ pub fn on_mouse_up(
                         board.apply_operation(BoardOperation::AddElement(Element {
                             id: new_id,
                             shape: ShapeType::Line,
+                            kind: ElementKind::Generic,
                             pos: connection_drag.start_world,
                             size: end_world - connection_drag.start_world,
                             rotation: 0.0,
@@ -1558,6 +1560,7 @@ pub fn on_mouse_move(
         state.preview = Some(Element {
             id: 0,
             shape,
+            kind: ElementKind::Generic,
             pos,
             size,
             rotation: 0.0,

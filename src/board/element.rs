@@ -10,6 +10,14 @@ pub enum ShapeType {
     Image,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ElementKind {
+    #[default]
+    Generic,
+    StickyNote,
+}
+
 pub const DEFAULT_TEXT_COLOR: [f32; 4] = palette::GRAY_3;
 pub const DEFAULT_RECT_COLOR: [f32; 4] = palette::OLIVE_LIGHT;
 pub const DEFAULT_ELLIPSE_COLOR: [f32; 4] = palette::TEAL;
@@ -185,6 +193,8 @@ pub struct LineEndpoints {
 pub struct Element {
     pub id: u64,
     pub shape: ShapeType,
+    #[serde(default)]
+    pub kind: ElementKind,
     pub pos: Vec2,
     pub size: Vec2,
     pub rotation: f32,
@@ -209,6 +219,10 @@ pub struct Element {
 }
 
 impl Element {
+    pub fn is_sticky_note(&self) -> bool {
+        self.kind == ElementKind::StickyNote
+    }
+
     pub fn uses_border_width(&self) -> bool {
         matches!(self.shape, ShapeType::Rect | ShapeType::Ellipse)
     }
