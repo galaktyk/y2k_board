@@ -122,7 +122,7 @@ impl Board {
         self.index_by_id.insert(id, index);
     }
 
-    fn ordered_candidate_indices(
+    pub fn ordered_candidate_indices(
         &self,
         candidate_ids: Option<&std::collections::HashSet<u64>>,
     ) -> Vec<usize> {

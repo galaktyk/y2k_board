@@ -529,27 +529,115 @@ fn anchored_position_from_anchor(board: &Board, anchor: &LineAnchor) -> Option<V
     Some(anchored_position_from_element(element, anchor.norm_pos))
 }
 
-fn find_line_anchor(board: &Board, spatial: &SpatialGrid, line_id: u64, world: Vec2) -> Option<LineAnchor> {
-    let candidate_ids = spatial.query(world, world);
-    board
-        .hit_test_all_filtered(world, Some(&candidate_ids))
-        .into_iter()
-        .filter(|&target_id| target_id != line_id)
-        .find_map(|target_id| {
-            let target = board.element(target_id)?;
-            line_anchor_from_drop(target, world)
-        })
+const SNAP_RADIUS_PX: f32 = 12.0;
+
+fn world_units_per_screen_px(zoom: f32) -> f32 {
+    1.0 / zoom.max(0.0001)
 }
 
-fn resolved_line_endpoints(board: &Board, spatial: &SpatialGrid, line_id: u64) -> Option<LineEndpoints> {
+fn snap_radius(zoom: f32) -> f32 {
+    SNAP_RADIUS_PX * world_units_per_screen_px(zoom)
+}
+
+fn point_to_element_edge_dist(element: &Element, world: Vec2) -> f32 {
+    let center = element.pos + element.size * 0.5;
+    let cos_r = (-element.rotation).cos();
+    let sin_r = (-element.rotation).sin();
+    let dx = world.x - center.x;
+    let dy = world.y - center.y;
+    let local = Vec2::new(dx * cos_r - dy * sin_r, dx * sin_r + dy * cos_r);
+    let half_size = (element.size * 0.5).abs();
+
+    match element.shape {
+        ShapeType::Rect | ShapeType::Image => {
+            let dx = local.x.abs() - half_size.x;
+            let dy = local.y.abs() - half_size.y;
+            
+            if dx <= 0.0 && dy <= 0.0 {
+                // Inside the rectangle
+                (-dx).min(-dy)
+            } else {
+                // Outside the rectangle
+                let odx = dx.max(0.0);
+                let ody = dy.max(0.0);
+                (odx * odx + ody * ody).sqrt()
+            }
+        }
+        ShapeType::Ellipse => {
+            if half_size.x <= 0.0 || half_size.y <= 0.0 {
+                return (local.x * local.x + local.y * local.y).sqrt();
+            }
+            let normalized = local / half_size;
+            let len = normalized.length();
+            
+            // For ellipse, dist to edge is roughly |len - 1| * average_radius
+            // or we find the closest point on the ellipse boundary.
+            let edge_point = if len > 0.0001 {
+                (normalized / len) * half_size
+            } else {
+                Vec2::new(half_size.x, 0.0)
+            };
+            (local - edge_point).length()
+        }
+        ShapeType::Line => 1e9, // Should not happen for anchors
+    }
+}
+
+fn find_line_anchor(
+    board: &Board,
+    spatial: &SpatialGrid,
+    line_id: u64,
+    world: Vec2,
+    snap_radius: f32,
+) -> Option<LineAnchor> {
+    let query_min = world - Vec2::splat(snap_radius);
+    let query_max = world + Vec2::splat(snap_radius);
+    let candidate_ids = spatial.query(query_min, query_max);
+
+    let mut best_anchor = None;
+    let mut min_dist = snap_radius;
+
+    let ordered_indices = board.ordered_candidate_indices(Some(&candidate_ids));
+
+    for &index in ordered_indices.iter().rev() {
+        let target = &board.elements[index];
+        if target.id == line_id || target.shape == ShapeType::Line {
+            continue;
+        }
+
+        let dist = point_to_element_edge_dist(target, world);
+        if dist < min_dist {
+            if let Some(norm_pos) = line_anchor_from_drop(target, world) {
+                min_dist = dist;
+                best_anchor = Some(norm_pos);
+            }
+        }
+    }
+
+    best_anchor
+}
+
+fn resolved_line_endpoints(
+    board: &Board,
+    spatial: &SpatialGrid,
+    line_id: u64,
+    zoom: f32,
+    ctrl_held: bool,
+) -> Option<LineEndpoints> {
     let line = board.element(line_id)?;
     if line.shape != ShapeType::Line {
         return None;
     }
 
+    if ctrl_held {
+        return Some(LineEndpoints::default());
+    }
+
+    let snap_radius = snap_radius(zoom);
+
     Some(LineEndpoints {
-        start: find_line_anchor(board, spatial, line_id, line.pos),
-        end: find_line_anchor(board, spatial, line_id, line.pos + line.size),
+        start: find_line_anchor(board, spatial, line_id, line.pos, snap_radius),
+        end: find_line_anchor(board, spatial, line_id, line.pos + line.size, snap_radius),
     })
 }
 
@@ -558,6 +646,8 @@ fn line_connection_change_for_handle_release(
     spatial: &SpatialGrid,
     line_id: u64,
     dir: HandleDir,
+    zoom: f32,
+    ctrl_held: bool,
 ) -> Option<LineConnectionChange> {
     let line = board.element(line_id)?;
     if line.shape != ShapeType::Line {
@@ -573,9 +663,23 @@ fn line_connection_change_for_handle_release(
     let start_world = line.pos;
     let end_world = line.pos + line.size;
 
+    let snap_radius = snap_radius(zoom);
+
     match dir {
-        HandleDir::LineStart => after.start = find_line_anchor(board, spatial, line_id, start_world),
-        HandleDir::LineEnd => after.end = find_line_anchor(board, spatial, line_id, end_world),
+        HandleDir::LineStart => {
+            after.start = if ctrl_held {
+                None
+            } else {
+                find_line_anchor(board, spatial, line_id, start_world, snap_radius)
+            }
+        }
+        HandleDir::LineEnd => {
+            after.end = if ctrl_held {
+                None
+            } else {
+                find_line_anchor(board, spatial, line_id, end_world, snap_radius)
+            }
+        }
         _ => return None,
     }
 
@@ -590,13 +694,15 @@ fn line_connection_change_for_move_release(
     board: &Board,
     spatial: &SpatialGrid,
     line_id: u64,
+    zoom: f32,
+    ctrl_held: bool,
 ) -> Option<LineConnectionChange> {
     let before = board
         .line_attachments
         .get(&line_id)
         .cloned()
         .unwrap_or_default();
-    let after = resolved_line_endpoints(board, spatial, line_id)?;
+    let after = resolved_line_endpoints(board, spatial, line_id, zoom, ctrl_held)?;
 
     (after != before).then_some(LineConnectionChange {
         id: line_id,
@@ -605,8 +711,14 @@ fn line_connection_change_for_move_release(
     })
 }
 
-fn new_line_connections(board: &Board, spatial: &SpatialGrid, line_id: u64) -> Option<LineConnectionChange> {
-    let after = resolved_line_endpoints(board, spatial, line_id)?;
+fn new_line_connections(
+    board: &Board,
+    spatial: &SpatialGrid,
+    line_id: u64,
+    zoom: f32,
+    ctrl_held: bool,
+) -> Option<LineConnectionChange> {
+    let after = resolved_line_endpoints(board, spatial, line_id, zoom, ctrl_held)?;
 
     (!matches!(after, LineEndpoints { start: None, end: None })).then_some(LineConnectionChange {
         id: line_id,
@@ -928,7 +1040,15 @@ pub fn on_mouse_up(
                         .move_origin
                         .iter()
                         .map(|&(id, _, _, _)| id)
-                        .filter_map(|id| line_connection_change_for_move_release(board, spatial, id))
+                        .filter_map(|id| {
+                            line_connection_change_for_move_release(
+                                board,
+                                spatial,
+                                id,
+                                camera.zoom,
+                                state.ctrl_held,
+                            )
+                        })
                         .collect();
                     if !line_connection_changes.is_empty() {
                         board.apply_operation(BoardOperation::SetLineConnections {
@@ -943,7 +1063,12 @@ pub fn on_mouse_up(
             }
             DragMode::CreatingConnection => {
                 if let Some(connection_drag) = state.connection_drag {
-                    let end_anchor = find_line_anchor(board, spatial, u64::MAX, world);
+                    let snap_radius = snap_radius(camera.zoom);
+                    let end_anchor = if state.ctrl_held {
+                        None
+                    } else {
+                        find_line_anchor(board, spatial, u64::MAX, world, snap_radius)
+                    };
                     let end_world = end_anchor
                         .as_ref()
                         .and_then(|anchor| anchored_position_from_anchor(board, anchor))
@@ -1011,7 +1136,14 @@ pub fn on_mouse_up(
                 completed_drag_mode
             {
                 let line_id = state.move_origin[0].0;
-                if let Some(change) = line_connection_change_for_handle_release(board, spatial, line_id, dir) {
+                if let Some(change) = line_connection_change_for_handle_release(
+                    board,
+                    spatial,
+                    line_id,
+                    dir,
+                    camera.zoom,
+                    state.ctrl_held,
+                ) {
                     board.apply_operation(BoardOperation::SetLineConnections {
                         changes: vec![change],
                     });
@@ -1076,7 +1208,7 @@ pub fn on_mouse_up(
                 board.apply_operation(BoardOperation::AddElement(element));
                 board.deselect_all();
                 board.select_only(new_id);
-                if let Some(change) = new_line_connections(board, spatial, new_id) {
+                if let Some(change) = new_line_connections(board, spatial, new_id, camera.zoom, state.ctrl_held) {
                     board.apply_operation(BoardOperation::SetLineConnections {
                         changes: vec![change],
                     });
@@ -1174,7 +1306,14 @@ pub fn on_mouse_move(
 
         if state.drag_mode == DragMode::CreatingConnection {
             if let Some(connection_drag) = state.connection_drag.as_mut() {
-                if let Some(anchor) = find_line_anchor(board, spatial, u64::MAX, world) {
+                let snap_radius = snap_radius(camera.zoom);
+                let anchor = if state.ctrl_held {
+                    None
+                } else {
+                    find_line_anchor(board, spatial, u64::MAX, world, snap_radius)
+                };
+
+                if let Some(anchor) = anchor {
                     connection_drag.end_world =
                         anchored_position_from_anchor(board, &anchor).unwrap_or(world);
                 } else {
@@ -1208,16 +1347,19 @@ pub fn on_mouse_move(
             return;
         }
 
+        let snap_radius = snap_radius(camera.zoom);
         let origins = state.move_origin.clone();
         for (id, orig_pos, orig_size, orig_rot) in origins {
-            let Some(element) = board.element_mut(id) else { continue; };
-            if !element.selected { continue; }
+            if !board.element(id).map(|e| e.selected).unwrap_or(false) {
+                continue;
+            }
 
             match state.drag_mode {
                 DragMode::Rotating => {
                     if !is_group_transform {
                         let center = orig_pos + orig_size * 0.5;
                         let angle_diff = rotation_angle_delta(state.move_start_world, world, center);
+                        let element = board.element_mut(id).unwrap();
                         element.rotation = orig_rot + angle_diff;
                     }
                 }
@@ -1232,6 +1374,7 @@ pub fn on_mouse_move(
                             continue;
                         };
 
+                        let element = board.element_mut(id).unwrap();
                         if element.shape == ShapeType::Line {
                                     let start = scale_point_from_anchor_in_frame(
                                         orig_pos,
@@ -1263,85 +1406,112 @@ pub fn on_mouse_move(
                                         bounds,
                                     );
                                 }
-                            } else if element.shape == ShapeType::Line {
-                                match dir {
-                                    HandleDir::LineStart => {
-                                        let old_end = orig_pos + orig_size;
-                                        element.pos = orig_pos + state.move_delta;
-                                        element.size = old_end - element.pos;
-                                    }
-                                    HandleDir::LineEnd => {
-                                        element.size = orig_size + state.move_delta;
-                                    }
-                                    _ => {}
-                                }
                             } else {
-                                let c = orig_rot.cos();
-                                let s = orig_rot.sin();
-                                let dx = state.move_delta.x;
-                                let dy = state.move_delta.y;
-                                let l_dx = dx * c + dy * s;
-                                let l_dy = -dx * s + dy * c;
+                                let element_shape = board.element(id).unwrap().shape;
+                                if element_shape == ShapeType::Line {
+                                    match dir {
+                                        HandleDir::LineStart => {
+                                            let old_end = orig_pos + orig_size;
+                                            let target_pos = orig_pos + state.move_delta;
 
-                                let mut new_pos = orig_pos;
-                                let mut new_size = orig_size;
+                                            let snapped_pos = if state.ctrl_held {
+                                                None
+                                            } else {
+                                                find_line_anchor(board, spatial, id, target_pos, snap_radius).and_then(
+                                                    |anchor| anchored_position_from_anchor(board, &anchor),
+                                                )
+                                            };
 
-                                match dir {
-                                    HandleDir::TL => {
-                                        new_pos += Vec2::new(l_dx, l_dy);
-                                        new_size -= Vec2::new(l_dx, l_dy);
+                                            let element = board.element_mut(id).unwrap();
+                                            element.pos = snapped_pos.unwrap_or(target_pos);
+                                            element.size = old_end - element.pos;
+                                        }
+                                        HandleDir::LineEnd => {
+                                            let target_end = orig_pos + orig_size + state.move_delta;
+
+                                            let snapped_end = if state.ctrl_held {
+                                                None
+                                            } else {
+                                                find_line_anchor(board, spatial, id, target_end, snap_radius).and_then(
+                                                    |anchor| anchored_position_from_anchor(board, &anchor),
+                                                )
+                                            };
+
+                                            let element = board.element_mut(id).unwrap();
+                                            element.size = snapped_end.unwrap_or(target_end) - element.pos;
+                                        }
+                                        _ => {}
                                     }
-                                    HandleDir::TR => {
-                                        new_pos.y += l_dy;
-                                        new_size.x += l_dx;
-                                        new_size.y -= l_dy;
+                                } else {
+                                    let element = board.element_mut(id).unwrap();
+                                    let c = orig_rot.cos();
+                                    let s = orig_rot.sin();
+                                    let dx = state.move_delta.x;
+                                    let dy = state.move_delta.y;
+                                    let l_dx = dx * c + dy * s;
+                                    let l_dy = -dx * s + dy * c;
+
+                                    let mut new_pos = orig_pos;
+                                    let mut new_size = orig_size;
+
+                                    match dir {
+                                        HandleDir::TL => {
+                                            new_pos += Vec2::new(l_dx, l_dy);
+                                            new_size -= Vec2::new(l_dx, l_dy);
+                                        }
+                                        HandleDir::TR => {
+                                            new_pos.y += l_dy;
+                                            new_size.x += l_dx;
+                                            new_size.y -= l_dy;
+                                        }
+                                        HandleDir::BL => {
+                                            new_pos.x += l_dx;
+                                            new_size.x -= l_dx;
+                                            new_size.y += l_dy;
+                                        }
+                                        HandleDir::BR => {
+                                            new_size += Vec2::new(l_dx, l_dy);
+                                        }
+                                        HandleDir::Top => {
+                                            new_pos.y += l_dy;
+                                            new_size.y -= l_dy;
+                                        }
+                                        HandleDir::Right => {
+                                            new_size.x += l_dx;
+                                        }
+                                        HandleDir::Bottom => {
+                                            new_size.y += l_dy;
+                                        }
+                                        HandleDir::Left => {
+                                            new_pos.x += l_dx;
+                                            new_size.x -= l_dx;
+                                        }
+                                        _ => {}
                                     }
-                                    HandleDir::BL => {
-                                        new_pos.x += l_dx;
-                                        new_size.x -= l_dx;
-                                        new_size.y += l_dy;
-                                    }
-                                    HandleDir::BR => {
-                                        new_size += Vec2::new(l_dx, l_dy);
-                                    }
-                                    HandleDir::Top => {
-                                        new_pos.y += l_dy;
-                                        new_size.y -= l_dy;
-                                    }
-                                    HandleDir::Right => {
-                                        new_size.x += l_dx;
-                                    }
-                                    HandleDir::Bottom => {
-                                        new_size.y += l_dy;
-                                    }
-                                    HandleDir::Left => {
-                                        new_pos.x += l_dx;
-                                        new_size.x -= l_dx;
-                                    }
-                                    _ => {}
+
+                                    let local_center = new_pos + new_size * 0.5;
+                                    let orig_local_center = orig_pos + orig_size * 0.5;
+                                    let d_cx = local_center.x - orig_local_center.x;
+                                    let d_cy = local_center.y - orig_local_center.y;
+                                    let w_dcx = d_cx * c - d_cy * s;
+                                    let w_dcy = d_cx * s + d_cy * c;
+                                    let w_center =
+                                        orig_pos + orig_size * 0.5 + Vec2::new(w_dcx, w_dcy);
+
+                                    element.size = new_size;
+                                    element.pos = w_center - new_size * 0.5;
                                 }
-
-                                let local_center = new_pos + new_size * 0.5;
-                                let orig_local_center = orig_pos + orig_size * 0.5;
-                                let d_cx = local_center.x - orig_local_center.x;
-                                let d_cy = local_center.y - orig_local_center.y;
-                                let w_dcx = d_cx * c - d_cy * s;
-                                let w_dcy = d_cx * s + d_cy * c;
-                                let w_center =
-                                    orig_pos + orig_size * 0.5 + Vec2::new(w_dcx, w_dcy);
-
-                                element.size = new_size;
-                                element.pos = w_center - new_size * 0.5;
                             }
-                            if element.text.is_some() {
-                                state.enqueue_resize_text_recompute(element.id);
+                            if board.element(id).unwrap().text.is_some() {
+                                state.enqueue_resize_text_recompute(id);
                             }
-                        }
-                        DragMode::MoveSelected
-                        | DragMode::MarqueeSelect
-                        | DragMode::CreatingConnection
-                        | DragMode::None => {}
-                    }
+                }
+                DragMode::MoveSelected => {
+                    let element = board.element_mut(id).unwrap();
+                    element.pos = orig_pos + state.move_delta;
+                }
+                _ => {}
+            }
         }
         if is_group_transform {
             if let DragMode::ResizingHandle(dir) = state.drag_mode {
