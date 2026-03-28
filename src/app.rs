@@ -421,6 +421,10 @@ impl App {
             }
         }
 
+        if self.toolbar.active_tool == ui::tool::Tool::Sticky {
+            return CursorIcon::Help;
+        }
+
         CursorIcon::Default
     }
 
@@ -619,6 +623,19 @@ impl App {
                     tabs,
                     style::color_for_box_defaults(self.tool_style_defaults.ellipse, active),
                     Some(self.tool_style_defaults.ellipse.border_width.min(16)),
+                    None,
+                    None,
+                    None,
+                )
+            }
+            ui::tool::Tool::Sticky => {
+                let tabs = style::tabs(true, true, true);
+                let active = self.resolve_panel_target(tabs)?;
+                (
+                    "NOTE",
+                    tabs,
+                    style::color_for_box_defaults(self.tool_style_defaults.sticky, active),
+                    Some(self.tool_style_defaults.sticky.border_width.min(16)),
                     None,
                     None,
                     None,
@@ -858,6 +875,7 @@ impl App {
         match tool {
             ui::tool::Tool::Rect => style::apply_box_color(&mut self.tool_style_defaults.rect, target, color),
             ui::tool::Tool::Ellipse => style::apply_box_color(&mut self.tool_style_defaults.ellipse, target, color),
+            ui::tool::Tool::Sticky => style::apply_box_color(&mut self.tool_style_defaults.sticky, target, color),
             ui::tool::Tool::Text => style::apply_box_color(&mut self.tool_style_defaults.text, target, color),
             ui::tool::Tool::Line => {
                 if target == ColorTarget::Stroke {
@@ -872,6 +890,7 @@ impl App {
         match tool {
             ui::tool::Tool::Rect if target == WidthTarget::Border => self.tool_style_defaults.rect.border_width = width,
             ui::tool::Tool::Ellipse if target == WidthTarget::Border => self.tool_style_defaults.ellipse.border_width = width,
+            ui::tool::Tool::Sticky if target == WidthTarget::Border => self.tool_style_defaults.sticky.border_width = width,
             ui::tool::Tool::Text if target == WidthTarget::Border => self.tool_style_defaults.text.border_width = width,
             ui::tool::Tool::Line if target == WidthTarget::Stroke => self.tool_style_defaults.line.stroke_width = width,
             ui::tool::Tool::Select => {}

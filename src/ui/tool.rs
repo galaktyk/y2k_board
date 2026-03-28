@@ -4,5 +4,6 @@ pub enum Tool {
     Rect,
     Ellipse,
     Line,
+    Sticky,
     Text,
 }

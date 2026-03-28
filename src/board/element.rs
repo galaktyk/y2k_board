@@ -13,6 +13,7 @@ pub enum ShapeType {
 pub const DEFAULT_TEXT_COLOR: [f32; 4] = palette::GRAY_3;
 pub const DEFAULT_RECT_COLOR: [f32; 4] = palette::OLIVE_LIGHT;
 pub const DEFAULT_ELLIPSE_COLOR: [f32; 4] = palette::TEAL;
+pub const DEFAULT_STICKY_COLOR: [f32; 4] = palette::YELLOW_PALE;
 pub const DEFAULT_LINE_COLOR: [f32; 4] = palette::BLACK;
 pub const DEFAULT_STROKE_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
 pub const DEFAULT_BORDER_WIDTH: u8 = 2;
@@ -78,6 +79,15 @@ impl BoxToolStyle {
             text_color: DEFAULT_TEXT_COLOR,
         }
     }
+
+    pub fn sticky_default() -> Self {
+        Self {
+            fill_color: DEFAULT_STICKY_COLOR,
+            stroke_color: palette::TRANSPARENT,
+            border_width: 0,
+            text_color: palette::BLACK,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -103,6 +113,7 @@ impl LineToolStyle {
 pub struct ToolStyleDefaults {
     pub rect: BoxToolStyle,
     pub ellipse: BoxToolStyle,
+    pub sticky: BoxToolStyle,
     pub text: BoxToolStyle,
     pub line: LineToolStyle,
 }
@@ -112,6 +123,7 @@ impl Default for ToolStyleDefaults {
         Self {
             rect: BoxToolStyle::rect_default(),
             ellipse: BoxToolStyle::ellipse_default(),
+            sticky: BoxToolStyle::sticky_default(),
             text: BoxToolStyle::text_default(),
             line: LineToolStyle::default_line(),
         }

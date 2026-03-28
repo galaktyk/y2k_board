@@ -25,12 +25,15 @@ pub(crate) fn set_cursor(cursor: CursorIcon) -> bool {
 const DEFAULT_CURSOR_CSS: &str = "url('cursor/default_cursor.png') 0 0, default";
 #[cfg(target_arch = "wasm32")]
 const POINTER_CURSOR_CSS: &str = "url('cursor/pointer_cursor.png') 12 0, pointer";
+#[cfg(target_arch = "wasm32")]
+const STICKY_CURSOR_CSS: &str = "url('cursor/sticky_cursor.png') 0 0, help";
 
 #[cfg(target_arch = "wasm32")]
 fn try_set_custom_cursor(cursor: CursorIcon) -> CustomCursorResult {
     let css = match cursor {
         CursorIcon::Default => DEFAULT_CURSOR_CSS,
         CursorIcon::Pointer => POINTER_CURSOR_CSS,
+        CursorIcon::Help => STICKY_CURSOR_CSS,
         _ => return CustomCursorResult::NotHandled,
     };
 
@@ -42,7 +45,7 @@ fn try_set_custom_cursor(cursor: CursorIcon) -> CustomCursorResult {
 fn try_set_custom_cursor(cursor: CursorIcon) -> CustomCursorResult {
     if !ensure_windows_cursor_hook() {
         return match cursor {
-            CursorIcon::Default | CursorIcon::Pointer => CustomCursorResult::Pending,
+            CursorIcon::Default | CursorIcon::Pointer | CursorIcon::Help => CustomCursorResult::Pending,
             _ => CustomCursorResult::NotHandled,
         };
     }
@@ -50,6 +53,7 @@ fn try_set_custom_cursor(cursor: CursorIcon) -> CustomCursorResult {
     let handle = match cursor {
         CursorIcon::Default => windows_cursor_handles().default as winapi::shared::windef::HCURSOR,
         CursorIcon::Pointer => windows_cursor_handles().pointer as winapi::shared::windef::HCURSOR,
+        CursorIcon::Help => windows_cursor_handles().sticky as winapi::shared::windef::HCURSOR,
         _ => {
             set_active_custom_cursor(std::ptr::null_mut());
             return CustomCursorResult::NotHandled;
@@ -84,6 +88,7 @@ enum CustomCursorResult {
 struct WindowsCursorHandles {
     default: usize,
     pointer: usize,
+    sticky: usize,
 }
 
 #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
@@ -94,6 +99,7 @@ fn windows_cursor_handles() -> &'static WindowsCursorHandles {
     CURSORS.get_or_init(|| WindowsCursorHandles {
         default: load_png_cursor(include_bytes!("../../assets/cursor/default_cursor.png"), (0, 0)) as usize,
         pointer: load_png_cursor(include_bytes!("../../assets/cursor/pointer_cursor.png"), (12, 0)) as usize,
+        sticky: load_png_cursor(include_bytes!("../../assets/cursor/sticky_cursor.png"), (0, 0)) as usize,
     })
 }
 

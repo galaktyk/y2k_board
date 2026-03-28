@@ -17,6 +17,7 @@ use crate::ui::tool::Tool;
 
 const MARQUEE_MIN_SIZE: f32 = 4.0;
 const DRAG_START_DISTANCE: f32 = 3.0;
+const STICKY_NOTE_SIZE: f32 = 196.0;
 pub const COMPUTE_TEXT_LAYOUT_DEBOUNCE: f64 = 0.10;
 
 // The pan velocity smoothing factor, between 0 and 1. 
@@ -58,6 +59,30 @@ fn finalize_pan_glide(state: &mut InputState, zoom: f32) {
         state.pan_velocity = state.pan_velocity.normalize() * (PAN_GLIDE_MAX_LAUNCH_SPEED_SCREEN / zoom);
     }
     state.pan_velocity_sample_time = None;
+}
+
+fn sticky_note_element(tool_style_defaults: &ToolStyleDefaults, pos: Vec2) -> Element {
+    Element {
+        id: 0,
+        shape: ShapeType::Rect,
+        pos,
+        size: Vec2::splat(STICKY_NOTE_SIZE),
+        rotation: 0.0,
+        color: tool_style_defaults.sticky.fill_color,
+        stroke_color: tool_style_defaults.sticky.stroke_color,
+        border_width: tool_style_defaults.sticky.border_width,
+        stroke_width: crate::board::DEFAULT_LINE_STROKE_WIDTH,
+        line_arrow_start: false,
+        line_arrow_end: false,
+        selected: false,
+        text: Some(crate::board::TextData {
+            content: String::new(),
+            font_size: 24.0,
+            color: tool_style_defaults.sticky.text_color,
+        }),
+        image: None,
+        text_layout_generation: 0,
+    }
 }
 
 fn begin_transform_drag(
@@ -801,6 +826,16 @@ pub fn on_mouse_down(
                 begin_pending_drag(state, DragMode::MarqueeSelect, state.mouse_pos, world);
             }
         }
+        Tool::Sticky => {
+            clear_pending_drag(state);
+            state.active_text_id = None;
+            state.text_selecting = false;
+            state.dragging_tool = true;
+            state.drag_start_world = world;
+            state.preview = None;
+            state.last_click_id = None;
+            state.last_click_at = None;
+        }
         Tool::Rect | Tool::Ellipse | Tool::Line | Tool::Text => {
             clear_pending_drag(state);
             state.active_text_id = None;
@@ -993,6 +1028,24 @@ pub fn on_mouse_up(
     state.drag_selection_bounds = None;
     state.transform_bounds_origin = None;
 
+    if active_tool == Tool::Sticky {
+        let should_create = state.dragging_tool && !was_panning;
+        state.dragging_tool = false;
+        state.preview = None;
+        if should_create {
+            let new_id = board.next_id();
+            let mut element = sticky_note_element(tool_style_defaults, state.drag_start_world);
+            element.id = new_id;
+            board.apply_operation(BoardOperation::AddElement(element));
+            board.deselect_all();
+            board.select_only(new_id);
+            state.selection_bounds = None;
+            state.active_text_id = Some(new_id);
+            state.text_cursor = 0;
+            return Some(Tool::Select);
+        }
+    }
+
     if state.dragging_tool {
         state.dragging_tool = false;
         if let Some(prev) = state.preview.take() {
@@ -1028,7 +1081,7 @@ pub fn on_mouse_up(
                         changes: vec![change],
                     });
                 }
-                if matches!(active_tool, Tool::Text) {
+                if matches!(active_tool, Tool::Rect | Tool::Text) {
                     state.active_text_id = Some(new_id);
                     state.text_cursor = 0;
                 }
@@ -1307,6 +1360,11 @@ pub fn on_mouse_move(
     }
 
     if state.dragging_tool {
+        if active_tool == Tool::Sticky {
+            state.preview = None;
+            return;
+        }
+
         let start = state.drag_start_world;
         let current = world;
 
@@ -1315,6 +1373,7 @@ pub fn on_mouse_move(
             Tool::Ellipse => ShapeType::Ellipse,
             Tool::Line => ShapeType::Line,
             Tool::Text => ShapeType::Rect,
+            Tool::Sticky => return,
             Tool::Select => return,
         };
 
@@ -1358,6 +1417,7 @@ fn preview_fill_color(tool: &Tool, defaults: &ToolStyleDefaults) -> [f32; 4] {
     match tool {
         Tool::Rect => defaults.rect.fill_color,
         Tool::Ellipse => defaults.ellipse.fill_color,
+        Tool::Sticky => defaults.sticky.fill_color,
         Tool::Text => defaults.text.fill_color,
         Tool::Line => defaults.line.color,
         _ => crate::palette::PURE_BLACK,
@@ -1368,6 +1428,7 @@ fn preview_stroke_color(tool: &Tool, defaults: &ToolStyleDefaults) -> [f32; 4] {
     match tool {
         Tool::Rect => defaults.rect.stroke_color,
         Tool::Ellipse => defaults.ellipse.stroke_color,
+        Tool::Sticky => defaults.sticky.stroke_color,
         Tool::Text => defaults.text.stroke_color,
         Tool::Line => defaults.line.color,
         _ => crate::board::DEFAULT_STROKE_COLOR,
@@ -1378,6 +1439,7 @@ fn preview_border_width(tool: &Tool, defaults: &ToolStyleDefaults) -> u8 {
     match tool {
         Tool::Rect => defaults.rect.border_width,
         Tool::Ellipse => defaults.ellipse.border_width,
+        Tool::Sticky => defaults.sticky.border_width,
         Tool::Text => defaults.text.border_width,
         _ => crate::board::DEFAULT_BORDER_WIDTH,
     }
@@ -1408,6 +1470,7 @@ fn preview_text_color(tool: &Tool, defaults: &ToolStyleDefaults) -> [f32; 4] {
     match tool {
         Tool::Rect => defaults.rect.text_color,
         Tool::Ellipse => defaults.ellipse.text_color,
+        Tool::Sticky => defaults.sticky.text_color,
         Tool::Text => defaults.text.text_color,
         _ => crate::board::DEFAULT_TEXT_COLOR,
     }

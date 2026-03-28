@@ -1,14 +1,6 @@
 
 
 
-use custom cursor for this app for these
-default: assets/cursor/default_cursor.png
-pointer: assets/cursor/pointer_cursor.png
-sticky: assets/cursor/sticky_cursor.png
- (also wasm if possible what you think best practice)
----
-
-
 
 fix touchpad
 

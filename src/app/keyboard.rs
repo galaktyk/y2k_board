@@ -45,6 +45,10 @@ impl App {
                     return;
                 }
                 KeyCode::Key5 => {
+                    self.set_active_tool(crate::ui::tool::Tool::Sticky);
+                    return;
+                }
+                KeyCode::Key6 => {
                     self.set_active_tool(crate::ui::tool::Tool::Text);
                     return;
                 }

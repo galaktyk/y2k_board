@@ -24,11 +24,12 @@ const TOOLBAR_BORDER_SHADOW: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
 const TOOLBAR_ICON_COLOR: [f32; 4] = palette::BLACK;
 const TOOLBAR_ICON_SIZE: f32 = 32.0;
 const TOOLBAR_LABEL_FONT_SIZE: f32 = 12.0;
-const TOOLBAR_ICON_BYTES: [&[u8]; 8] = [
+const TOOLBAR_ICON_BYTES: [&[u8]; 9] = [
     include_bytes!("../../assets/toolbar/select.png"),
     include_bytes!("../../assets/toolbar/rect.png"),
     include_bytes!("../../assets/toolbar/ellipse.png"),
     include_bytes!("../../assets/toolbar/line.png"),
+    include_bytes!("../../assets/toolbar/sticky.png"),
     include_bytes!("../../assets/toolbar/text.png"),
     include_bytes!("../../assets/toolbar/image.png"),
     include_bytes!("../../assets/toolbar/load.png"),
@@ -39,10 +40,11 @@ const ICON_SELECT: usize = 0;
 const ICON_RECT: usize = 1;
 const ICON_ELLIPSE: usize = 2;
 const ICON_LINE: usize = 3;
-const ICON_TEXT: usize = 4;
-const ICON_IMAGE: usize = 5;
-const ICON_LOAD: usize = 6;
-const ICON_SAVE: usize = 7;
+const ICON_STICKY: usize = 4;
+const ICON_TEXT: usize = 5;
+const ICON_IMAGE: usize = 6;
+const ICON_LOAD: usize = 7;
+const ICON_SAVE: usize = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ToolbarAction {
@@ -66,6 +68,7 @@ enum BtnKind {
     Rect,
     Ellipse,
     Line,
+    Sticky,
     Text,
     Image,
     Save,
@@ -81,7 +84,7 @@ struct Button {
 
 pub struct ToolbarIcons {
     atlas: TextureId,
-    uv_rects: [[[f32; 2]; 2]; 8],
+    uv_rects: [[[f32; 2]; 2]; 9],
 }
 
 impl ToolbarIcons {
@@ -104,6 +107,7 @@ impl ToolbarIcons {
             BtnKind::Rect => ICON_RECT,
             BtnKind::Ellipse => ICON_ELLIPSE,
             BtnKind::Line => ICON_LINE,
+            BtnKind::Sticky => ICON_STICKY,
             BtnKind::Text => ICON_TEXT,
             BtnKind::Image => ICON_IMAGE,
             BtnKind::Load => ICON_LOAD,
@@ -117,7 +121,7 @@ impl ToolbarIcons {
 
 pub struct Toolbar {
     pub active_tool: Tool,
-    buttons: [Button; 10],
+    buttons: [Button; 11],
 }
 
 impl Toolbar {
@@ -127,6 +131,7 @@ impl Toolbar {
             BtnKind::Rect,
             BtnKind::Ellipse,
             BtnKind::Line,
+            BtnKind::Sticky,
             BtnKind::Text,
             BtnKind::Image,
             BtnKind::Load,
@@ -176,6 +181,7 @@ impl Toolbar {
                     BtnKind::Rect    => ToolbarAction::SetTool(Tool::Rect),
                     BtnKind::Ellipse => ToolbarAction::SetTool(Tool::Ellipse),
                     BtnKind::Line    => ToolbarAction::SetTool(Tool::Line),
+                    BtnKind::Sticky  => ToolbarAction::SetTool(Tool::Sticky),
                     BtnKind::Text    => ToolbarAction::SetTool(Tool::Text),
                     BtnKind::Image   => ToolbarAction::ImportImage,
                     BtnKind::Load    => ToolbarAction::Load,
@@ -254,6 +260,7 @@ impl Toolbar {
                 | (BtnKind::Rect, Tool::Rect)
                 | (BtnKind::Ellipse, Tool::Ellipse)
                 | (BtnKind::Line, Tool::Line)
+                | (BtnKind::Sticky, Tool::Sticky)
                 | (BtnKind::Text, Tool::Text)
             );
 
@@ -404,6 +411,7 @@ fn matches_button_action(kind: BtnKind, action: ToolbarAction) -> bool {
             | (BtnKind::Rect, ToolbarAction::SetTool(Tool::Rect))
             | (BtnKind::Ellipse, ToolbarAction::SetTool(Tool::Ellipse))
             | (BtnKind::Line, ToolbarAction::SetTool(Tool::Line))
+            | (BtnKind::Sticky, ToolbarAction::SetTool(Tool::Sticky))
             | (BtnKind::Text, ToolbarAction::SetTool(Tool::Text))
             | (BtnKind::Image, ToolbarAction::ImportImage)
             | (BtnKind::Load, ToolbarAction::Load)
@@ -416,8 +424,8 @@ fn matches_button_action(kind: BtnKind, action: ToolbarAction) -> bool {
 fn load_toolbar_atlas(
     ctx: &mut dyn RenderingBackend,
     icon_bytes: &[&[u8]],
-) -> (TextureId, [[[f32; 2]; 2]; 8]) {
-    debug_assert_eq!(icon_bytes.len(), 8, "toolbar atlas table must stay in sync");
+) -> (TextureId, [[[f32; 2]; 2]; 9]) {
+    debug_assert_eq!(icon_bytes.len(), 9, "toolbar atlas table must stay in sync");
 
     let decoded: Vec<_> = icon_bytes
         .iter()
@@ -438,7 +446,7 @@ fn load_toolbar_atlas(
     let atlas_width = icon_width * decoded.len() as u32;
     let atlas_height = icon_height;
     let mut atlas_pixels = vec![0u8; atlas_width as usize * atlas_height as usize * 4];
-    let mut uv_rects = [[[0.0; 2]; 2]; 8];
+    let mut uv_rects = [[[0.0; 2]; 2]; 9];
 
     for (index, image) in decoded.iter().enumerate() {
         let x_offset = index * icon_width as usize;
