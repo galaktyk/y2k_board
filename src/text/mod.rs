@@ -1169,10 +1169,13 @@ fn selection_range(cursor_byte: usize, anchor_byte: Option<usize>) -> Option<(us
 }
 
 fn caret_geometry(buffer: &Buffer, cursor: Cursor) -> Option<(f32, f32, f32)> {
+    let mut last_matching_run = None;
+
     for run in buffer.layout_runs() {
         if run.line_i != cursor.line {
             continue;
         }
+        last_matching_run = Some((run.line_w, run.line_top, run.line_height, run.glyphs.is_empty()));
         // Handle cursor at the very beginning (leftmost edge)
         if cursor.index == 0 {
             return Some((0.0, run.line_top, run.line_height));
@@ -1180,14 +1183,15 @@ fn caret_geometry(buffer: &Buffer, cursor: Cursor) -> Option<(f32, f32, f32)> {
         if let Some((x, _)) = run.highlight(cursor, cursor) {
             return Some((x, run.line_top, run.line_height));
         }
-        if cursor.index >= run.text.len() {
-            return Some((run.line_w, run.line_top, run.line_height));
-        }
         if run.glyphs.is_empty() {
             return Some((0.0, run.line_top, run.line_height));
         }
     }
-    None
+
+    last_matching_run.map(|(line_w, line_top, line_height, glyphs_empty)| {
+        let x = if glyphs_empty { 0.0 } else { line_w };
+        (x, line_top, line_height)
+    })
 }
 
 fn atlas_bytes(image: &SwashImage) -> Option<Vec<u8>> {

@@ -17,7 +17,7 @@ use crate::ui::tool::Tool;
 
 const MARQUEE_MIN_SIZE: f32 = 4.0;
 const DRAG_START_DISTANCE: f32 = 3.0;
-const STICKY_NOTE_SIZE: f32 = 196.0;
+const STICKY_NOTE_SIZE: f32 = 128.0;
 pub const COMPUTE_TEXT_LAYOUT_DEBOUNCE: f64 = 0.10;
 
 // The pan velocity smoothing factor, between 0 and 1. 

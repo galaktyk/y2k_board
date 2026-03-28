@@ -14,12 +14,6 @@ fix touchpad
 
 
 
----
-
-fix ellipse border rendering
-the ellipse itself doens't have good AA and have some gap with the border which have good AA,
-not sure what happenning here 
-but please make the ellispse fit with it's border
 
 ---
 
