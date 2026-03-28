@@ -104,10 +104,10 @@ pub struct TextElementRange {
     pub was_active_edit: bool,
     pub element_pos: [f32; 2],
     pub element_rotation: f32,
-    pub mono_start: usize,
-    pub mono_end: usize,
-    pub color_start: usize,
-    pub color_end: usize,
+    pub mono_start: u32,
+    pub mono_end: u32,
+    pub color_start: u32,
+    pub color_end: u32,
 }
 
 #[derive(Default, Clone)]
@@ -116,42 +116,14 @@ pub struct PreparedTextDraw {
     pub color_instances: Vec<TextInstanceData>,
     pub caret_pos: Option<Vec2>,
     pub element_ranges: Vec<TextElementRange>,
-    element_range_index: HashMap<u64, usize>,
-    scratch_mono_instances: Vec<TextInstanceData>,
-    scratch_color_instances: Vec<TextInstanceData>,
-    scratch_element_ranges: Vec<TextElementRange>,
-    scratch_element_range_index: HashMap<u64, usize>,
+    element_range_index: HashMap<u64, u32>,
 }
 
 impl PreparedTextDraw {
-    fn push_scratch_element_range(&mut self, range: TextElementRange) {
-        let index = self.scratch_element_ranges.len();
-        self.scratch_element_range_index
-            .insert(range.element_id, index);
-        self.scratch_element_ranges.push(range);
-    }
-
-    fn begin_rebuild(&mut self) {
-        self.scratch_mono_instances.clear();
-        self.scratch_color_instances.clear();
-        self.scratch_element_ranges.clear();
-        self.scratch_element_range_index.clear();
-        self.caret_pos = None;
-    }
-
-    fn finish_rebuild(&mut self, caret_pos: Option<Vec2>) {
-        std::mem::swap(&mut self.mono_instances, &mut self.scratch_mono_instances);
-        std::mem::swap(&mut self.color_instances, &mut self.scratch_color_instances);
-        std::mem::swap(&mut self.element_ranges, &mut self.scratch_element_ranges);
-        std::mem::swap(
-            &mut self.element_range_index,
-            &mut self.scratch_element_range_index,
-        );
-        self.scratch_mono_instances.clear();
-        self.scratch_color_instances.clear();
-        self.scratch_element_ranges.clear();
-        self.scratch_element_range_index.clear();
-        self.caret_pos = caret_pos;
+    fn push_element_range(&mut self, range: TextElementRange) {
+        let index = self.element_ranges.len() as u32;
+        self.element_range_index.insert(range.element_id, index);
+        self.element_ranges.push(range);
     }
 
     pub fn release_memory(&mut self) {
@@ -163,14 +135,6 @@ impl PreparedTextDraw {
         self.element_ranges.shrink_to_fit();
         self.element_range_index.clear();
         self.element_range_index.shrink_to_fit();
-        self.scratch_mono_instances.clear();
-        self.scratch_mono_instances.shrink_to_fit();
-        self.scratch_color_instances.clear();
-        self.scratch_color_instances.shrink_to_fit();
-        self.scratch_element_ranges.clear();
-        self.scratch_element_ranges.shrink_to_fit();
-        self.scratch_element_range_index.clear();
-        self.scratch_element_range_index.shrink_to_fit();
         self.caret_pos = None;
     }
 }
@@ -442,26 +406,38 @@ impl TextSystem {
     ) -> PreparedTextDraw {
         self.ensure_overlay_pixel(ctx, text_atlas);
 
-        let candidates: Vec<&Element> = board
-            .elements
-            .iter()
-            .filter(|element| {
-                let active_content = active_edit
-                    .filter(|edit| edit.element_id == element.id)
-                    .map(|edit| edit.content);
-                active_content
-                    .or_else(|| element.text.as_ref().map(|text| text.content.as_str()))
-                    .map(|content| !content.is_empty())
-                    .unwrap_or(false)
-            })
-            .collect();
+        let prev_mono_instances = std::mem::take(&mut prepared.mono_instances);
+        let prev_color_instances = std::mem::take(&mut prepared.color_instances);
+        let prev_element_ranges = std::mem::take(&mut prepared.element_ranges);
+        let prev_element_range_index = std::mem::take(&mut prepared.element_range_index);
 
-        prepared.begin_rebuild();
+        prepared.mono_instances.reserve(prev_mono_instances.capacity());
+        prepared.color_instances.reserve(prev_color_instances.capacity());
+        prepared.element_ranges.reserve(prev_element_ranges.capacity());
+        prepared
+            .element_range_index
+            .reserve(prev_element_range_index.len());
+        prepared.caret_pos = None;
         let mut caret_pos = None;
 
-        for element in candidates {
-            let mono_start = prepared.scratch_mono_instances.len();
-            let color_start = prepared.scratch_color_instances.len();
+        for element in &board.elements {
+            let content = if let Some(edit) = active_edit.filter(|edit| edit.element_id == element.id) {
+                edit.content
+            } else {
+                element.text.as_ref().map(|text| text.content.as_str()).unwrap_or_default()
+            };
+
+            let is_active_edit = active_edit
+                .as_ref()
+                .map(|edit| edit.element_id == element.id)
+                .unwrap_or(false);
+
+            if content.is_empty() && !is_active_edit {
+                continue;
+            }
+
+            let mono_start = prepared.mono_instances.len();
+            let color_start = prepared.color_instances.len();
             let is_active_edit = active_edit
                 .as_ref()
                 .map(|edit| edit.element_id == element.id)
@@ -469,8 +445,8 @@ impl TextSystem {
 
             // Attempt to reuse from previous draw
             if !is_active_edit {
-                if let Some(&prev_range_index) = prepared.element_range_index.get(&element.id) {
-                    let prev_range = &prepared.element_ranges[prev_range_index];
+                if let Some(&prev_range_index) = prev_element_range_index.get(&element.id) {
+                    let prev_range = &prev_element_ranges[prev_range_index as usize];
                     if prev_range.generation == element.text_layout_generation && !prev_range.was_active_edit {
                         let pos_diff = element.pos - Vec2::from(prev_range.element_pos);
                         let rot_diff = element.rotation - prev_range.element_rotation;
@@ -487,17 +463,17 @@ impl TextSystem {
                         let origin_f32 = (element.pos + element.size * 0.5).to_array();
                         let origin_i16 = [origin_f32[0] as i16, origin_f32[1] as i16];
 
-                        prepared.scratch_mono_instances.extend_from_slice(
-                            &prepared.mono_instances[prev_range.mono_start..prev_range.mono_end],
+                        prepared.mono_instances.extend_from_slice(
+                            &prev_mono_instances[prev_range.mono_start as usize..prev_range.mono_end as usize],
                         );
-                        prepared.scratch_color_instances.extend_from_slice(
-                            &prepared.color_instances[prev_range.color_start..prev_range.color_end],
+                        prepared.color_instances.extend_from_slice(
+                            &prev_color_instances[prev_range.color_start as usize..prev_range.color_end as usize],
                         );
 
-                        let mono_end = prepared.scratch_mono_instances.len();
-                        let color_end = prepared.scratch_color_instances.len();
+                        let mono_end = prepared.mono_instances.len();
+                        let color_end = prepared.color_instances.len();
 
-                        for inst in &mut prepared.scratch_mono_instances[mono_start..mono_end] {
+                        for inst in &mut prepared.mono_instances[mono_start..mono_end] {
                             if pos_diff != Vec2::ZERO || rot_diff != 0.0 {
                                 inst.pos[0] += pos_diff.x;
                                 inst.pos[1] += pos_diff.y;
@@ -508,7 +484,7 @@ impl TextSystem {
                             inst.color = new_color_u8;
                         }
 
-                        for inst in &mut prepared.scratch_color_instances[color_start..color_end] {
+                        for inst in &mut prepared.color_instances[color_start..color_end] {
                             if pos_diff != Vec2::ZERO || rot_diff != 0.0 {
                                 inst.pos[0] += pos_diff.x;
                                 inst.pos[1] += pos_diff.y;
@@ -519,30 +495,20 @@ impl TextSystem {
                             inst.color[3] = new_color_u8[3];
                         }
 
-                        prepared.push_scratch_element_range(TextElementRange {
+                        prepared.push_element_range(TextElementRange {
                             element_id: element.id,
                             generation: element.text_layout_generation,
                             was_active_edit: false,
                             element_pos: element.pos.to_array(),
                             element_rotation: element.rotation,
-                            mono_start,
-                            mono_end,
-                            color_start,
-                            color_end,
+                            mono_start: mono_start as u32,
+                            mono_end: mono_end as u32,
+                            color_start: color_start as u32,
+                            color_end: color_end as u32,
                         });
                         continue;
                     }
                 }
-            }
-
-            let content = if is_active_edit {
-                active_edit.unwrap().content
-            } else {
-                element.text.as_ref().map(|text| text.content.as_str()).unwrap_or_default()
-            };
-
-            if content.is_empty() {
-                continue;
             }
 
             let origin = (element.pos + element.size * 0.5).to_array();
@@ -600,20 +566,64 @@ impl TextSystem {
                         None,
                     );
                     buffer.shape_until_scroll(&mut self.font_system, true);
-                    let glyph_data = buffer
-                        .layout_runs()
-                        .flat_map(|run| {
-                            run.glyphs.iter().map(move |glyph| {
-                                let physical = glyph.physical((0.0, run.line_y), 1.0);
-                                let glyph_color = glyph
-                                    .color_opt
-                                    .map(cosmic_color_to_rgba)
-                                    .unwrap_or(default_color);
-                                (physical.cache_key, physical.x, physical.y, glyph_color)
-                            })
-                        })
-                        .collect();
-                    (glyph_data, world_min)
+                    for run in buffer.layout_runs() {
+                        for glyph in run.glyphs.iter() {
+                            let physical = glyph.physical((0.0, run.line_y), 1.0);
+                            let glyph_color = glyph
+                                .color_opt
+                                .map(cosmic_color_to_rgba)
+                                .unwrap_or(default_color);
+                            let Some(resolved) =
+                                self.resolve_glyph(ctx, text_atlas, emoji_atlas, physical.cache_key)
+                            else {
+                                continue;
+                            };
+
+                            let instance_color = match resolved.kind {
+                                AtlasKind::Mono => glyph_color,
+                                AtlasKind::Color => [1.0, 1.0, 1.0, glyph_color[3]],
+                            };
+
+                            let pos = world_min
+                                + Vec2::new(
+                                    (physical.x + resolved.entry.left) as f32,
+                                    (physical.y - resolved.entry.top) as f32,
+                                );
+
+                            let atlas_size = match resolved.kind {
+                                AtlasKind::Mono => TEXT_ATLAS_SIZE,
+                                AtlasKind::Color => EMOJI_ATLAS_SIZE,
+                            };
+
+                            let instance = TextInstanceData::new(
+                                pos.to_array(),
+                                [resolved.entry.width as f32, resolved.entry.height as f32],
+                                origin,
+                                element.rotation,
+                                resolved.entry.uv_min(atlas_size as f32),
+                                resolved.entry.uv_max(atlas_size as f32),
+                                instance_color,
+                                element.selected,
+                            );
+
+                            match resolved.kind {
+                                AtlasKind::Mono => prepared.mono_instances.push(instance),
+                                AtlasKind::Color => prepared.color_instances.push(instance),
+                            }
+                        }
+                    }
+                    prepared.push_element_range(TextElementRange {
+                        element_id: element.id,
+                        generation: element.text_layout_generation,
+                        was_active_edit: false,
+                        element_pos: element.pos.to_array(),
+                        element_rotation: element.rotation,
+                        mono_start: mono_start as u32,
+                        mono_end: prepared.mono_instances.len() as u32,
+                        color_start: color_start as u32,
+                        color_end: prepared.color_instances.len() as u32,
+                    });
+                    continue;
                 };
 
             for (cache_key, phys_x, phys_y, glyph_color) in glyph_data {
@@ -650,21 +660,21 @@ impl TextSystem {
                 );
 
                 match resolved.kind {
-                    AtlasKind::Mono => prepared.scratch_mono_instances.push(instance),
-                    AtlasKind::Color => prepared.scratch_color_instances.push(instance),
+                    AtlasKind::Mono => prepared.mono_instances.push(instance),
+                    AtlasKind::Color => prepared.color_instances.push(instance),
                 }
             }
 
-            prepared.push_scratch_element_range(TextElementRange {
+            prepared.push_element_range(TextElementRange {
                 element_id: element.id,
                 generation: element.text_layout_generation,
                 was_active_edit: is_active_edit,
                 element_pos: element.pos.to_array(),
                 element_rotation: element.rotation,
-                mono_start,
-                mono_end: prepared.scratch_mono_instances.len(),
-                color_start,
-                color_end: prepared.scratch_color_instances.len(),
+                mono_start: mono_start as u32,
+                mono_end: prepared.mono_instances.len() as u32,
+                color_start: color_start as u32,
+                color_end: prepared.color_instances.len() as u32,
             });
         }
 
@@ -677,12 +687,12 @@ impl TextSystem {
                     edit.cursor_byte,
                     edit.selection_anchor_byte,
                 );
-                prepared.scratch_mono_instances.extend(overlay);
+                prepared.mono_instances.extend(overlay);
                 caret_pos = overlay_caret_pos;
             }
         }
 
-        prepared.finish_rebuild(caret_pos);
+        prepared.caret_pos = caret_pos;
         prepared
     }
 
