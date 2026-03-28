@@ -275,6 +275,7 @@ impl App {
 
         let active_text_edit = self.text_edit.as_ref().map(TextEditSession::as_active_edit);
         let current_edit_snapshot = self.text_edit.as_ref().map(TextEditSession::snapshot);
+        let previous_draw = self.cached_text_draw.take().unwrap_or_default();
 
         let prepared = self.text_system.build_text_instances(
             &mut *self.ctx,
@@ -282,7 +283,7 @@ impl App {
             self.renderer.emoji_atlas(),
             &self.board,
             active_text_edit,
-            self.cached_text_draw.as_ref(),
+            previous_draw,
         );
 
         self.renderer.upload_scene_text_instances(

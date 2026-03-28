@@ -117,13 +117,41 @@ pub struct PreparedTextDraw {
     pub caret_pos: Option<Vec2>,
     pub element_ranges: Vec<TextElementRange>,
     element_range_index: HashMap<u64, usize>,
+    scratch_mono_instances: Vec<TextInstanceData>,
+    scratch_color_instances: Vec<TextInstanceData>,
+    scratch_element_ranges: Vec<TextElementRange>,
+    scratch_element_range_index: HashMap<u64, usize>,
 }
 
 impl PreparedTextDraw {
-    fn push_element_range(&mut self, range: TextElementRange) {
-        let index = self.element_ranges.len();
-        self.element_range_index.insert(range.element_id, index);
-        self.element_ranges.push(range);
+    fn push_scratch_element_range(&mut self, range: TextElementRange) {
+        let index = self.scratch_element_ranges.len();
+        self.scratch_element_range_index
+            .insert(range.element_id, index);
+        self.scratch_element_ranges.push(range);
+    }
+
+    fn begin_rebuild(&mut self) {
+        self.scratch_mono_instances.clear();
+        self.scratch_color_instances.clear();
+        self.scratch_element_ranges.clear();
+        self.scratch_element_range_index.clear();
+        self.caret_pos = None;
+    }
+
+    fn finish_rebuild(&mut self, caret_pos: Option<Vec2>) {
+        std::mem::swap(&mut self.mono_instances, &mut self.scratch_mono_instances);
+        std::mem::swap(&mut self.color_instances, &mut self.scratch_color_instances);
+        std::mem::swap(&mut self.element_ranges, &mut self.scratch_element_ranges);
+        std::mem::swap(
+            &mut self.element_range_index,
+            &mut self.scratch_element_range_index,
+        );
+        self.scratch_mono_instances.clear();
+        self.scratch_color_instances.clear();
+        self.scratch_element_ranges.clear();
+        self.scratch_element_range_index.clear();
+        self.caret_pos = caret_pos;
     }
 
     pub fn release_memory(&mut self) {
@@ -135,6 +163,14 @@ impl PreparedTextDraw {
         self.element_ranges.shrink_to_fit();
         self.element_range_index.clear();
         self.element_range_index.shrink_to_fit();
+        self.scratch_mono_instances.clear();
+        self.scratch_mono_instances.shrink_to_fit();
+        self.scratch_color_instances.clear();
+        self.scratch_color_instances.shrink_to_fit();
+        self.scratch_element_ranges.clear();
+        self.scratch_element_ranges.shrink_to_fit();
+        self.scratch_element_range_index.clear();
+        self.scratch_element_range_index.shrink_to_fit();
         self.caret_pos = None;
     }
 }
@@ -402,7 +438,7 @@ impl TextSystem {
         emoji_atlas: TextureId,
         board: &Board,
         active_edit: Option<ActiveTextEdit<'_>>,
-        previous_draw: Option<&PreparedTextDraw>,
+        mut prepared: PreparedTextDraw,
     ) -> PreparedTextDraw {
         self.ensure_overlay_pixel(ctx, text_atlas);
 
@@ -420,11 +456,12 @@ impl TextSystem {
             })
             .collect();
 
-        let mut prepared = PreparedTextDraw::default();
+        prepared.begin_rebuild();
+        let mut caret_pos = None;
 
         for element in candidates {
-            let mono_start = prepared.mono_instances.len();
-            let color_start = prepared.color_instances.len();
+            let mono_start = prepared.scratch_mono_instances.len();
+            let color_start = prepared.scratch_color_instances.len();
             let is_active_edit = active_edit
                 .as_ref()
                 .map(|edit| edit.element_id == element.id)
@@ -432,70 +469,68 @@ impl TextSystem {
 
             // Attempt to reuse from previous draw
             if !is_active_edit {
-                if let Some(prev) = previous_draw {
-                    if let Some(&prev_range_index) = prev.element_range_index.get(&element.id) {
-                        let prev_range = &prev.element_ranges[prev_range_index];
-                        if prev_range.generation == element.text_layout_generation && !prev_range.was_active_edit {
-                            let pos_diff = element.pos - Vec2::from(prev_range.element_pos);
-                            let rot_diff = element.rotation - prev_range.element_rotation;
+                if let Some(&prev_range_index) = prepared.element_range_index.get(&element.id) {
+                    let prev_range = &prepared.element_ranges[prev_range_index];
+                    if prev_range.generation == element.text_layout_generation && !prev_range.was_active_edit {
+                        let pos_diff = element.pos - Vec2::from(prev_range.element_pos);
+                        let rot_diff = element.rotation - prev_range.element_rotation;
 
-                            let new_selected = if element.selected { 1 } else { 0 };
-                            let text_color = element.text.as_ref().map(|t| t.color).unwrap_or(palette::BLACK);
-                            let new_color_u8 = [
-                                (text_color[0] * 255.0) as u8,
-                                (text_color[1] * 255.0) as u8,
-                                (text_color[2] * 255.0) as u8,
-                                (text_color[3] * 255.0) as u8,
-                            ];
+                        let new_selected = if element.selected { 1 } else { 0 };
+                        let text_color = element.text.as_ref().map(|t| t.color).unwrap_or(palette::BLACK);
+                        let new_color_u8 = [
+                            (text_color[0] * 255.0) as u8,
+                            (text_color[1] * 255.0) as u8,
+                            (text_color[2] * 255.0) as u8,
+                            (text_color[3] * 255.0) as u8,
+                        ];
 
-                            let origin_f32 = (element.pos + element.size * 0.5).to_array();
-                            let origin_i16 = [origin_f32[0] as i16, origin_f32[1] as i16];
+                        let origin_f32 = (element.pos + element.size * 0.5).to_array();
+                        let origin_i16 = [origin_f32[0] as i16, origin_f32[1] as i16];
 
-                            prepared.mono_instances.extend_from_slice(
-                                &prev.mono_instances[prev_range.mono_start..prev_range.mono_end],
-                            );
-                            prepared.color_instances.extend_from_slice(
-                                &prev.color_instances[prev_range.color_start..prev_range.color_end],
-                            );
+                        prepared.scratch_mono_instances.extend_from_slice(
+                            &prepared.mono_instances[prev_range.mono_start..prev_range.mono_end],
+                        );
+                        prepared.scratch_color_instances.extend_from_slice(
+                            &prepared.color_instances[prev_range.color_start..prev_range.color_end],
+                        );
 
-                            let mono_end = prepared.mono_instances.len();
-                            let color_end = prepared.color_instances.len();
+                        let mono_end = prepared.scratch_mono_instances.len();
+                        let color_end = prepared.scratch_color_instances.len();
 
-                            for inst in &mut prepared.mono_instances[mono_start..mono_end] {
-                                if pos_diff != Vec2::ZERO || rot_diff != 0.0 {
-                                    inst.pos[0] += pos_diff.x;
-                                    inst.pos[1] += pos_diff.y;
-                                    inst.origin = origin_i16;
-                                    inst.rotation = element.rotation;
-                                }
-                                inst.selected = new_selected;
-                                inst.color = new_color_u8;
+                        for inst in &mut prepared.scratch_mono_instances[mono_start..mono_end] {
+                            if pos_diff != Vec2::ZERO || rot_diff != 0.0 {
+                                inst.pos[0] += pos_diff.x;
+                                inst.pos[1] += pos_diff.y;
+                                inst.origin = origin_i16;
+                                inst.rotation = element.rotation;
                             }
-
-                            for inst in &mut prepared.color_instances[color_start..color_end] {
-                                if pos_diff != Vec2::ZERO || rot_diff != 0.0 {
-                                    inst.pos[0] += pos_diff.x;
-                                    inst.pos[1] += pos_diff.y;
-                                    inst.origin = origin_i16;
-                                    inst.rotation = element.rotation;
-                                }
-                                inst.selected = new_selected;
-                                inst.color[3] = new_color_u8[3];
-                            }
-
-                            prepared.push_element_range(TextElementRange {
-                                element_id: element.id,
-                                generation: element.text_layout_generation,
-                                was_active_edit: false,
-                                element_pos: element.pos.to_array(),
-                                element_rotation: element.rotation,
-                                mono_start,
-                                mono_end,
-                                color_start,
-                                color_end,
-                            });
-                            continue;
+                            inst.selected = new_selected;
+                            inst.color = new_color_u8;
                         }
+
+                        for inst in &mut prepared.scratch_color_instances[color_start..color_end] {
+                            if pos_diff != Vec2::ZERO || rot_diff != 0.0 {
+                                inst.pos[0] += pos_diff.x;
+                                inst.pos[1] += pos_diff.y;
+                                inst.origin = origin_i16;
+                                inst.rotation = element.rotation;
+                            }
+                            inst.selected = new_selected;
+                            inst.color[3] = new_color_u8[3];
+                        }
+
+                        prepared.push_scratch_element_range(TextElementRange {
+                            element_id: element.id,
+                            generation: element.text_layout_generation,
+                            was_active_edit: false,
+                            element_pos: element.pos.to_array(),
+                            element_rotation: element.rotation,
+                            mono_start,
+                            mono_end,
+                            color_start,
+                            color_end,
+                        });
+                        continue;
                     }
                 }
             }
@@ -615,38 +650,39 @@ impl TextSystem {
                 );
 
                 match resolved.kind {
-                    AtlasKind::Mono => prepared.mono_instances.push(instance),
-                    AtlasKind::Color => prepared.color_instances.push(instance),
+                    AtlasKind::Mono => prepared.scratch_mono_instances.push(instance),
+                    AtlasKind::Color => prepared.scratch_color_instances.push(instance),
                 }
             }
 
-            prepared.push_element_range(TextElementRange {
+            prepared.push_scratch_element_range(TextElementRange {
                 element_id: element.id,
                 generation: element.text_layout_generation,
                 was_active_edit: is_active_edit,
                 element_pos: element.pos.to_array(),
                 element_rotation: element.rotation,
                 mono_start,
-                mono_end: prepared.mono_instances.len(),
+                mono_end: prepared.scratch_mono_instances.len(),
                 color_start,
-                color_end: prepared.color_instances.len(),
+                color_end: prepared.scratch_color_instances.len(),
             });
         }
 
         if let Some(edit) = active_edit {
             if let Some(element) = board.element(edit.element_id) {
-                let (overlay, caret_pos) = self.build_edit_overlay_instances(
+                let (overlay, overlay_caret_pos) = self.build_edit_overlay_instances(
                     element,
                     edit.content,
                     edit.line_offsets,
                     edit.cursor_byte,
                     edit.selection_anchor_byte,
                 );
-                prepared.mono_instances.extend(overlay);
-                prepared.caret_pos = caret_pos;
+                prepared.scratch_mono_instances.extend(overlay);
+                caret_pos = overlay_caret_pos;
             }
         }
 
+        prepared.finish_rebuild(caret_pos);
         prepared
     }
 
