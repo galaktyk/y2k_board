@@ -18,7 +18,7 @@ pub use element::{
 use geometry::element_hit;
 pub use geometry::{
     line_bend_handle_position, line_curve_handle_offset_from_handle,
-    line_world_normals_from_anchor, rotate_point, sample_line_polyline, world_to_local_norm,
+    line_world_normals_from_anchor, rotate_point, world_to_local_norm,
 };
 use operation::HistoryEntry;
 pub use operation::{
@@ -38,6 +38,15 @@ pub struct Board {
     redo_stack: Vec<HistoryEntry>,
     emitted_ops: Vec<BoardOperation>,
     next_id: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LinePreviewPatch {
+    pub id: u64,
+    pub pos: Vec2,
+    pub size: Vec2,
+    pub start_normal: Option<Vec2>,
+    pub end_normal: Option<Vec2>,
 }
 
 impl Board {
@@ -302,14 +311,14 @@ impl Board {
         })
     }
 
-    /// Compute preview positions for lines connected to elements being dragged
-    /// by temporary transform previews. Returns `(line_id, new_pos, new_size)` for
-    /// each affected line that is **not** itself selected.
+    /// Compute preview positions and endpoint normals for lines connected to elements
+    /// being dragged by temporary transform previews. Each patch targets one line that
+    /// is not itself selected.
     pub fn compute_drag_line_previews(
         &self,
         selected_ids: &std::collections::HashSet<u64>,
         preview_transforms: &std::collections::HashMap<u64, ElementTransform>,
-    ) -> Vec<(u64, Vec2, Vec2)> {
+    ) -> Vec<LinePreviewPatch> {
         let mut result = Vec::new();
         let mut seen = std::collections::HashSet::new();
 
@@ -336,6 +345,8 @@ impl Board {
 
                 let mut start_pos = line.pos;
                 let mut end_pos = line.pos + line.size;
+                let mut start_normal = line.line_start_normal;
+                let mut end_normal = line.line_end_normal;
 
                 if let Some(start) = &endpoints.start {
                     if let Some(transform) =
@@ -343,6 +354,8 @@ impl Board {
                     {
                         start_pos =
                             Self::anchored_position_from_transform(transform, start.norm_pos);
+                        start_normal =
+                            Some(line_world_normals_from_anchor(start.norm_pos, transform.rotation));
                     }
                 }
 
@@ -351,10 +364,18 @@ impl Board {
                         self.preview_transform(end.target_id, preview_transforms)
                     {
                         end_pos = Self::anchored_position_from_transform(transform, end.norm_pos);
+                        end_normal =
+                            Some(line_world_normals_from_anchor(end.norm_pos, transform.rotation));
                     }
                 }
 
-                result.push((line_id, start_pos, end_pos - start_pos));
+                result.push(LinePreviewPatch {
+                    id: line_id,
+                    pos: start_pos,
+                    size: end_pos - start_pos,
+                    start_normal,
+                    end_normal,
+                });
             }
         }
 

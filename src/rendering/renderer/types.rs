@@ -7,6 +7,8 @@ pub const MAX_IMAGE_INSTANCES: usize = 8_192;
 pub struct InstanceData {
     pub pos: [f32; 2],
     pub size: [f32; 2],
+    pub line_c1: [f32; 2],
+    pub line_c2: [f32; 2],
     pub color: [u8; 4],
     pub rotation: f32,
     pub alpha: u8,
@@ -62,6 +64,8 @@ impl InstanceData {
         Self {
             pos,
             size,
+            line_c1: [0.0, 0.0],
+            line_c2: [0.0, 0.0],
             color: [
                 (color_f32[0] * 255.0) as u8,
                 (color_f32[1] * 255.0) as u8,
@@ -78,6 +82,12 @@ impl InstanceData {
 
     pub fn with_stroke_width(mut self, stroke_width: u8) -> Self {
         self.stroke_width = stroke_width;
+        self
+    }
+
+    pub fn with_line_curve_controls(mut self, c1: [f32; 2], c2: [f32; 2]) -> Self {
+        self.line_c1 = c1;
+        self.line_c2 = c2;
         self
     }
 

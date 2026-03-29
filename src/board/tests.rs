@@ -423,7 +423,13 @@ fn compute_drag_line_previews_tracks_resized_targets() {
 
     assert_eq!(
         previews,
-        vec![(2, Vec2::new(40.0, 10.0), Vec2::new(20.0, 0.0))]
+        vec![LinePreviewPatch {
+            id: 2,
+            pos: Vec2::new(40.0, 10.0),
+            size: Vec2::new(20.0, 0.0),
+            start_normal: Some(Vec2::new(1.0, 0.0)),
+            end_normal: None,
+        }]
     );
 }
 
@@ -458,10 +464,15 @@ fn compute_drag_line_previews_tracks_rotated_targets() {
 
     let previews = board.compute_drag_line_previews(&selected_ids, &preview_transforms);
 
-    assert_eq!(
-        previews,
-        vec![(2, Vec2::new(10.0, 20.0), Vec2::new(50.0, -10.0))]
-    );
+    assert_eq!(previews.len(), 1);
+    let preview = previews[0];
+    assert_eq!(preview.id, 2);
+    assert_eq!(preview.pos, Vec2::new(10.0, 20.0));
+    assert_eq!(preview.size, Vec2::new(50.0, -10.0));
+    assert_eq!(preview.end_normal, None);
+
+    let start_normal = preview.start_normal.expect("expected rotated start normal");
+    assert!((start_normal - Vec2::new(0.0, 1.0)).length() < 0.0001);
 }
 
 #[test]
@@ -583,6 +594,16 @@ fn connected_line_end_tangent_stays_outside_target() {
     let pre_end = sample_cubic(curve, 0.99);
 
     assert!(pre_end.x < curve.p3.x);
+}
+
+#[test]
+fn perpendicular_connected_line_normal_pushes_control_farther_outward() {
+    let mut line = line_element(1, Vec2::ZERO, Vec2::new(100.0, 0.0));
+    line.line_start_normal = Some(Vec2::new(0.0, -1.0));
+
+    let curve = line_curve(&line).unwrap();
+
+    assert!(curve.c1.y < -30.0);
 }
 
 #[test]

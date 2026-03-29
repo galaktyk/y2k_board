@@ -1,6 +1,7 @@
 use glam::Vec2;
 
-use crate::board::{sample_line_polyline, Element, ShapeType};
+use crate::board::geometry::{line_curve, CubicBezier};
+use crate::board::{Element, ShapeType};
 use crate::input::SelectionBounds;
 use crate::palette;
 use crate::rendering::renderer::InstanceData;
@@ -26,7 +27,7 @@ pub fn element_instance(element: &Element, alpha: f32) -> InstanceData {
 }
 
 pub fn selection_instance(element: &Element, zoom: f32, alpha: f32) -> Option<InstanceData> {
-    if !element.selected || element.shape == ShapeType::Line && element.is_curved_line() {
+    if !element.selected || element.shape == ShapeType::Line {
         return None;
     }
 
@@ -38,7 +39,7 @@ pub fn selection_instances(element: &Element, zoom: f32, alpha: f32) -> Vec<Inst
         return Vec::new();
     }
 
-    if element.shape == ShapeType::Line && element.is_curved_line() {
+    if element.shape == ShapeType::Line {
         return line_instances(
             element,
             CREATION_OUTLINE_COLOR,
@@ -81,6 +82,7 @@ pub fn connection_preview_instance(
     stroke_width: u8,
     alpha: f32,
 ) -> InstanceData {
+    let (c1, c2) = straight_line_controls(start, end);
     InstanceData::new(
         start.to_array(),
         (end - start).to_array(),
@@ -91,6 +93,7 @@ pub fn connection_preview_instance(
         false,
     )
     .with_stroke_width(stroke_width.max(1))
+    .with_line_curve_controls(c1.to_array(), c2.to_array())
     .with_line_arrowheads(false, true)
 }
 
@@ -249,34 +252,50 @@ fn line_instances(
     arrow_start: bool,
     arrow_end: bool,
 ) -> Vec<InstanceData> {
-    let points = sample_line_polyline(element);
-    if points.len() < 2 {
+    let Some(curve) = line_curve_instance(element) else {
         return Vec::new();
+    };
+
+    let mut instance = InstanceData::new(
+        element.pos.to_array(),
+        element.size.to_array(),
+        0.0,
+        color,
+        shape_type,
+        alpha,
+        selected,
+    )
+    .with_stroke_width(stroke_width.max(1))
+    .with_line_curve_controls(curve.c1.to_array(), curve.c2.to_array());
+
+    if shape_type > 1.5 && shape_type < 2.5 {
+        instance = instance.with_line_arrowheads(arrow_start, arrow_end);
     }
 
-    let last_segment = points.len() - 2;
-    let mut out = Vec::with_capacity(points.len() - 1);
-    for (index, segment) in points.windows(2).enumerate() {
-        let mut instance = InstanceData::new(
-            segment[0].to_array(),
-            (segment[1] - segment[0]).to_array(),
-            0.0,
-            color,
-            shape_type,
-            alpha,
-            selected,
-        )
-        .with_stroke_width(stroke_width.max(1));
-        if shape_type > 1.5 && shape_type < 2.5 {
-            instance = instance.with_line_arrowheads(
-                arrow_start && index == 0,
-                arrow_end && index == last_segment,
-            );
-        }
-        out.push(instance);
+    vec![instance]
+}
+
+fn line_curve_instance(element: &Element) -> Option<CubicBezier> {
+    if element.shape != ShapeType::Line || element.size.length_squared() <= 0.0001 {
+        return None;
     }
 
-    out
+    line_curve(element).or_else(|| {
+        let start = element.pos;
+        let end = element.pos + element.size;
+        let (c1, c2) = straight_line_controls(start, end);
+        Some(CubicBezier {
+            p0: start,
+            c1,
+            c2,
+            p3: end,
+        })
+    })
+}
+
+fn straight_line_controls(start: Vec2, end: Vec2) -> (Vec2, Vec2) {
+    let delta = end - start;
+    (start + delta / 3.0, start + delta * (2.0 / 3.0))
 }
 
 fn bounds_outline_instance(

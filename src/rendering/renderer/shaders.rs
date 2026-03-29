@@ -2,6 +2,8 @@ pub const VERTEX_SRC: &str = r#"#version 100
 attribute vec2 a_pos;
 attribute vec2 i_pos;
 attribute vec2 i_size;
+attribute vec2 i_line_c1;
+attribute vec2 i_line_c2;
 attribute vec4 i_color;
 attribute float i_rotation;
 attribute vec4 i_pack;
@@ -16,11 +18,25 @@ varying vec2 v_uv;
 varying vec4 v_color;
 varying float v_shape;
 varying float v_alpha;
-varying vec2 v_line_p;
-varying float v_line_len;
+varying vec2 v_world_pos;
+varying vec2 v_line_p0;
+varying vec2 v_line_c1;
+varying vec2 v_line_c2;
+varying vec2 v_line_p3;
 varying vec2 v_line_arrows;
 varying vec2 v_size;
 varying float v_stroke_width;
+
+vec2 apply_selected_transform(vec2 point, float selected) {
+    if (selected > 0.5) {
+        float sel_c = cos(u_rotate_angle);
+        float sel_s = sin(u_rotate_angle);
+        mat2 sel_rot = mat2(sel_c, sel_s, -sel_s, sel_c);
+        point += u_move_offset;
+        point = u_rotate_center + sel_rot * (point - u_rotate_center);
+    }
+    return point;
+}
 
 void main() {
     // Instance data is packed on the Rust side to keep the vertex format compact.
@@ -34,29 +50,40 @@ void main() {
     vec4 actual_color = i_color / 255.0;
 
     vec2 world_pos;
-    // Lines and line outlines are rendered from a padded quad built around the
-    // segment direction so the fragment shader can measure distance to the line.
-    if ((i_shape > 1.5 && i_shape < 2.5) || (i_shape > 5.5 && i_shape < 6.5)) {
-        vec2 dir = i_size;
-        float len = length(dir);
-        if (len < 0.0001) { len = 0.0001; }
-        vec2 u = dir / len;
-        vec2 v = vec2(-u.y, u.x);
+    bool is_line_shape = ((i_shape > 1.5 && i_shape < 2.5) || (i_shape > 5.5 && i_shape < 6.5));
 
-        // Shape 6 (selection overlay) needs only a small screen-space margin.
-        // Shape 2 (line with arrows) needs enough room for the world-space arrow head.
+    // Lines and line overlays are rendered from a single padded quad around the
+    // entire cubic Bezier instead of many CPU-generated segment quads.
+    if (is_line_shape) {
+        vec2 p0 = i_pos;
+        vec2 p3 = i_pos + i_size;
+        vec2 c1 = i_line_c1;
+        vec2 c2 = i_line_c2;
+
+        p0 = apply_selected_transform(p0, i_selected);
+        c1 = apply_selected_transform(c1, i_selected);
+        c2 = apply_selected_transform(c2, i_selected);
+        p3 = apply_selected_transform(p3, i_selected);
+
+        vec2 min_pt = min(min(p0, p3), min(c1, c2));
+        vec2 max_pt = max(max(p0, p3), max(c1, c2));
+
+        float line_margin = max(i_stroke_width * u_world_per_px, u_world_per_px * 1.0) + u_world_per_px * 2.0;
+        float arrow_half_width = max(i_stroke_width * 3.125, u_world_per_px * 5.0);
+        float arrow_length = max(i_stroke_width * 6.25, u_world_per_px * 10.0);
         float margin = (i_shape > 5.5 && i_shape < 6.5)
-            ? u_world_per_px * 3.0
-            : i_stroke_width * 4.0 + u_world_per_px * 2.0;
+            ? u_world_per_px * 4.0
+            : max(line_margin, max(arrow_half_width, arrow_length)) + u_world_per_px * 2.0;
 
-        vec2 p = vec2(
-            mix(-margin, len + margin, a_pos.x),
-            mix(-margin, margin, a_pos.y)
-        );
-        world_pos = i_pos + p.x * u + p.y * v;
+        min_pt -= vec2(margin);
+        max_pt += vec2(margin);
 
-        v_line_p = p;
-        v_line_len = len;
+        world_pos = mix(min_pt, max_pt, a_pos);
+        v_world_pos = world_pos;
+        v_line_p0 = p0;
+        v_line_c1 = c1;
+        v_line_c2 = c2;
+        v_line_p3 = p3;
         v_line_arrows = vec2(i_arrow_start, i_arrow_end);
         v_uv = a_pos;
     } else {
@@ -71,15 +98,18 @@ void main() {
         v_uv = a_pos;
         v_size = draw_size;
         v_line_arrows = vec2(0.0);
+        v_world_pos = world_pos;
     }
 
-    vec2 center = i_pos + i_size * 0.5;
-    float c = cos(i_rotation);
-    float s = sin(i_rotation);
-    mat2 rot = mat2(c, s, -s, c);
-    world_pos = center + rot * (world_pos - center);
+    if (!is_line_shape) {
+        vec2 center = i_pos + i_size * 0.5;
+        float c = cos(i_rotation);
+        float s = sin(i_rotation);
+        mat2 rot = mat2(c, s, -s, c);
+        world_pos = center + rot * (world_pos - center);
+    }
 
-    if (i_selected > 0.5) {
+    if (!is_line_shape && i_selected > 0.5) {
         float sel_c = cos(u_rotate_angle);
         float sel_s = sin(u_rotate_angle);
         mat2 sel_rot = mat2(sel_c, sel_s, -sel_s, sel_c);
@@ -91,7 +121,7 @@ void main() {
     v_color = actual_color;
     v_shape = i_shape;
     v_alpha = i_alpha;
-    if (!((i_shape > 0.5 && i_shape < 4.5) || ((i_shape > 1.5 && i_shape < 2.5) || (i_shape > 5.5 && i_shape < 6.5)))) {
+    if (!((i_shape > 0.5 && i_shape < 4.5) || is_line_shape)) {
         v_size = i_size;
     }
     v_stroke_width = i_stroke_width;
@@ -107,11 +137,16 @@ varying vec2 v_uv;
 varying vec4 v_color;
 varying float v_shape;
 varying float v_alpha;
-varying vec2 v_line_p;
-varying float v_line_len;
+varying vec2 v_world_pos;
+varying vec2 v_line_p0;
+varying vec2 v_line_c1;
+varying vec2 v_line_c2;
+varying vec2 v_line_p3;
 varying vec2 v_line_arrows;
 varying vec2 v_size;
 varying float v_stroke_width;
+
+const int CUBIC_DISTANCE_STEPS = 24;
 
 // Rectangle and ellipse outlines use edge distance inside an expanded quad.
 float outline_alpha(float edge, float width, float aa) {
@@ -128,20 +163,37 @@ float ellipse_signed_distance(vec2 p, vec2 radius) {
     return f / max(length(grad), 0.0001);
 }
 
-// Distance from a local point to the finite line segment laid out in v_line_p.
-float line_segment_distance(vec2 p, float len) {
-    float dx = p.x - clamp(p.x, 0.0, len);
-    return length(vec2(dx, p.y));
-}
-
-float line_segment_alpha(vec2 p, float start, float end, float thickness, float aa) {
-    float len = max(end - start, 0.0);
-    if (len <= 0.0001) {
-        return 0.0;
+float point_segment_distance(vec2 point, vec2 start, vec2 end) {
+    vec2 segment = end - start;
+    float len2 = dot(segment, segment);
+    if (len2 <= 0.0001) {
+        return length(point - start);
     }
 
-    float d = line_segment_distance(vec2(p.x - start, p.y), len);
-    return 1.0 - smoothstep(thickness - aa, thickness + aa, d);
+    float t = clamp(dot(point - start, segment) / len2, 0.0, 1.0);
+    return length(point - (start + segment * t));
+}
+
+vec2 sample_cubic(vec2 p0, vec2 c1, vec2 c2, vec2 p3, float t) {
+    float mt = 1.0 - t;
+    return p0 * (mt * mt * mt)
+        + c1 * (3.0 * mt * mt * t)
+        + c2 * (3.0 * mt * t * t)
+        + p3 * (t * t * t);
+}
+
+float cubic_distance(vec2 point, vec2 p0, vec2 c1, vec2 c2, vec2 p3) {
+    vec2 prev = p0;
+    float min_dist = length(point - p0);
+
+    for (int i = 1; i <= CUBIC_DISTANCE_STEPS; i++) {
+        float t = float(i) / float(CUBIC_DISTANCE_STEPS);
+        vec2 curr = sample_cubic(p0, c1, c2, p3, t);
+        min_dist = min(min_dist, point_segment_distance(point, prev, curr));
+        prev = curr;
+    }
+
+    return min_dist;
 }
 
 // Simple triangular arrowhead (not rounded).
@@ -167,6 +219,36 @@ float arrow_triangle_alpha(
     float sdf = max(d_top, d_base);
 
     return 1.0 - smoothstep(-aa, aa, sdf);
+}
+
+vec2 safe_normalize(vec2 vector, vec2 fallback) {
+    float len = length(vector);
+    if (len > 0.0001) {
+        return vector / len;
+    }
+
+    float fallback_len = length(fallback);
+    if (fallback_len > 0.0001) {
+        return fallback / fallback_len;
+    }
+
+    return vec2(1.0, 0.0);
+}
+
+float arrow_world_alpha(
+    vec2 point,
+    vec2 tip,
+    vec2 tip_to_base,
+    float arrow_length,
+    float arrow_half_width,
+    float aa
+) {
+    vec2 u = safe_normalize(tip_to_base, v_line_p3 - v_line_p0);
+    vec2 v = vec2(-u.y, u.x);
+    vec2 delta = point - tip;
+    float axial = dot(delta, u);
+    float lateral = dot(delta, v);
+    return arrow_triangle_alpha(axial, lateral, arrow_length, arrow_half_width, aa);
 }
 
 float fixed_stroke_width() {
@@ -211,34 +293,20 @@ void main() {
         float a = smoothstep(0.0, aa, -sd);
         gl_FragColor = vec4(v_color.rgb, alpha * a);
     } else if (v_shape < 2.5) {
-        vec2 p = v_line_p;
         float aa = max(u_world_per_px * 0.75, 0.0001);
-        // Line body thickness is screen-space (constant pixel width).
         float thickness = max(v_stroke_width * u_world_per_px, u_world_per_px * 1.0);
-        // Arrow head is pure world-space so it scales with zoom like normal elements.
-        // We add a minimum screen-space size so it's visible when zoomed out.
         float arrow_half_width = max(v_stroke_width * 3.125, u_world_per_px * 5.0);
         float arrow_length = max(v_stroke_width * 6.25, u_world_per_px * 10.0);
-
-        float max_arrow_length = v_line_len * 0.45;
-        if (arrow_length > max_arrow_length) {
-            float scale = max_arrow_length / arrow_length;
-            arrow_length = max_arrow_length;
-            arrow_half_width *= scale;
-        }
-
-        float body_start = (v_line_arrows.x > 0.5) ? arrow_length : 0.0;
-        float body_end = (v_line_arrows.y > 0.5) ? v_line_len - arrow_length : v_line_len;
-        float a = 0.0;
-        if (body_end > body_start) {
-            a = line_segment_alpha(p, body_start, body_end, thickness, aa);
-        }
+        float distance = cubic_distance(v_world_pos, v_line_p0, v_line_c1, v_line_c2, v_line_p3);
+        float a = 1.0 - smoothstep(thickness - aa, thickness + aa, distance);
 
         if (v_line_arrows.x > 0.5) {
-            a = max(a, arrow_triangle_alpha(p.x, p.y, arrow_length, arrow_half_width, aa));
+            vec2 start_tangent = safe_normalize(v_line_c1 - v_line_p0, v_line_p3 - v_line_p0);
+            a = max(a, arrow_world_alpha(v_world_pos, v_line_p0, start_tangent, arrow_length, arrow_half_width, aa));
         }
         if (v_line_arrows.y > 0.5) {
-            a = max(a, arrow_triangle_alpha(v_line_len - p.x, p.y, arrow_length, arrow_half_width, aa));
+            vec2 end_tangent = safe_normalize(v_line_p3 - v_line_c2, v_line_p3 - v_line_p0);
+            a = max(a, arrow_world_alpha(v_world_pos, v_line_p3, -end_tangent, arrow_length, arrow_half_width, aa));
         }
 
         gl_FragColor = vec4(v_color.rgb, alpha * a);
@@ -269,8 +337,7 @@ void main() {
         float a = outline_alpha(edge, border, aa);
         gl_FragColor = vec4(v_color.rgb, alpha * a);
     } else if (v_shape < 6.5) {
-        vec2 p = v_line_p;
-        float d = line_segment_distance(p, v_line_len);
+        float d = cubic_distance(v_world_pos, v_line_p0, v_line_c1, v_line_c2, v_line_p3);
         // Keep the overlay centered on the line with a total visible width of 1 px.
         float half_width = fixed_centered_stroke_half_width();
         float aa = max(u_world_per_px * 0.5, 0.0001);

@@ -138,6 +138,8 @@ impl Renderer {
                 VertexAttribute::with_buffer("a_pos", VertexFormat::Float2, 0),
                 VertexAttribute::with_buffer("i_pos", VertexFormat::Float2, 1),
                 VertexAttribute::with_buffer("i_size", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_line_c1", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_line_c2", VertexFormat::Float2, 1),
                 VertexAttribute::with_buffer("i_color", VertexFormat::Byte4, 1),
                 VertexAttribute::with_buffer("i_rotation", VertexFormat::Float1, 1),
                 VertexAttribute::with_buffer("i_pack", VertexFormat::Byte4, 1),

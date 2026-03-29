@@ -127,17 +127,17 @@ fn base_line_curve(element: &Element) -> Option<CubicBezier> {
     }
 
     let dir = chord / len;
-    let start_dir = element
+    let start_normal = element
         .line_start_normal
-        .and_then(normalize_or_none)
-        .unwrap_or(dir);
-    let end_dir = element
+        .and_then(normalize_or_none);
+    let end_normal = element
         .line_end_normal
         .and_then(normalize_or_none)
-        .map(|normal| -normal)
-        .unwrap_or(dir);
-    let start_offset = tangent_offset_for_direction(len, chord, start_dir);
-    let end_offset = tangent_offset_for_direction(len, chord, end_dir);
+        .map(|normal| -normal);
+    let start_dir = start_normal.unwrap_or(dir);
+    let end_dir = end_normal.unwrap_or(dir);
+    let start_offset = tangent_offset_for_direction(len, chord, start_dir, start_normal.is_some());
+    let end_offset = tangent_offset_for_direction(len, chord, end_dir, end_normal.is_some());
 
     let c1 = p0 + start_dir * start_offset;
     let c2 = p3 - end_dir * end_offset;
@@ -263,16 +263,29 @@ fn line_curve_midpoint_offset(line: &Element) -> Vec2 {
     line_chord_axis(line) * line.line_midpoint_shift + line_bend_axis(line) * line.line_bend
 }
 
-fn tangent_offset_for_direction(length: f32, chord: Vec2, tangent_dir: Vec2) -> f32 {
-    let desired = length * 0.28;
+fn tangent_offset_for_direction(
+    length: f32,
+    chord: Vec2,
+    tangent_dir: Vec2,
+    anchored_to_normal: bool,
+) -> f32 {
     let projected = chord.dot(tangent_dir).abs();
-    let directional_cap = if projected > CURVE_EPSILON {
-        projected * 0.65 + length * 0.08
+    let alignment = (projected / length.max(CURVE_EPSILON)).clamp(0.0, 1.0);
+    let perpendicularity = if anchored_to_normal {
+        1.0 - alignment
     } else {
-        length * 0.18
+        0.0
+    };
+    let desired = length * (0.28 + perpendicularity * 0.14);
+    let directional_cap = if projected > CURVE_EPSILON {
+        projected * 0.65 + length * (0.08 + perpendicularity * 0.14)
+    } else {
+        length * (0.18 + perpendicularity * 0.24)
     };
 
-    let max_offset = MAX_CURVE_TANGENT_OFFSET.min((length * 0.5).max(MIN_CURVE_TANGENT_OFFSET));
+    let max_offset_scale = 0.5 + perpendicularity * 0.1;
+    let max_offset =
+        MAX_CURVE_TANGENT_OFFSET.min((length * max_offset_scale).max(MIN_CURVE_TANGENT_OFFSET));
     desired
         .min(directional_cap)
         .clamp(MIN_CURVE_TANGENT_OFFSET.min(max_offset), max_offset)

@@ -3,7 +3,7 @@ use std::ops::Range;
 
 use glam::Vec2;
 
-use crate::board::{Board, Element};
+use crate::board::{Board, Element, LinePreviewPatch};
 use crate::camera::Camera;
 use crate::rendering::renderer::InstanceData;
 use crate::spatial::SpatialGrid;
@@ -90,35 +90,31 @@ impl BoardRenderCache {
         for board_index in dirty_indices {
             let element = &board.elements[board_index];
             let new_instances = overlay::element_to_instances(element, 1.0);
-            let old_range = self.element_ranges[board_index].clone();
-            let old_len = old_range.end - old_range.start;
-            let new_len = new_instances.len();
-
-            self.all_instances.splice(old_range.clone(), new_instances);
-            self.element_ranges[board_index] = old_range.start..(old_range.start + new_len);
-
-            let delta = new_len as isize - old_len as isize;
-            if delta != 0 {
-                for range in self.element_ranges.iter_mut().skip(board_index + 1) {
-                    range.start = ((range.start as isize) + delta) as usize;
-                    range.end = ((range.end as isize) + delta) as usize;
-                }
-            }
+            self.replace_element_instances(board_index, new_instances);
         }
     }
 
-    /// Overwrite the pos/size of cached instances for the given elements.
-    /// Used for drag-preview of connected lines without mutating board state.
-    pub fn patch_element_positions(&mut self, patches: &[(u64, Vec2, Vec2)]) {
-        for &(id, pos, size) in patches {
-            let Some(&index) = self.index_by_id.get(&id) else {
+    /// Replace cached line instances with preview versions while dragging connected targets.
+    pub fn patch_line_previews(&mut self, board: &Board, patches: &[LinePreviewPatch]) {
+        let mut indexed_patches: Vec<(usize, LinePreviewPatch)> = patches
+            .iter()
+            .filter_map(|patch| self.index_by_id.get(&patch.id).copied().map(|index| (index, *patch)))
+            .collect();
+        indexed_patches.sort_unstable_by_key(|(index, _)| *index);
+
+        for (index, patch) in indexed_patches {
+            let Some(element) = board.element(patch.id) else {
                 continue;
             };
-            let range = self.element_ranges[index].clone();
-            for i in range {
-                self.all_instances[i].pos = pos.to_array();
-                self.all_instances[i].size = size.to_array();
-            }
+
+            let mut preview_element = element.clone();
+            preview_element.pos = patch.pos;
+            preview_element.size = patch.size;
+            preview_element.line_start_normal = patch.start_normal;
+            preview_element.line_end_normal = patch.end_normal;
+
+            let new_instances = overlay::element_to_instances(&preview_element, 1.0);
+            self.replace_element_instances(index, new_instances);
         }
     }
 
@@ -128,6 +124,23 @@ impl BoardRenderCache {
 
     pub fn element_count(&self) -> usize {
         self.id_by_index.len()
+    }
+
+    fn replace_element_instances(&mut self, board_index: usize, new_instances: Vec<InstanceData>) {
+        let old_range = self.element_ranges[board_index].clone();
+        let old_len = old_range.end - old_range.start;
+        let new_len = new_instances.len();
+
+        self.all_instances.splice(old_range.clone(), new_instances);
+        self.element_ranges[board_index] = old_range.start..(old_range.start + new_len);
+
+        let delta = new_len as isize - old_len as isize;
+        if delta != 0 {
+            for range in self.element_ranges.iter_mut().skip(board_index + 1) {
+                range.start = ((range.start as isize) + delta) as usize;
+                range.end = ((range.end as isize) + delta) as usize;
+            }
+        }
     }
 }
 

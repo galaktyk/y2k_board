@@ -104,7 +104,8 @@ impl App {
             .board
             .compute_drag_line_previews(&selected_ids, &preview_transforms);
         if !patches.is_empty() {
-            self.board_render_cache.patch_element_positions(&patches);
+            self.board_render_cache
+                .patch_line_previews(&self.board, &patches);
             // Force a GPU re-upload this frame so the patched positions reach the shader.
             self.board_scene_dirty = true;
         }
