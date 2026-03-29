@@ -348,17 +348,18 @@ float sticky_note_shadow_alpha(vec2 uv, vec2 size, float softness) {
 void main() {
     float alpha = v_color.a * v_alpha;
     vec2 uv = v_uv;
+    vec4 frag_color;
 
     // Shape ids are assigned in Rust when building instance data.
     if (v_shape < 0.5) {
-        gl_FragColor = vec4(v_color.rgb, alpha);
+        frag_color = vec4(v_color.rgb, alpha);
     } else if (v_shape < 1.5) {
         vec2 p = (uv - 0.5) * v_size;
         vec2 outer_r = abs(v_size) * 0.5;
         float aa = max(u_world_per_px * 0.75, 0.0001);
         float sd = ellipse_signed_distance(p, outer_r);
         float a = smoothstep(0.0, aa, -sd);
-        gl_FragColor = vec4(v_color.rgb, alpha * a);
+        frag_color = vec4(v_color.rgb, alpha * a);
     } else if (v_shape < 2.5) {
         float aa = max(u_world_per_px * 0.75, 0.0001);
         float thickness = max(v_stroke_width * u_world_per_px, u_world_per_px * 1.0);
@@ -376,14 +377,14 @@ void main() {
             a = max(a, arrow_world_alpha(v_world_pos, v_line_p3, -end_tangent, arrow_length, arrow_half_width, aa));
         }
 
-        gl_FragColor = vec4(v_color.rgb, alpha * a);
+        frag_color = vec4(v_color.rgb, alpha * a);
     } else if (v_shape < 3.5) {
         vec2 dist = min(uv, 1.0 - uv) * v_size;
         float edge = min(dist.x, dist.y);
         float width = max(v_stroke_width * u_world_per_px, u_world_per_px * 1.0);
         float aa = max(u_world_per_px * 0.75, 0.0001);
         float a = outline_alpha(edge, width, aa);
-        gl_FragColor = vec4(v_color.rgb, alpha * a);
+        frag_color = vec4(v_color.rgb, alpha * a);
     } else if (v_shape < 4.5) {
         vec2 p = (uv - 0.5) * v_size;
         vec2 outer_r = abs(v_size) * 0.5;
@@ -395,29 +396,35 @@ void main() {
         float outer_alpha = smoothstep(0.0, aa, -outer_sd);
         float inner_alpha = smoothstep(0.0, aa, inner_sd);
         float a = clamp(outer_alpha * inner_alpha, 0.0, 1.0);
-        gl_FragColor = vec4(v_color.rgb, alpha * a);
+        frag_color = vec4(v_color.rgb, alpha * a);
     } else if (v_shape < 5.5) {
         vec2 dist = min(uv, 1.0 - uv) * v_size;
         float edge = min(dist.x, dist.y);
         float border = fixed_stroke_width();
         float aa = fixed_stroke_aa();
         float a = outline_alpha(edge, border, aa);
-        gl_FragColor = vec4(v_color.rgb, alpha * a);
+        frag_color = vec4(v_color.rgb, alpha * a);
     } else if (v_shape < 6.5) {
         float d = cubic_distance(v_world_pos, v_line_p0, v_line_c1, v_line_c2, v_line_p3);
         // Keep the overlay centered on the line with a total visible width of 1 px.
         float half_width = fixed_centered_stroke_half_width();
         float aa = max(u_world_per_px * 0.5, 0.0001);
         float a = centered_stroke_alpha(d, half_width, aa);
-        gl_FragColor = vec4(v_color.rgb, alpha * a);
+        frag_color = vec4(v_color.rgb, alpha * a);
     } else if (v_shape < 7.5) {
         float softness = max(min(v_size.x, v_size.y) * 0.16, u_world_per_px * 10.0);
         float a = sticky_note_shadow_alpha(uv, v_size, softness);
-        gl_FragColor = vec4(v_color.rgb, alpha * a);
+        frag_color = vec4(v_color.rgb, alpha * a);
     }
     else {
-        gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+        frag_color = vec4(0.0, 0.0, 0.0, 0.0);
     }
+
+    if (frag_color.a <= 0.0) {
+        discard;
+    }
+
+    gl_FragColor = frag_color;
 }
 "#;
 

@@ -11,6 +11,7 @@ use crate::spatial::SpatialGrid;
 use crate::ui::overlay;
 
 const BOARD_VISIBILITY_MARGIN: f32 = 64.0;
+const BOARD_LAYER_BASE: f32 = 1.0;
 
 #[derive(Clone, Copy)]
 struct VisibleRange {
@@ -20,12 +21,14 @@ struct VisibleRange {
 
 #[derive(Clone, Default)]
 struct ElementInstanceRanges {
+    shadows: Range<usize>,
     shapes: Range<usize>,
     lines: Range<usize>,
 }
 
 #[derive(Default)]
 pub struct BoardRenderCache {
+    all_shadow_instances: Vec<InstanceData>,
     all_shape_instances: Vec<InstanceData>,
     all_line_instances: Vec<crate::rendering::renderer::LineInstanceData>,
     element_ranges: Vec<ElementInstanceRanges>,
@@ -36,6 +39,8 @@ pub struct BoardRenderCache {
 
 impl BoardRenderCache {
     pub fn hard_reset(&mut self) {
+        self.all_shadow_instances.clear();
+        self.all_shadow_instances.shrink_to_fit();
         self.all_shape_instances.clear();
         self.all_shape_instances.shrink_to_fit();
         self.all_line_instances.clear();
@@ -50,11 +55,13 @@ impl BoardRenderCache {
     }
 
     pub fn rebuild_all(&mut self, board: &Board) {
+        self.all_shadow_instances.clear();
         self.all_shape_instances.clear();
         self.all_line_instances.clear();
         self.element_ranges.clear();
         self.id_by_index.clear();
         self.index_by_id.clear();
+        self.all_shadow_instances.reserve(board.elements.len());
         self.all_shape_instances.reserve(board.elements.len() * 2);
         self.all_line_instances.reserve(board.elements.len());
         self.element_ranges.reserve(board.elements.len());
@@ -63,12 +70,16 @@ impl BoardRenderCache {
         for (index, element) in board.elements.iter().enumerate() {
             self.index_by_id.insert(element.id, index);
             self.id_by_index.push(element.id);
-            let instances = overlay::element_to_instances(element, 1.0).with_layer(index as f32);
+            let instances =
+                overlay::element_to_instances(element, 1.0).with_layer(index as f32 + BOARD_LAYER_BASE);
+            let shadow_start = self.all_shadow_instances.len();
             let shape_start = self.all_shape_instances.len();
             let line_start = self.all_line_instances.len();
+            self.all_shadow_instances.extend(instances.shadows);
             self.all_shape_instances.extend(instances.shapes);
             self.all_line_instances.extend(instances.lines);
             self.element_ranges.push(ElementInstanceRanges {
+                shadows: shadow_start..self.all_shadow_instances.len(),
                 shapes: shape_start..self.all_shape_instances.len(),
                 lines: line_start..self.all_line_instances.len(),
             });
@@ -105,7 +116,8 @@ impl BoardRenderCache {
 
         for board_index in dirty_indices {
             let element = &board.elements[board_index];
-            let new_instances = overlay::element_to_instances(element, 1.0).with_layer(board_index as f32);
+            let new_instances = overlay::element_to_instances(element, 1.0)
+                .with_layer(board_index as f32 + BOARD_LAYER_BASE);
             self.replace_element_instances(board_index, new_instances);
         }
     }
@@ -142,6 +154,10 @@ impl BoardRenderCache {
         }
     }
 
+    pub fn all_shadow_instances(&self) -> &[InstanceData] {
+        &self.all_shadow_instances
+    }
+
     pub fn all_shape_instances(&self) -> &[InstanceData] {
         &self.all_shape_instances
     }
@@ -160,24 +176,32 @@ impl BoardRenderCache {
         new_instances: overlay::OverlayInstances,
     ) {
         let old_ranges = self.element_ranges[board_index].clone();
+        let old_shadow_len = old_ranges.shadows.end - old_ranges.shadows.start;
         let old_shape_len = old_ranges.shapes.end - old_ranges.shapes.start;
         let old_line_len = old_ranges.lines.end - old_ranges.lines.start;
+        let new_shadow_len = new_instances.shadows.len();
         let new_shape_len = new_instances.shapes.len();
         let new_line_len = new_instances.lines.len();
 
+        self.all_shadow_instances
+            .splice(old_ranges.shadows.clone(), new_instances.shadows);
         self.all_shape_instances
             .splice(old_ranges.shapes.clone(), new_instances.shapes);
         self.all_line_instances
             .splice(old_ranges.lines.clone(), new_instances.lines);
         self.element_ranges[board_index] = ElementInstanceRanges {
+            shadows: old_ranges.shadows.start..(old_ranges.shadows.start + new_shadow_len),
             shapes: old_ranges.shapes.start..(old_ranges.shapes.start + new_shape_len),
             lines: old_ranges.lines.start..(old_ranges.lines.start + new_line_len),
         };
 
+        let shadow_delta = new_shadow_len as isize - old_shadow_len as isize;
         let shape_delta = new_shape_len as isize - old_shape_len as isize;
         let line_delta = new_line_len as isize - old_line_len as isize;
-        if shape_delta != 0 || line_delta != 0 {
+        if shadow_delta != 0 || shape_delta != 0 || line_delta != 0 {
             for ranges in self.element_ranges.iter_mut().skip(board_index + 1) {
+                ranges.shadows.start = ((ranges.shadows.start as isize) + shadow_delta) as usize;
+                ranges.shadows.end = ((ranges.shadows.end as isize) + shadow_delta) as usize;
                 ranges.shapes.start = ((ranges.shapes.start as isize) + shape_delta) as usize;
                 ranges.shapes.end = ((ranges.shapes.end as isize) + shape_delta) as usize;
                 ranges.lines.start = ((ranges.lines.start as isize) + line_delta) as usize;

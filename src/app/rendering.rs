@@ -199,6 +199,7 @@ impl App {
         if self.board_scene_dirty {
             self.renderer.upload_scene_instances(
                 &mut *self.ctx,
+                self.board_render_cache.all_shadow_instances(),
                 self.board_render_cache.all_shape_instances(),
                 self.board_render_cache.all_line_instances(),
             );
@@ -435,6 +436,14 @@ impl App {
     fn draw_preview_overlay(&mut self, board_mvp: glam::Mat4) {
         if let Some(ref preview) = self.input.preview {
             let preview_inst = overlay::preview_instances(preview, self.camera.zoom, 0.5);
+            if !preview_inst.shadows.is_empty() {
+                self.renderer.draw_shadow_instances(
+                    &mut *self.ctx,
+                    &preview_inst.shadows,
+                    board_mvp,
+                    self.screen_size,
+                );
+            }
             if !preview_inst.shapes.is_empty() {
                 self.renderer.draw_instances(
                     &mut *self.ctx,
@@ -592,7 +601,10 @@ impl App {
             return;
         };
 
-        let (ui_bg_instances, tb_icon_draws, mut ui_text_specs) = self.build_base_ui_elements();
+        let (ui_bg_instances, tb_icon_draws, mut ui_text_specs) = self.build_base_ui_elements(
+            _move_drag_offset,
+            _rotate_drag_preview,
+        );
 
         let char_count = mono_count + color_count;
         let renderer_memory = self.renderer.memory_stats(scene_image_count);
@@ -654,6 +666,8 @@ impl App {
 
     fn build_base_ui_elements(
         &self,
+        move_drag_offset: Option<Vec2>,
+        rotate_drag_preview: Option<(f32, Vec2)>,
     ) -> (
         Vec<crate::rendering::renderer::InstanceData>,
         Vec<crate::rendering::renderer::PreparedImageDraw>,
@@ -679,6 +693,20 @@ impl App {
             self.board.can_redo(),
         );
 
+        let transform_overlay_point = |point: Vec2, selected: bool| -> Vec2 {
+            if !selected {
+                return point;
+            }
+
+            if let Some((angle, center)) = rotate_drag_preview {
+                rotate_point(point, center, angle)
+            } else if let Some(offset) = move_drag_offset {
+                point + offset
+            } else {
+                point
+            }
+        };
+
         if self.board.selected_count() > 1 {
             if let Some(bounds) = self
                 .input
@@ -688,7 +716,7 @@ impl App {
             {
                 let handles = crate::input::get_selection_bounds_handles(bounds, self.camera.zoom);
                 if handles.len() > 4 {
-                    let pos = handles[4];
+                    let pos = transform_overlay_point(handles[4], true);
                     let screen_pos = self.camera.world_to_screen(pos, self.screen_size);
                     ui_text_specs.push(crate::text::UiTextSpec::top_center(
                         "↻",
@@ -703,7 +731,7 @@ impl App {
                 if e.selected {
                     if let Some(handles) = crate::input::get_element_handles(e, self.camera.zoom) {
                         if handles.len() > 4 {
-                            let pos = handles[4];
+                            let pos = transform_overlay_point(handles[4], true);
                             let screen_pos = self.camera.world_to_screen(pos, self.screen_size);
                             ui_text_specs.push(crate::text::UiTextSpec::top_center(
                                 "↻",

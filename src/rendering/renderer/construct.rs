@@ -44,7 +44,17 @@ impl Renderer {
             BufferUsage::Stream,
             BufferSource::empty::<InstanceData>(MAX_SHAPE_INSTANCES),
         );
+        let shadow_instance_buffer = ctx.new_buffer(
+            BufferType::VertexBuffer,
+            BufferUsage::Stream,
+            BufferSource::empty::<InstanceData>(MAX_SHAPE_INSTANCES),
+        );
         let scene_instance_buffer = ctx.new_buffer(
+            BufferType::VertexBuffer,
+            BufferUsage::Stream,
+            BufferSource::empty::<InstanceData>(MAX_SHAPE_INSTANCES),
+        );
+        let scene_shadow_instance_buffer = ctx.new_buffer(
             BufferType::VertexBuffer,
             BufferUsage::Stream,
             BufferSource::empty::<InstanceData>(MAX_SHAPE_INSTANCES),
@@ -206,6 +216,74 @@ impl Renderer {
             },
         );
 
+        let shadow_pipeline = ctx.new_pipeline(
+            &[
+                BufferLayout::default(),
+                BufferLayout {
+                    step_func: VertexStep::PerInstance,
+                    ..Default::default()
+                },
+            ],
+            &[
+                VertexAttribute::with_buffer("a_pos", VertexFormat::Float2, 0),
+                VertexAttribute::with_buffer("i_pos", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_size", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_color", VertexFormat::Byte4, 1),
+                VertexAttribute::with_buffer("i_rotation", VertexFormat::Float1, 1),
+                VertexAttribute::with_buffer("i_layer", VertexFormat::Float1, 1),
+                VertexAttribute::with_buffer("i_pack", VertexFormat::Byte4, 1),
+            ],
+            shape_shader,
+            PipelineParams {
+                color_blend: Some(BlendState::new(
+                    Equation::Add,
+                    BlendFactor::Value(BlendValue::SourceAlpha),
+                    BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
+                )),
+                alpha_blend: Some(BlendState::new(
+                    Equation::Add,
+                    BlendFactor::One,
+                    BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
+                )),
+                ..Default::default()
+            },
+        );
+
+        let scene_shadow_pipeline = ctx.new_pipeline(
+            &[
+                BufferLayout::default(),
+                BufferLayout {
+                    step_func: VertexStep::PerInstance,
+                    ..Default::default()
+                },
+            ],
+            &[
+                VertexAttribute::with_buffer("a_pos", VertexFormat::Float2, 0),
+                VertexAttribute::with_buffer("i_pos", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_size", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_color", VertexFormat::Byte4, 1),
+                VertexAttribute::with_buffer("i_rotation", VertexFormat::Float1, 1),
+                VertexAttribute::with_buffer("i_layer", VertexFormat::Float1, 1),
+                VertexAttribute::with_buffer("i_pack", VertexFormat::Byte4, 1),
+            ],
+            shape_shader,
+            PipelineParams {
+                depth_test: Comparison::LessOrEqual,
+                depth_write: false,
+                color_blend: Some(BlendState::new(
+                    Equation::Add,
+                    BlendFactor::Value(BlendValue::SourceAlpha),
+                    BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
+                )),
+                alpha_blend: Some(BlendState::new(
+                    Equation::Add,
+                    BlendFactor::One,
+                    BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
+                )),
+                ..Default::default()
+            },
+        );
+
         let line_shader = ctx
             .new_shader(
                 ShaderSource::Glsl {
@@ -304,6 +382,11 @@ impl Renderer {
             index_buffer: index_buf,
             images: vec![],
         };
+        let shadow_bindings = Bindings {
+            vertex_buffers: vec![vertex_buf, shadow_instance_buffer],
+            index_buffer: index_buf,
+            images: vec![],
+        };
         let line_bindings = Bindings {
             vertex_buffers: vec![vertex_buf, line_instance_buffer],
             index_buffer: index_buf,
@@ -311,6 +394,11 @@ impl Renderer {
         };
         let scene_shape_bindings = Bindings {
             vertex_buffers: vec![vertex_buf, scene_instance_buffer],
+            index_buffer: index_buf,
+            images: vec![],
+        };
+        let scene_shadow_bindings = Bindings {
+            vertex_buffers: vec![vertex_buf, scene_shadow_instance_buffer],
             index_buffer: index_buf,
             images: vec![],
         };
@@ -483,6 +571,8 @@ impl Renderer {
             shape_pipeline,
             shape_bindings,
             instance_buffer,
+            shadow_pipeline,
+            shadow_bindings,
             line_pipeline,
             line_bindings,
             line_instance_buffer,
@@ -490,6 +580,10 @@ impl Renderer {
             scene_shape_bindings,
             scene_instance_buffer,
             scene_shape_count: 0,
+            scene_shadow_pipeline,
+            scene_shadow_bindings,
+            scene_shadow_instance_buffer,
+            scene_shadow_count: 0,
             scene_line_pipeline,
             scene_line_bindings,
             scene_line_instance_buffer,

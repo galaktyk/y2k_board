@@ -13,6 +13,7 @@ const MULTI_SELECTION_BOUNDS_COLOR: [f32; 4] = palette::BLUE;
 const FIXED_SCREEN_OUTLINE_SHAPE_TYPE: f32 = 5.0;
 const FIXED_SCREEN_LINE_OUTLINE_SHAPE_TYPE: f32 = 6.0;
 const STICKY_NOTE_SHADOW_SHAPE_TYPE: f32 = 7.0;
+const STICKY_NOTE_SHADOW_LAYER_OFFSET: f32 = 0.25;
 const STICKY_NOTE_SHADOW_OFFSET_Y: f32 = 6.0;
 const STICKY_NOTE_SHADOW_EXPAND_X: f32 = 8.0;
 const STICKY_NOTE_SHADOW_EXPAND_Y: f32 = 10.0;
@@ -20,12 +21,17 @@ const STICKY_NOTE_SHADOW_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.18];
 
 #[derive(Default)]
 pub struct OverlayInstances {
+    pub shadows: Vec<InstanceData>,
     pub shapes: Vec<InstanceData>,
     pub lines: Vec<LineInstanceData>,
 }
 
 impl OverlayInstances {
     pub fn with_layer(mut self, layer: f32) -> Self {
+        let shadow_layer = (layer - STICKY_NOTE_SHADOW_LAYER_OFFSET).max(0.0);
+        for instance in &mut self.shadows {
+            *instance = instance.with_layer(shadow_layer);
+        }
         for instance in &mut self.shapes {
             *instance = instance.with_layer(layer);
         }
@@ -56,6 +62,7 @@ pub fn selection_instances(element: &Element, zoom: f32, alpha: f32) -> OverlayI
 
     if element.shape == ShapeType::Line {
         return OverlayInstances {
+            shadows: Vec::new(),
             shapes: Vec::new(),
             lines: line_instances(
                 element,
@@ -71,6 +78,7 @@ pub fn selection_instances(element: &Element, zoom: f32, alpha: f32) -> OverlayI
     }
 
     OverlayInstances {
+        shadows: Vec::new(),
         shapes: selection_instance(element, zoom, alpha).into_iter().collect(),
         lines: Vec::new(),
     }
@@ -123,7 +131,7 @@ pub fn element_to_instances(element: &Element, alpha: f32) -> OverlayInstances {
 
     match element.shape {
         ShapeType::Rect => {
-            push_sticky_note_shadow_instance(&mut out.shapes, element, alpha);
+            push_sticky_note_shadow_instance(&mut out.shadows, element, alpha);
             push_fill_instance(&mut out.shapes, element, 0.0, element.color, alpha);
             push_border_instance(
                 &mut out.shapes,

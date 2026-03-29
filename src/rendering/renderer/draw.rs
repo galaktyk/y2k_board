@@ -71,6 +71,31 @@ impl Renderer {
         ctx.draw(0, 6, instances.len() as i32);
     }
 
+    pub fn draw_shadow_instances(
+        &mut self,
+        ctx: &mut dyn RenderingBackend,
+        instances: &[InstanceData],
+        mvp: glam::Mat4,
+        screen_size: Vec2,
+    ) {
+        if instances.is_empty() {
+            return;
+        }
+
+        let world_per_px = Self::world_per_px(mvp, screen_size);
+        ctx.buffer_update(self.shadow_bindings.vertex_buffers[1], BufferSource::slice(instances));
+        ctx.apply_pipeline(&self.shadow_pipeline);
+        ctx.apply_bindings(&self.shadow_bindings);
+        ctx.apply_uniforms(UniformsSource::table(&ShapeUniforms {
+            u_mvp: mvp.to_cols_array_2d(),
+            u_world_per_px: world_per_px,
+            u_move_offset: [0.0, 0.0],
+            u_rotate_center: [0.0, 0.0],
+            u_rotate_angle: 0.0,
+        }));
+        ctx.draw(0, 6, instances.len() as i32);
+    }
+
     pub fn draw_line_instances(
         &mut self,
         ctx: &mut dyn RenderingBackend,
@@ -99,12 +124,20 @@ impl Renderer {
     pub fn upload_scene_instances(
         &mut self,
         ctx: &mut dyn RenderingBackend,
+        shadow_instances: &[InstanceData],
         shape_instances: &[InstanceData],
         line_instances: &[LineInstanceData],
     ) {
+        self.scene_shadow_count = shadow_instances.len();
         self.scene_shape_count = shape_instances.len();
         self.scene_line_count = line_instances.len();
 
+        if !shadow_instances.is_empty() {
+            ctx.buffer_update(
+                self.scene_shadow_instance_buffer,
+                BufferSource::slice(shadow_instances),
+            );
+        }
         if !shape_instances.is_empty() {
             ctx.buffer_update(self.scene_instance_buffer, BufferSource::slice(shape_instances));
         }
@@ -124,7 +157,7 @@ impl Renderer {
         move_drag_offset: Option<Vec2>,
         rotate_drag_preview: Option<(f32, Vec2)>,
     ) {
-        if self.scene_shape_count == 0 && self.scene_line_count == 0 {
+        if self.scene_shadow_count == 0 && self.scene_shape_count == 0 && self.scene_line_count == 0 {
             return;
         }
 
@@ -138,6 +171,19 @@ impl Renderer {
         } else if let Some((angle, center)) = rotate_drag_preview {
             u_rotate_center = center.to_array();
             u_rotate_angle = angle;
+        }
+
+        if self.scene_shadow_count > 0 {
+            ctx.apply_pipeline(&self.scene_shadow_pipeline);
+            ctx.apply_bindings(&self.scene_shadow_bindings);
+            ctx.apply_uniforms(UniformsSource::table(&ShapeUniforms {
+                u_mvp: mvp.to_cols_array_2d(),
+                u_world_per_px: world_per_px,
+                u_move_offset,
+                u_rotate_center,
+                u_rotate_angle,
+            }));
+            ctx.draw(0, 6, self.scene_shadow_count as i32);
         }
 
         if self.scene_shape_count > 0 {

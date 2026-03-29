@@ -33,6 +33,8 @@ pub struct Renderer {
     shape_pipeline: Pipeline,
     shape_bindings: Bindings,
     instance_buffer: BufferId,
+    shadow_pipeline: Pipeline,
+    shadow_bindings: Bindings,
     line_pipeline: Pipeline,
     line_bindings: Bindings,
     line_instance_buffer: BufferId,
@@ -40,6 +42,10 @@ pub struct Renderer {
     scene_shape_bindings: Bindings,
     scene_instance_buffer: BufferId,
     scene_shape_count: usize,
+    scene_shadow_pipeline: Pipeline,
+    scene_shadow_bindings: Bindings,
+    scene_shadow_instance_buffer: BufferId,
+    scene_shadow_count: usize,
     scene_line_pipeline: Pipeline,
     scene_line_bindings: Bindings,
     scene_line_instance_buffer: BufferId,
@@ -82,7 +88,8 @@ impl Renderer {
                 + reserved_text_instance_bytes
                 + reserved_image_instance_bytes
                 + reserved_atlas_bytes,
-            active_scene_bytes: self.scene_shape_count * std::mem::size_of::<InstanceData>()
+            active_scene_bytes: (self.scene_shape_count + self.scene_shadow_count)
+                * std::mem::size_of::<InstanceData>()
                 + self.scene_line_count * std::mem::size_of::<LineInstanceData>()
                 + self.scene_mono_text_count * std::mem::size_of::<TextInstanceData>()
                 + self.scene_color_text_count * std::mem::size_of::<TextInstanceData>(),
