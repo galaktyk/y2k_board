@@ -167,13 +167,13 @@ pub fn hit_test(
     }
 
     if let Some(track) = layout.text_size_track {
-        if track.contains(point) {
+        if slider_hit_rect(track).contains(point) {
             return Some(PropertyPanelHit::TextSize(text_size_from_track(track, x)));
         }
     }
 
     for (target, rect) in &layout.width_tracks {
-        if rect.contains(point) {
+        if slider_hit_rect(*rect).contains(point) {
             return Some(PropertyPanelHit::Width(
                 *target,
                 width_from_track(*rect, x, *target),
@@ -726,6 +726,17 @@ fn arrow_enabled(view: &PropertyPanelView, target: LineArrowTarget) -> Option<bo
     match target {
         LineArrowTarget::Start => view.line_arrow_start,
         LineArrowTarget::End => view.line_arrow_end,
+    }
+}
+
+fn slider_hit_rect(track: Rect) -> Rect {
+    let horizontal_overhang = SLIDER_KNOB_SIZE * 0.5;
+    let vertical_overhang = (SLIDER_KNOB_SIZE - track.h).max(0.0) * 0.5;
+    Rect {
+        x: track.x - horizontal_overhang,
+        y: track.y - vertical_overhang,
+        w: track.w + horizontal_overhang * 2.0,
+        h: track.h + vertical_overhang * 2.0,
     }
 }
 

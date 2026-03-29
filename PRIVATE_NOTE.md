@@ -1,9 +1,4 @@
 
-
-the line draw got clip by those sticky notes shadow and ellipse bounding box
-
-
-
 ---
 
 fix touchpad
