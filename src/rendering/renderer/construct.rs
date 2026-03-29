@@ -2,11 +2,11 @@ use miniquad::*;
 
 use super::shaders::{
     COLOR_TEXT_FRAGMENT_SRC, FRAGMENT_SRC, GRID_FRAGMENT_SRC, GRID_VERTEX_SRC, IMAGE_FRAGMENT_SRC,
-    TEXT_FRAGMENT_SRC, TEXT_VERTEX_SRC, VERTEX_SRC,
+    LINE_VERTEX_SRC, TEXT_FRAGMENT_SRC, TEXT_VERTEX_SRC, VERTEX_SRC,
 };
 use super::{
-    ImageInstanceData, InstanceData, Renderer, TextInstanceData, MAX_IMAGE_INSTANCES,
-    MAX_SHAPE_INSTANCES, MAX_TEXT_INSTANCES,
+    ImageInstanceData, InstanceData, LineInstanceData, Renderer, TextInstanceData,
+    MAX_IMAGE_INSTANCES, MAX_LINE_INSTANCES, MAX_SHAPE_INSTANCES, MAX_TEXT_INSTANCES,
 };
 
 impl Renderer {
@@ -49,6 +49,16 @@ impl Renderer {
             BufferUsage::Stream,
             BufferSource::empty::<InstanceData>(MAX_SHAPE_INSTANCES),
         );
+        let line_instance_buffer = ctx.new_buffer(
+            BufferType::VertexBuffer,
+            BufferUsage::Stream,
+            BufferSource::empty::<LineInstanceData>(MAX_LINE_INSTANCES),
+        );
+        let scene_line_instance_buffer = ctx.new_buffer(
+            BufferType::VertexBuffer,
+            BufferUsage::Stream,
+            BufferSource::empty::<LineInstanceData>(MAX_LINE_INSTANCES),
+        );
         let text_instance_buffer = ctx.new_buffer(
             BufferType::VertexBuffer,
             BufferUsage::Stream,
@@ -70,11 +80,13 @@ impl Renderer {
             BufferSource::empty::<TextInstanceData>(MAX_TEXT_INSTANCES),
         );
         eprintln!(
-            "[Renderer] Instance buffers created: {} MB (max {} shape instances, max {} text instances)",
-            ((MAX_SHAPE_INSTANCES * std::mem::size_of::<InstanceData>())
+            "[Renderer] Instance buffers created: {} MB (max {} shape instances, max {} line instances, max {} text instances)",
+            ((MAX_SHAPE_INSTANCES * std::mem::size_of::<InstanceData>() * 2)
+                + (MAX_LINE_INSTANCES * std::mem::size_of::<LineInstanceData>() * 2)
                 + (MAX_TEXT_INSTANCES * std::mem::size_of::<TextInstanceData>()))
                 / (1024 * 1024),
             MAX_SHAPE_INSTANCES,
+            MAX_LINE_INSTANCES,
             MAX_TEXT_INSTANCES
         );
 
@@ -138,14 +150,141 @@ impl Renderer {
                 VertexAttribute::with_buffer("a_pos", VertexFormat::Float2, 0),
                 VertexAttribute::with_buffer("i_pos", VertexFormat::Float2, 1),
                 VertexAttribute::with_buffer("i_size", VertexFormat::Float2, 1),
-                VertexAttribute::with_buffer("i_line_c1", VertexFormat::Float2, 1),
-                VertexAttribute::with_buffer("i_line_c2", VertexFormat::Float2, 1),
                 VertexAttribute::with_buffer("i_color", VertexFormat::Byte4, 1),
                 VertexAttribute::with_buffer("i_rotation", VertexFormat::Float1, 1),
+                VertexAttribute::with_buffer("i_layer", VertexFormat::Float1, 1),
                 VertexAttribute::with_buffer("i_pack", VertexFormat::Byte4, 1),
             ],
             shape_shader,
             PipelineParams {
+                color_blend: Some(BlendState::new(
+                    Equation::Add,
+                    BlendFactor::Value(BlendValue::SourceAlpha),
+                    BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
+                )),
+                alpha_blend: Some(BlendState::new(
+                    Equation::Add,
+                    BlendFactor::One,
+                    BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
+                )),
+                ..Default::default()
+            },
+        );
+
+        let scene_shape_pipeline = ctx.new_pipeline(
+            &[
+                BufferLayout::default(),
+                BufferLayout {
+                    step_func: VertexStep::PerInstance,
+                    ..Default::default()
+                },
+            ],
+            &[
+                VertexAttribute::with_buffer("a_pos", VertexFormat::Float2, 0),
+                VertexAttribute::with_buffer("i_pos", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_size", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_color", VertexFormat::Byte4, 1),
+                VertexAttribute::with_buffer("i_rotation", VertexFormat::Float1, 1),
+                VertexAttribute::with_buffer("i_layer", VertexFormat::Float1, 1),
+                VertexAttribute::with_buffer("i_pack", VertexFormat::Byte4, 1),
+            ],
+            shape_shader,
+            PipelineParams {
+                depth_test: Comparison::LessOrEqual,
+                depth_write: true,
+                color_blend: Some(BlendState::new(
+                    Equation::Add,
+                    BlendFactor::Value(BlendValue::SourceAlpha),
+                    BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
+                )),
+                alpha_blend: Some(BlendState::new(
+                    Equation::Add,
+                    BlendFactor::One,
+                    BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
+                )),
+                ..Default::default()
+            },
+        );
+
+        let line_shader = ctx
+            .new_shader(
+                ShaderSource::Glsl {
+                    vertex: LINE_VERTEX_SRC,
+                    fragment: FRAGMENT_SRC,
+                },
+                ShaderMeta {
+                    uniforms: UniformBlockLayout {
+                        uniforms: vec![
+                            UniformDesc::new("u_mvp", UniformType::Mat4),
+                            UniformDesc::new("u_world_per_px", UniformType::Float1),
+                            UniformDesc::new("u_move_offset", UniformType::Float2),
+                            UniformDesc::new("u_rotate_center", UniformType::Float2),
+                            UniformDesc::new("u_rotate_angle", UniformType::Float1),
+                        ],
+                    },
+                    images: vec![],
+                },
+            )
+            .expect("line shader compile failed");
+
+        let line_pipeline = ctx.new_pipeline(
+            &[
+                BufferLayout::default(),
+                BufferLayout {
+                    step_func: VertexStep::PerInstance,
+                    ..Default::default()
+                },
+            ],
+            &[
+                VertexAttribute::with_buffer("a_pos", VertexFormat::Float2, 0),
+                VertexAttribute::with_buffer("i_pos", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_size", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_line_c1", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_line_c2", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_color", VertexFormat::Byte4, 1),
+                VertexAttribute::with_buffer("i_rotation", VertexFormat::Float1, 1),
+                VertexAttribute::with_buffer("i_layer", VertexFormat::Float1, 1),
+                VertexAttribute::with_buffer("i_pack", VertexFormat::Byte4, 1),
+            ],
+            line_shader,
+            PipelineParams {
+                color_blend: Some(BlendState::new(
+                    Equation::Add,
+                    BlendFactor::Value(BlendValue::SourceAlpha),
+                    BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
+                )),
+                alpha_blend: Some(BlendState::new(
+                    Equation::Add,
+                    BlendFactor::One,
+                    BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
+                )),
+                ..Default::default()
+            },
+        );
+
+        let scene_line_pipeline = ctx.new_pipeline(
+            &[
+                BufferLayout::default(),
+                BufferLayout {
+                    step_func: VertexStep::PerInstance,
+                    ..Default::default()
+                },
+            ],
+            &[
+                VertexAttribute::with_buffer("a_pos", VertexFormat::Float2, 0),
+                VertexAttribute::with_buffer("i_pos", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_size", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_line_c1", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_line_c2", VertexFormat::Float2, 1),
+                VertexAttribute::with_buffer("i_color", VertexFormat::Byte4, 1),
+                VertexAttribute::with_buffer("i_rotation", VertexFormat::Float1, 1),
+                VertexAttribute::with_buffer("i_layer", VertexFormat::Float1, 1),
+                VertexAttribute::with_buffer("i_pack", VertexFormat::Byte4, 1),
+            ],
+            line_shader,
+            PipelineParams {
+                depth_test: Comparison::LessOrEqual,
+                depth_write: true,
                 color_blend: Some(BlendState::new(
                     Equation::Add,
                     BlendFactor::Value(BlendValue::SourceAlpha),
@@ -165,8 +304,18 @@ impl Renderer {
             index_buffer: index_buf,
             images: vec![],
         };
+        let line_bindings = Bindings {
+            vertex_buffers: vec![vertex_buf, line_instance_buffer],
+            index_buffer: index_buf,
+            images: vec![],
+        };
         let scene_shape_bindings = Bindings {
             vertex_buffers: vec![vertex_buf, scene_instance_buffer],
+            index_buffer: index_buf,
+            images: vec![],
+        };
+        let scene_line_bindings = Bindings {
+            vertex_buffers: vec![vertex_buf, scene_line_instance_buffer],
             index_buffer: index_buf,
             images: vec![],
         };
@@ -334,9 +483,17 @@ impl Renderer {
             shape_pipeline,
             shape_bindings,
             instance_buffer,
+            line_pipeline,
+            line_bindings,
+            line_instance_buffer,
+            scene_shape_pipeline,
             scene_shape_bindings,
             scene_instance_buffer,
             scene_shape_count: 0,
+            scene_line_pipeline,
+            scene_line_bindings,
+            scene_line_instance_buffer,
+            scene_line_count: 0,
             text_pipeline,
             text_bindings,
             color_text_pipeline,

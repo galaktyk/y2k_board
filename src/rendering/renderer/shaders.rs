@@ -2,10 +2,9 @@ pub const VERTEX_SRC: &str = r#"#version 100
 attribute vec2 a_pos;
 attribute vec2 i_pos;
 attribute vec2 i_size;
-attribute vec2 i_line_c1;
-attribute vec2 i_line_c2;
 attribute vec4 i_color;
 attribute float i_rotation;
+attribute float i_layer;
 attribute vec4 i_pack;
 
 uniform mat4 u_mvp;
@@ -26,6 +25,10 @@ varying vec2 v_line_p3;
 varying vec2 v_line_arrows;
 varying vec2 v_size;
 varying float v_stroke_width;
+
+float layer_depth(float layer) {
+    return 1.0 - clamp(layer / 65535.0, 0.0, 1.0) * 2.0;
+}
 
 vec2 apply_selected_transform(vec2 point, float selected) {
     if (selected > 0.5) {
@@ -50,66 +53,30 @@ void main() {
     vec4 actual_color = i_color / 255.0;
 
     vec2 world_pos;
-    bool is_line_shape = ((i_shape > 1.5 && i_shape < 2.5) || (i_shape > 5.5 && i_shape < 6.5));
-
-    // Lines and line overlays are rendered from a single padded quad around the
-    // entire cubic Bezier instead of many CPU-generated segment quads.
-    if (is_line_shape) {
-        vec2 p0 = i_pos;
-        vec2 p3 = i_pos + i_size;
-        vec2 c1 = i_line_c1;
-        vec2 c2 = i_line_c2;
-
-        p0 = apply_selected_transform(p0, i_selected);
-        c1 = apply_selected_transform(c1, i_selected);
-        c2 = apply_selected_transform(c2, i_selected);
-        p3 = apply_selected_transform(p3, i_selected);
-
-        vec2 min_pt = min(min(p0, p3), min(c1, c2));
-        vec2 max_pt = max(max(p0, p3), max(c1, c2));
-
-        float line_margin = max(i_stroke_width * u_world_per_px, u_world_per_px * 1.0) + u_world_per_px * 2.0;
-        float arrow_half_width = max(i_stroke_width * 3.125, u_world_per_px * 5.0);
-        float arrow_length = max(i_stroke_width * 6.25, u_world_per_px * 10.0);
-        float margin = (i_shape > 5.5 && i_shape < 6.5)
-            ? u_world_per_px * 4.0
-            : max(line_margin, max(arrow_half_width, arrow_length)) + u_world_per_px * 2.0;
-
-        min_pt -= vec2(margin);
-        max_pt += vec2(margin);
-
-        world_pos = mix(min_pt, max_pt, a_pos);
-        v_world_pos = world_pos;
-        v_line_p0 = p0;
-        v_line_c1 = c1;
-        v_line_c2 = c2;
-        v_line_p3 = p3;
-        v_line_arrows = vec2(i_arrow_start, i_arrow_end);
-        v_uv = a_pos;
-    } else {
-        vec2 draw_pos = i_pos;
-        vec2 draw_size = i_size;
-        if (i_shape > 0.5 && i_shape < 4.5) {
-            float margin = max(u_world_per_px * 2.0, 0.0);
-            draw_pos -= vec2(margin);
-            draw_size += vec2(margin * 2.0);
-        }
-        world_pos = draw_pos + a_pos * draw_size;
-        v_uv = a_pos;
-        v_size = draw_size;
-        v_line_arrows = vec2(0.0);
-        v_world_pos = world_pos;
+    vec2 draw_pos = i_pos;
+    vec2 draw_size = i_size;
+    if (i_shape > 0.5 && i_shape < 4.5) {
+        float margin = max(u_world_per_px * 2.0, 0.0);
+        draw_pos -= vec2(margin);
+        draw_size += vec2(margin * 2.0);
     }
+    world_pos = draw_pos + a_pos * draw_size;
+    v_uv = a_pos;
+    v_size = draw_size;
+    v_line_arrows = vec2(0.0);
+    v_world_pos = world_pos;
+    v_line_p0 = vec2(0.0);
+    v_line_c1 = vec2(0.0);
+    v_line_c2 = vec2(0.0);
+    v_line_p3 = vec2(0.0);
 
-    if (!is_line_shape) {
-        vec2 center = i_pos + i_size * 0.5;
-        float c = cos(i_rotation);
-        float s = sin(i_rotation);
-        mat2 rot = mat2(c, s, -s, c);
-        world_pos = center + rot * (world_pos - center);
-    }
+    vec2 center = i_pos + i_size * 0.5;
+    float c = cos(i_rotation);
+    float s = sin(i_rotation);
+    mat2 rot = mat2(c, s, -s, c);
+    world_pos = center + rot * (world_pos - center);
 
-    if (!is_line_shape && i_selected > 0.5) {
+    if (i_selected > 0.5) {
         float sel_c = cos(u_rotate_angle);
         float sel_s = sin(u_rotate_angle);
         mat2 sel_rot = mat2(sel_c, sel_s, -sel_s, sel_c);
@@ -117,13 +84,113 @@ void main() {
         world_pos = u_rotate_center + sel_rot * (world_pos - u_rotate_center);
     }
 
-    gl_Position = u_mvp * vec4(world_pos, 0.0, 1.0);
+    vec4 clip_pos = u_mvp * vec4(world_pos, 0.0, 1.0);
+    clip_pos.z = layer_depth(i_layer);
+    gl_Position = clip_pos;
     v_color = actual_color;
     v_shape = i_shape;
     v_alpha = i_alpha;
-    if (!((i_shape > 0.5 && i_shape < 4.5) || is_line_shape)) {
+    if (!(i_shape > 0.5 && i_shape < 4.5)) {
         v_size = i_size;
     }
+    v_stroke_width = i_stroke_width;
+}
+"#;
+
+pub const LINE_VERTEX_SRC: &str = r#"#version 100
+attribute vec2 a_pos;
+attribute vec2 i_pos;
+attribute vec2 i_size;
+attribute vec2 i_line_c1;
+attribute vec2 i_line_c2;
+attribute vec4 i_color;
+attribute float i_rotation;
+attribute float i_layer;
+attribute vec4 i_pack;
+
+uniform mat4 u_mvp;
+uniform float u_world_per_px;
+uniform vec2 u_move_offset;
+uniform vec2 u_rotate_center;
+uniform float u_rotate_angle;
+
+varying vec2 v_uv;
+varying vec4 v_color;
+varying float v_shape;
+varying float v_alpha;
+varying vec2 v_world_pos;
+varying vec2 v_line_p0;
+varying vec2 v_line_c1;
+varying vec2 v_line_c2;
+varying vec2 v_line_p3;
+varying vec2 v_line_arrows;
+varying vec2 v_size;
+varying float v_stroke_width;
+
+float layer_depth(float layer) {
+    return 1.0 - clamp(layer / 65535.0, 0.0, 1.0) * 2.0;
+}
+
+vec2 apply_selected_transform(vec2 point, float selected) {
+    if (selected > 0.5) {
+        float sel_c = cos(u_rotate_angle);
+        float sel_s = sin(u_rotate_angle);
+        mat2 sel_rot = mat2(sel_c, sel_s, -sel_s, sel_c);
+        point += u_move_offset;
+        point = u_rotate_center + sel_rot * (point - u_rotate_center);
+    }
+    return point;
+}
+
+void main() {
+    float i_alpha = i_pack.x / 255.0;
+    float i_shape = i_pack.y;
+    float i_stroke_width = i_pack.z;
+    float i_flags = i_pack.w;
+    float i_selected = mod(i_flags, 2.0);
+    float i_arrow_start = mod(floor(i_flags / 2.0), 2.0);
+    float i_arrow_end = mod(floor(i_flags / 4.0), 2.0);
+    vec4 actual_color = i_color / 255.0;
+
+    vec2 p0 = i_pos;
+    vec2 p3 = i_pos + i_size;
+    vec2 c1 = i_line_c1;
+    vec2 c2 = i_line_c2;
+
+    p0 = apply_selected_transform(p0, i_selected);
+    c1 = apply_selected_transform(c1, i_selected);
+    c2 = apply_selected_transform(c2, i_selected);
+    p3 = apply_selected_transform(p3, i_selected);
+
+    vec2 min_pt = min(min(p0, p3), min(c1, c2));
+    vec2 max_pt = max(max(p0, p3), max(c1, c2));
+
+    float line_margin = max(i_stroke_width * u_world_per_px, u_world_per_px * 1.0) + u_world_per_px * 2.0;
+    float arrow_half_width = max(i_stroke_width * 3.125, u_world_per_px * 5.0);
+    float arrow_length = max(i_stroke_width * 6.25, u_world_per_px * 10.0);
+    float margin = (i_shape > 5.5 && i_shape < 6.5)
+        ? u_world_per_px * 4.0
+        : max(line_margin, max(arrow_half_width, arrow_length)) + u_world_per_px * 2.0;
+
+    min_pt -= vec2(margin);
+    max_pt += vec2(margin);
+
+    vec2 world_pos = mix(min_pt, max_pt, a_pos);
+
+    vec4 clip_pos = u_mvp * vec4(world_pos, 0.0, 1.0);
+    clip_pos.z = layer_depth(i_layer);
+    gl_Position = clip_pos;
+    v_color = actual_color;
+    v_shape = i_shape;
+    v_alpha = i_alpha;
+    v_world_pos = world_pos;
+    v_line_p0 = p0;
+    v_line_c1 = c1;
+    v_line_c2 = c2;
+    v_line_p3 = p3;
+    v_line_arrows = vec2(i_arrow_start, i_arrow_end);
+    v_uv = a_pos;
+    v_size = max_pt - min_pt;
     v_stroke_width = i_stroke_width;
 }
 "#;

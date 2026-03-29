@@ -106,8 +106,28 @@ pub fn line_curve_handle_offset_from_handle(line: &Element, handle_world: Vec2) 
 }
 
 pub fn line_curve(element: &Element) -> Option<CubicBezier> {
-    let mut curve = base_line_curve(element)?;
-    let control_shift = line_curve_midpoint_offset(element) * MIDPOINT_HANDLE_TO_CONTROL_SHIFT;
+    line_curve_from_state(
+        element.pos,
+        element.size,
+        element.line_bend,
+        element.line_midpoint_shift,
+        element.line_start_normal,
+        element.line_end_normal,
+    )
+}
+
+pub fn line_curve_from_state(
+    pos: Vec2,
+    size: Vec2,
+    line_bend: f32,
+    line_midpoint_shift: f32,
+    line_start_normal: Option<Vec2>,
+    line_end_normal: Option<Vec2>,
+) -> Option<CubicBezier> {
+    let mut curve = base_line_curve_from_state(pos, size, line_start_normal, line_end_normal)?;
+    let control_shift =
+        line_curve_midpoint_offset_from_state(size, line_bend, line_midpoint_shift)
+            * MIDPOINT_HANDLE_TO_CONTROL_SHIFT;
     curve.c1 += control_shift;
     curve.c2 += control_shift;
 
@@ -115,11 +135,22 @@ pub fn line_curve(element: &Element) -> Option<CubicBezier> {
 }
 
 fn base_line_curve(element: &Element) -> Option<CubicBezier> {
-    if element.shape != ShapeType::Line {
-        return None;
-    }
+    base_line_curve_from_state(
+        element.pos,
+        element.size,
+        element.line_start_normal,
+        element.line_end_normal,
+    )
+}
 
-    let (p0, p3) = element.line_endpoints();
+fn base_line_curve_from_state(
+    pos: Vec2,
+    size: Vec2,
+    line_start_normal: Option<Vec2>,
+    line_end_normal: Option<Vec2>,
+) -> Option<CubicBezier> {
+    let p0 = pos;
+    let p3 = pos + size;
     let chord = p3 - p0;
     let len = chord.length();
     if len <= CURVE_EPSILON {
@@ -127,13 +158,8 @@ fn base_line_curve(element: &Element) -> Option<CubicBezier> {
     }
 
     let dir = chord / len;
-    let start_normal = element
-        .line_start_normal
-        .and_then(normalize_or_none);
-    let end_normal = element
-        .line_end_normal
-        .and_then(normalize_or_none)
-        .map(|normal| -normal);
+    let start_normal = line_start_normal.and_then(normalize_or_none);
+    let end_normal = line_end_normal.and_then(normalize_or_none).map(|normal| -normal);
     let start_dir = start_normal.unwrap_or(dir);
     let end_dir = end_normal.unwrap_or(dir);
     let start_offset = tangent_offset_for_direction(len, chord, start_dir, start_normal.is_some());
@@ -158,29 +184,19 @@ pub fn sample_line_polyline(element: &Element) -> Vec<Vec2> {
         return Vec::new();
     }
 
-    let Some(curve) = line_curve(element) else {
-        let (start, end) = element.line_endpoints();
-        return vec![start, end];
-    };
-
-    let segments = line_curve_segment_count(element, curve);
-    let mut points = Vec::with_capacity(segments + 1);
-    for step in 0..=segments {
-        let t = step as f32 / segments as f32;
-        points.push(sample_cubic(curve, t));
-    }
+    let mut points = Vec::with_capacity(usize::from(line_sample_count(element)));
+    visit_line_polyline_points(element, |point| points.push(point));
     points
 }
 
 pub fn line_aabb(element: &Element, expand: f32) -> (Vec2, Vec2) {
-    let points = sample_line_polyline(element);
     let mut min = Vec2::splat(f32::INFINITY);
     let mut max = Vec2::splat(f32::NEG_INFINITY);
 
-    for point in points {
+    visit_line_polyline_points(element, |point| {
         min = min.min(point);
         max = max.max(point);
-    }
+    });
 
     if !min.is_finite() || !max.is_finite() {
         let (start, end) = element.line_endpoints();
@@ -217,12 +233,17 @@ pub fn line_world_normals_from_anchor(norm_pos: Vec2, rotation: f32) -> Vec2 {
 
 fn line_hit(element: &Element, point: Vec2) -> bool {
     let tolerance = f32::from(element.stroke_width.max(1)) * 0.5 + 8.0;
-    let points = sample_line_polyline(element);
-    points
-        .windows(2)
-        .map(|segment| dist_point_segment(point, segment[0], segment[1]))
-        .fold(f32::INFINITY, f32::min)
-        <= tolerance
+    let mut previous = None;
+    let mut min_distance = f32::INFINITY;
+
+    visit_line_polyline_points(element, |current| {
+        if let Some(start) = previous {
+            min_distance = min_distance.min(dist_point_segment(point, start, current));
+        }
+        previous = Some(current);
+    });
+
+    min_distance <= tolerance
 }
 
 fn line_curve_segment_count(element: &Element, curve: CubicBezier) -> usize {
@@ -260,7 +281,66 @@ fn base_curve_midpoint(line: &Element) -> Vec2 {
 }
 
 fn line_curve_midpoint_offset(line: &Element) -> Vec2 {
-    line_chord_axis(line) * line.line_midpoint_shift + line_bend_axis(line) * line.line_bend
+    line_curve_midpoint_offset_from_state(line.size, line.line_bend, line.line_midpoint_shift)
+}
+
+fn line_curve_midpoint_offset_from_state(
+    line_size: Vec2,
+    line_bend: f32,
+    line_midpoint_shift: f32,
+) -> Vec2 {
+    chord_axis_from_size(line_size) * line_midpoint_shift + bend_axis_from_size(line_size) * line_bend
+}
+
+fn bend_axis_from_size(size: Vec2) -> Vec2 {
+    let len = size.length();
+    if len <= CURVE_EPSILON {
+        Vec2::Y
+    } else {
+        Vec2::new(-size.y / len, size.x / len)
+    }
+}
+
+fn chord_axis_from_size(size: Vec2) -> Vec2 {
+    let len = size.length();
+    if len <= CURVE_EPSILON {
+        Vec2::X
+    } else {
+        size / len
+    }
+}
+
+fn line_sample_count(element: &Element) -> u8 {
+    let count = if let Some(curve) = line_curve(element) {
+        line_curve_segment_count(element, curve) + 1
+    } else if element.shape == ShapeType::Line {
+        2
+    } else {
+        0
+    };
+    count as u8
+}
+
+fn visit_line_polyline_points<F>(element: &Element, mut visit: F)
+where
+    F: FnMut(Vec2),
+{
+    if element.shape != ShapeType::Line {
+        return;
+    }
+
+    let Some(curve) = line_curve(element) else {
+        let (start, end) = element.line_endpoints();
+        visit(start);
+        visit(end);
+        return;
+    };
+
+    let segments = line_curve_segment_count(element, curve);
+    for step in 0..=segments {
+        let t = step as f32 / segments as f32;
+        visit(sample_cubic(curve, t));
+    }
 }
 
 fn tangent_offset_for_direction(

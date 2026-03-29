@@ -1013,6 +1013,7 @@ mod tests {
     use glam::Vec2;
 
     use super::*;
+    use crate::input::handlers::mouse::connection::line_anchor_from_drop;
     use crate::spatial::SpatialGrid;
 
     fn rect_target(id: u64, pos: Vec2, size: Vec2) -> Element {

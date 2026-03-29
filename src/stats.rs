@@ -1,6 +1,4 @@
-use crate::rendering::renderer::{
-    InstanceData, TextInstanceData, MAX_SHAPE_INSTANCES, MAX_TEXT_INSTANCES,
-};
+use crate::rendering::renderer::{InstanceData, RendererMemoryStats};
 use crate::text::UiTextSpec;
 use glam::Vec2;
 
@@ -19,8 +17,9 @@ pub struct StatsPanelLayout {
 /// Build screen-space text specs for the stats overlay.
 pub fn build_stats_text_specs(
     zoom: f32,
-    shapes_count: usize,
+    element_count: usize,
     char_count: usize,
+    renderer_memory: RendererMemoryStats,
     atlas_count: usize,
     atlas_total: usize,
     image_ram_used_bytes: usize,
@@ -39,14 +38,13 @@ pub fn build_stats_text_specs(
         format!("FT   {:.3}MS", frame_ms)
     };
 
-    // calculate sizes
-    let shape_bytes = MAX_SHAPE_INSTANCES * std::mem::size_of::<InstanceData>();
-    let text_bytes = MAX_TEXT_INSTANCES * std::mem::size_of::<TextInstanceData>();
-    let total_mb: f64 = (shape_bytes + text_bytes) as f64 / (1024.0 * 1024.0);
-
-    let mb_usage: f64 = ((shapes_count * std::mem::size_of::<InstanceData>()) as f64
-        + (char_count * std::mem::size_of::<TextInstanceData>()) as f64)
-        / (1024.0 * 1024.0);
+    let scene_mb = renderer_memory.active_scene_bytes as f64 / (1024.0 * 1024.0);
+    let reserved_mb = renderer_memory.reserved_gpu_bytes as f64 / (1024.0 * 1024.0);
+    let shape_reserved_mb = renderer_memory.reserved_shape_instance_bytes as f64 / (1024.0 * 1024.0);
+    let line_reserved_mb = renderer_memory.reserved_line_instance_bytes as f64 / (1024.0 * 1024.0);
+    let text_reserved_mb = renderer_memory.reserved_text_instance_bytes as f64 / (1024.0 * 1024.0);
+    let image_reserved_mb = renderer_memory.reserved_image_instance_bytes as f64 / (1024.0 * 1024.0);
+    let atlas_reserved_mb = renderer_memory.reserved_atlas_bytes as f64 / (1024.0 * 1024.0);
     let image_ram_mb = image_ram_used_bytes as f64 / (1024.0 * 1024.0);
     let image_ram_total_mb = image_ram_total_bytes as f64 / (1024.0 * 1024.0);
     let image_vram_mb = image_vram_used_bytes as f64 / (1024.0 * 1024.0);
@@ -55,9 +53,15 @@ pub fn build_stats_text_specs(
     // Lines listed top → bottom inside the panel
     let lines: Vec<String> = vec![
         format!("ZOOM  {:.3}X", zoom),
-        format!("SHAPE {}/{}", shapes_count, MAX_SHAPE_INSTANCES),
-        format!("TEXT  {}/{}", char_count, MAX_TEXT_INSTANCES),
-        format!("VRAM  {:.1}MB/{:.0}MB", mb_usage, total_mb),
+        format!("ELEM  {}", element_count),
+        format!("TEXT  {}", char_count),
+        format!("SCN   {:.1}MB", scene_mb),
+        format!("RDRV  {:.1}MB", reserved_mb),
+        format!("RSHP  {:.1}MB", shape_reserved_mb),
+        format!("RLIN  {:.1}MB", line_reserved_mb),
+        format!("RTXT  {:.1}MB", text_reserved_mb),
+        format!("RIMG  {:.1}MB", image_reserved_mb),
+        format!("RATL  {:.1}MB", atlas_reserved_mb),
         format!("ATLAS {}/{}", atlas_count, atlas_total),
         format!("IRAM  {:.1}MB/{:.0}MB", image_ram_mb, image_ram_total_mb),
         format!("IVRAM {:.1}MB/{:.0}MB", image_vram_mb, image_vram_total_mb),

@@ -1,4 +1,5 @@
 pub const MAX_SHAPE_INSTANCES: usize = 50_000;
+pub const MAX_LINE_INSTANCES: usize = 50_000;
 pub const MAX_TEXT_INSTANCES: usize = 200_000;
 pub const MAX_IMAGE_INSTANCES: usize = 8_192;
 
@@ -7,10 +8,25 @@ pub const MAX_IMAGE_INSTANCES: usize = 8_192;
 pub struct InstanceData {
     pub pos: [f32; 2],
     pub size: [f32; 2],
+    pub color: [u8; 4],
+    pub rotation: f32,
+    pub layer: f32,
+    pub alpha: u8,
+    pub shape_type: u8,
+    pub stroke_width: u8,
+    pub selected: u8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct LineInstanceData {
+    pub pos: [f32; 2],
+    pub size: [f32; 2],
     pub line_c1: [f32; 2],
     pub line_c2: [f32; 2],
     pub color: [u8; 4],
     pub rotation: f32,
+    pub layer: f32,
     pub alpha: u8,
     pub shape_type: u8,
     pub stroke_width: u8,
@@ -64,6 +80,45 @@ impl InstanceData {
         Self {
             pos,
             size,
+            color: [
+                (color_f32[0] * 255.0) as u8,
+                (color_f32[1] * 255.0) as u8,
+                (color_f32[2] * 255.0) as u8,
+                (color_f32[3] * 255.0) as u8,
+            ],
+            rotation,
+            layer: 0.0,
+            alpha: (alpha_f32 * 255.0) as u8,
+            shape_type: shape_type as u8,
+            stroke_width: 1,
+            selected: selected as u8,
+        }
+    }
+
+    pub fn with_stroke_width(mut self, stroke_width: u8) -> Self {
+        self.stroke_width = stroke_width;
+        self
+    }
+
+    pub fn with_layer(mut self, layer: f32) -> Self {
+        self.layer = layer;
+        self
+    }
+}
+
+impl LineInstanceData {
+    pub fn new(
+        pos: [f32; 2],
+        size: [f32; 2],
+        rotation: f32,
+        color_f32: [f32; 4],
+        shape_type: f32,
+        alpha_f32: f32,
+        selected: bool,
+    ) -> Self {
+        Self {
+            pos,
+            size,
             line_c1: [0.0, 0.0],
             line_c2: [0.0, 0.0],
             color: [
@@ -73,6 +128,7 @@ impl InstanceData {
                 (color_f32[3] * 255.0) as u8,
             ],
             rotation,
+            layer: 0.0,
             alpha: (alpha_f32 * 255.0) as u8,
             shape_type: shape_type as u8,
             stroke_width: 1,
@@ -88,6 +144,11 @@ impl InstanceData {
     pub fn with_line_curve_controls(mut self, c1: [f32; 2], c2: [f32; 2]) -> Self {
         self.line_c1 = c1;
         self.line_c2 = c2;
+        self
+    }
+
+    pub fn with_layer(mut self, layer: f32) -> Self {
+        self.layer = layer;
         self
     }
 

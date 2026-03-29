@@ -4,7 +4,7 @@ use crate::board::geometry::{line_curve, CubicBezier};
 use crate::board::{Element, ShapeType};
 use crate::input::SelectionBounds;
 use crate::palette;
-use crate::rendering::renderer::InstanceData;
+use crate::rendering::renderer::{InstanceData, LineInstanceData};
 
 const MARQUEE_COLOR: [f32; 4] = palette::DARK_BLUE;
 const CREATION_OUTLINE_COLOR: [f32; 4] = palette::BLUE;
@@ -18,12 +18,27 @@ const STICKY_NOTE_SHADOW_EXPAND_X: f32 = 12.0;
 const STICKY_NOTE_SHADOW_EXPAND_Y: f32 = 14.0;
 const STICKY_NOTE_SHADOW_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.26];
 
+#[derive(Default)]
+pub struct OverlayInstances {
+    pub shapes: Vec<InstanceData>,
+    pub lines: Vec<LineInstanceData>,
+}
+
+impl OverlayInstances {
+    pub fn with_layer(mut self, layer: f32) -> Self {
+        for instance in &mut self.shapes {
+            *instance = instance.with_layer(layer);
+        }
+        for instance in &mut self.lines {
+            *instance = instance.with_layer(layer);
+        }
+        self
+    }
+}
+
 #[allow(dead_code)]
-pub fn element_instance(element: &Element, alpha: f32) -> InstanceData {
+pub fn element_instance(element: &Element, alpha: f32) -> OverlayInstances {
     element_to_instances(element, alpha)
-        .into_iter()
-        .next()
-        .unwrap_or_default()
 }
 
 pub fn selection_instance(element: &Element, zoom: f32, alpha: f32) -> Option<InstanceData> {
@@ -34,27 +49,31 @@ pub fn selection_instance(element: &Element, zoom: f32, alpha: f32) -> Option<In
     Some(selection_outline_instance(element, zoom, alpha))
 }
 
-pub fn selection_instances(element: &Element, zoom: f32, alpha: f32) -> Vec<InstanceData> {
+pub fn selection_instances(element: &Element, zoom: f32, alpha: f32) -> OverlayInstances {
     if !element.selected {
-        return Vec::new();
+        return OverlayInstances::default();
     }
 
     if element.shape == ShapeType::Line {
-        return line_instances(
-            element,
-            CREATION_OUTLINE_COLOR,
-            FIXED_SCREEN_LINE_OUTLINE_SHAPE_TYPE,
-            alpha,
-            1,
-            false,
-            false,
-            false,
-        );
+        return OverlayInstances {
+            shapes: Vec::new(),
+            lines: line_instances(
+                element,
+                CREATION_OUTLINE_COLOR,
+                FIXED_SCREEN_LINE_OUTLINE_SHAPE_TYPE,
+                alpha,
+                1,
+                false,
+                false,
+                false,
+            ),
+        };
     }
 
-    selection_instance(element, zoom, alpha)
-        .into_iter()
-        .collect()
+    OverlayInstances {
+        shapes: selection_instance(element, zoom, alpha).into_iter().collect(),
+        lines: Vec::new(),
+    }
 }
 
 pub fn selection_bounds_instance(bounds: SelectionBounds, zoom: f32, alpha: f32) -> InstanceData {
@@ -65,25 +84,27 @@ pub fn marquee_instance(bounds: SelectionBounds, zoom: f32, alpha: f32) -> Insta
     bounds_outline_instance(bounds, zoom, MARQUEE_COLOR, alpha)
 }
 
-pub fn preview_instances(element: &Element, zoom: f32, alpha: f32) -> Vec<InstanceData> {
+pub fn preview_instances(element: &Element, zoom: f32, alpha: f32) -> OverlayInstances {
     let mut instances = element_to_instances(element, alpha);
 
     if element.shape != ShapeType::Line {
-        instances.push(selection_outline_instance(element, zoom, 1.0));
+        instances
+            .shapes
+            .push(selection_outline_instance(element, zoom, 1.0));
     }
 
     instances
 }
 
-pub fn connection_preview_instance(
+pub fn connection_preview_line_instance(
     start: Vec2,
     end: Vec2,
     color: [f32; 4],
     stroke_width: u8,
     alpha: f32,
-) -> InstanceData {
+) -> LineInstanceData {
     let (c1, c2) = straight_line_controls(start, end);
-    InstanceData::new(
+    LineInstanceData::new(
         start.to_array(),
         (end - start).to_array(),
         0.0,
@@ -97,15 +118,15 @@ pub fn connection_preview_instance(
     .with_line_arrowheads(false, true)
 }
 
-pub fn element_to_instances(element: &Element, alpha: f32) -> Vec<InstanceData> {
-    let mut out = Vec::new();
+pub fn element_to_instances(element: &Element, alpha: f32) -> OverlayInstances {
+    let mut out = OverlayInstances::default();
 
     match element.shape {
         ShapeType::Rect => {
-            push_sticky_note_shadow_instance(&mut out, element, alpha);
-            push_fill_instance(&mut out, element, 0.0, element.color, alpha);
+            push_sticky_note_shadow_instance(&mut out.shapes, element, alpha);
+            push_fill_instance(&mut out.shapes, element, 0.0, element.color, alpha);
             push_border_instance(
-                &mut out,
+                &mut out.shapes,
                 element,
                 3.0,
                 element.effective_stroke_color(),
@@ -113,9 +134,9 @@ pub fn element_to_instances(element: &Element, alpha: f32) -> Vec<InstanceData> 
             );
         }
         ShapeType::Ellipse => {
-            push_fill_instance(&mut out, element, 1.0, element.color, alpha);
+            push_fill_instance(&mut out.shapes, element, 1.0, element.color, alpha);
             push_border_instance(
-                &mut out,
+                &mut out.shapes,
                 element,
                 4.0,
                 element.effective_stroke_color(),
@@ -125,7 +146,7 @@ pub fn element_to_instances(element: &Element, alpha: f32) -> Vec<InstanceData> 
         ShapeType::Line => {
             let color = element.effective_stroke_color();
             if color[3] > 0.0 {
-                out.extend(line_instances(
+                out.lines.extend(line_instances(
                     element,
                     color,
                     2.0,
@@ -139,7 +160,7 @@ pub fn element_to_instances(element: &Element, alpha: f32) -> Vec<InstanceData> 
         }
 
         ShapeType::Image => {
-            out.push(InstanceData::new(
+            out.shapes.push(InstanceData::new(
                 element.pos.to_array(),
                 element.size.to_array(),
                 element.rotation,
@@ -251,12 +272,12 @@ fn line_instances(
     selected: bool,
     arrow_start: bool,
     arrow_end: bool,
-) -> Vec<InstanceData> {
+) -> Vec<LineInstanceData> {
     let Some(curve) = line_curve_instance(element) else {
         return Vec::new();
     };
 
-    let mut instance = InstanceData::new(
+    let mut instance = LineInstanceData::new(
         element.pos.to_array(),
         element.size.to_array(),
         0.0,

@@ -4,7 +4,9 @@ use miniquad::PassAction;
 use crate::board::ElementTransform;
 use crate::input::{DragMode, COMPUTE_TEXT_LAYOUT_DEBOUNCE};
 use crate::rendering::renderer::{Renderer, TextInstanceData};
-use crate::rendering::transform::{offset_instance, rotate_instance, rotate_point};
+use crate::rendering::transform::{
+    offset_instance, offset_line_instance, rotate_instance, rotate_line_instance, rotate_point,
+};
 use crate::stats;
 use crate::text::TextEditSession;
 use crate::ui::overlay;
@@ -47,12 +49,11 @@ impl App {
             );
         let image_draws = self.build_image_draws();
 
-        self.ctx.begin_default_pass(PassAction::clear_color(
-            139.0 / 255.0,
-            153.0 / 255.0,
-            180.0 / 255.0,
-            1.0,
-        ));
+        self.ctx.begin_default_pass(PassAction::Clear {
+            color: Some((139.0 / 255.0, 153.0 / 255.0, 180.0 / 255.0, 1.0)),
+            depth: Some(1.0),
+            stencil: None,
+        });
 
         self.renderer
             .draw_background_grid(&mut *self.ctx, &self.camera, self.screen_size);
@@ -196,8 +197,11 @@ impl App {
 
     fn upload_scene_shapes_if_needed(&mut self) {
         if self.board_scene_dirty {
-            self.renderer
-                .upload_scene_instances(&mut *self.ctx, self.board_render_cache.all_instances());
+            self.renderer.upload_scene_instances(
+                &mut *self.ctx,
+                self.board_render_cache.all_shape_instances(),
+                self.board_render_cache.all_line_instances(),
+            );
             self.board_scene_dirty = false;
         }
     }
@@ -431,23 +435,33 @@ impl App {
     fn draw_preview_overlay(&mut self, board_mvp: glam::Mat4) {
         if let Some(ref preview) = self.input.preview {
             let preview_inst = overlay::preview_instances(preview, self.camera.zoom, 0.5);
-            self.renderer.draw_instances(
-                &mut *self.ctx,
-                &preview_inst,
-                board_mvp,
-                self.screen_size,
-            );
+            if !preview_inst.shapes.is_empty() {
+                self.renderer.draw_instances(
+                    &mut *self.ctx,
+                    &preview_inst.shapes,
+                    board_mvp,
+                    self.screen_size,
+                );
+            }
+            if !preview_inst.lines.is_empty() {
+                self.renderer.draw_line_instances(
+                    &mut *self.ctx,
+                    &preview_inst.lines,
+                    board_mvp,
+                    self.screen_size,
+                );
+            }
         }
 
         if let Some(connection_drag) = self.input.connection_drag {
-            let preview_line = overlay::connection_preview_instance(
+            let preview_line = overlay::connection_preview_line_instance(
                 connection_drag.start_world,
                 connection_drag.end_world,
                 crate::board::DEFAULT_LINE_COLOR,
                 crate::board::DEFAULT_LINE_STROKE_WIDTH,
                 0.85,
             );
-            self.renderer.draw_instances(
+            self.renderer.draw_line_instances(
                 &mut *self.ctx,
                 &[preview_line],
                 board_mvp,
@@ -462,15 +476,29 @@ impl App {
         move_drag_offset: Option<Vec2>,
         rotate_drag_preview: Option<(f32, Vec2)>,
     ) {
-        let mut selection_inst = Vec::new();
+        let mut selection_shapes = Vec::new();
+        let mut selection_lines = Vec::new();
         for element in &self.board.elements {
-            for instance in overlay::selection_instances(element, self.camera.zoom, 1.0) {
-                selection_inst.push(
+            let instances = overlay::selection_instances(element, self.camera.zoom, 1.0);
+            for instance in instances.shapes {
+                selection_shapes.push(
                     if let Some((angle, center)) = rotate_drag_preview.filter(|_| element.selected)
                     {
                         rotate_instance(instance, center, angle)
                     } else if let Some(offset) = move_drag_offset.filter(|_| element.selected) {
                         offset_instance(instance, offset)
+                    } else {
+                        instance
+                    },
+                );
+            }
+            for instance in instances.lines {
+                selection_lines.push(
+                    if let Some((angle, center)) = rotate_drag_preview.filter(|_| element.selected)
+                    {
+                        rotate_line_instance(instance, center, angle)
+                    } else if let Some(offset) = move_drag_offset.filter(|_| element.selected) {
+                        offset_line_instance(instance, offset)
                     } else {
                         instance
                     },
@@ -484,7 +512,7 @@ impl App {
                 .or(self.input.selection_bounds)
                 .or_else(|| self.board.selected_bounds())
             {
-                selection_inst.push(overlay::selection_bounds_instance(
+                selection_shapes.push(overlay::selection_bounds_instance(
                     bounds,
                     self.camera.zoom,
                     1.0,
@@ -492,12 +520,20 @@ impl App {
             }
         }
         if let Some(bounds) = self.input.marquee_bounds {
-            selection_inst.push(overlay::marquee_instance(bounds, self.camera.zoom, 1.0));
+            selection_shapes.push(overlay::marquee_instance(bounds, self.camera.zoom, 1.0));
         }
-        if !selection_inst.is_empty() {
+        if !selection_shapes.is_empty() {
             self.renderer.draw_instances(
                 &mut *self.ctx,
-                &selection_inst,
+                &selection_shapes,
+                board_mvp,
+                self.screen_size,
+            );
+        }
+        if !selection_lines.is_empty() {
+            self.renderer.draw_line_instances(
+                &mut *self.ctx,
+                &selection_lines,
                 board_mvp,
                 self.screen_size,
             );
@@ -634,10 +670,12 @@ impl App {
             return;
         };
         let char_count = text_draw.mono_instances.len() + text_draw.color_instances.len();
+        let renderer_memory = self.renderer.memory_stats();
         let mut stats_text_specs = stats::build_stats_text_specs(
             self.camera.zoom,
             self.board.elements.len(),
             char_count,
+            renderer_memory,
             self.image_manager.atlas_count(),
             self.image_manager.atlas_capacity(),
             self.image_manager.ram_used_bytes(),
