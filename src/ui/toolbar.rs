@@ -14,6 +14,10 @@ pub const BTN_W: f32 = 52.0;
 pub const BTN_H: f32 = 48.0;
 pub const BTN_PAD: f32 = 4.0;
 pub const TOOLBAR_BOTTOM_MARGIN: f32 = 16.0;
+pub const INPUT_MODE_TOGGLE_SIZE: f32 = 30.0;
+pub const INPUT_MODE_TOGGLE_PAD: f32 = 2.0;
+pub const INPUT_MODE_TOGGLE_LEFT_MARGIN: f32 = 6.0;
+pub const INPUT_MODE_TOGGLE_BOTTOM_MARGIN: f32 = 6.0;
 
 const TOOLBAR_BG_COLOR: [f32; 4] = palette::GRAY_0;
 const TOOLBAR_HOVER_COLOR: [f32; 4] = palette::GRAY_1;
@@ -23,8 +27,9 @@ const TOOLBAR_BORDER_HIGHLIGHT: [f32; 4] = [239.0 / 255.0, 239.0 / 255.0, 239.0 
 const TOOLBAR_BORDER_SHADOW: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
 const TOOLBAR_ICON_COLOR: [f32; 4] = palette::BLACK;
 const TOOLBAR_ICON_SIZE: f32 = 32.0;
+const INPUT_MODE_ICON_SIZE: f32 = 16.0;
 const TOOLBAR_LABEL_FONT_SIZE: f32 = 12.0;
-const TOOLBAR_ICON_BYTES: [&[u8]; 9] = [
+const TOOLBAR_ICON_BYTES: [&[u8]; 11] = [
     include_bytes!("../../assets/toolbar/select.png"),
     include_bytes!("../../assets/toolbar/rect.png"),
     include_bytes!("../../assets/toolbar/ellipse.png"),
@@ -34,6 +39,8 @@ const TOOLBAR_ICON_BYTES: [&[u8]; 9] = [
     include_bytes!("../../assets/toolbar/image.png"),
     include_bytes!("../../assets/toolbar/load.png"),
     include_bytes!("../../assets/toolbar/save.png"),
+    include_bytes!("../../assets/toolbar/mouse.png"),
+    include_bytes!("../../assets/toolbar/touch_pad.png"),
 ];
 
 const ICON_SELECT: usize = 0;
@@ -45,6 +52,8 @@ const ICON_TEXT: usize = 5;
 const ICON_IMAGE: usize = 6;
 const ICON_LOAD: usize = 7;
 const ICON_SAVE: usize = 8;
+const ICON_MOUSE: usize = 9;
+const ICON_TOUCHPAD: usize = 10;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ToolbarAction {
@@ -54,6 +63,7 @@ pub enum ToolbarAction {
     Load,
     Undo,
     Redo,
+    SetTouchpadMode(bool),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -82,9 +92,20 @@ struct Button {
     x: f32, // left edge in screen pixels
 }
 
+#[derive(Clone, Copy, Debug)]
+enum InputModeButtonKind {
+    Mouse,
+    Touchpad,
+}
+
+struct InputModeButton {
+    kind: InputModeButtonKind,
+    x: f32,
+}
+
 pub struct ToolbarIcons {
     atlas: TextureId,
-    uv_rects: [[[f32; 2]; 2]; 9],
+    uv_rects: [[[f32; 2]; 2]; 11],
 }
 
 impl ToolbarIcons {
@@ -117,11 +138,24 @@ impl ToolbarIcons {
         let [uv_min, uv_max] = self.uv_rects[index];
         Some((uv_min, uv_max))
     }
+
+    fn uv_for_input_mode(&self, kind: InputModeButtonKind) -> ([f32; 2], [f32; 2]) {
+        let index = match kind {
+            InputModeButtonKind::Mouse => ICON_MOUSE,
+            InputModeButtonKind::Touchpad => ICON_TOUCHPAD,
+        };
+        let [uv_min, uv_max] = self.uv_rects[index];
+        (uv_min, uv_max)
+    }
 }
 
 pub struct Toolbar {
     pub active_tool: Tool,
     buttons: [Button; 11],
+}
+
+pub struct InputModeToggle {
+    buttons: [InputModeButton; 2],
 }
 
 impl Toolbar {
@@ -418,6 +452,200 @@ impl Toolbar {
     }
 }
 
+impl InputModeToggle {
+    pub fn new() -> Self {
+        let kinds = [InputModeButtonKind::Mouse, InputModeButtonKind::Touchpad];
+        let buttons = std::array::from_fn(|index| InputModeButton {
+            kind: kinds[index],
+            x: INPUT_MODE_TOGGLE_PAD
+                + index as f32 * (INPUT_MODE_TOGGLE_SIZE + INPUT_MODE_TOGGLE_PAD),
+        });
+        Self { buttons }
+    }
+
+    pub fn layout(&self, screen_size: Vec2) -> ToolbarLayout {
+        let width = self.buttons.len() as f32 * INPUT_MODE_TOGGLE_SIZE
+            + (self.buttons.len() as f32 + 1.0) * INPUT_MODE_TOGGLE_PAD;
+        let height = INPUT_MODE_TOGGLE_SIZE + INPUT_MODE_TOGGLE_PAD * 2.0;
+        ToolbarLayout {
+            origin: Vec2::new(
+                INPUT_MODE_TOGGLE_LEFT_MARGIN,
+                (screen_size.y - height - INPUT_MODE_TOGGLE_BOTTOM_MARGIN).max(0.0),
+            ),
+            size: Vec2::new(width, height),
+        }
+    }
+
+    pub fn contains_point(&self, screen_size: Vec2, x: f32, y: f32) -> bool {
+        let layout = self.layout(screen_size);
+        x >= layout.origin.x
+            && x < layout.origin.x + layout.size.x
+            && y >= layout.origin.y
+            && y < layout.origin.y + layout.size.y
+    }
+
+    pub fn hit_test(&self, screen_size: Vec2, x: f32, y: f32) -> Option<ToolbarAction> {
+        let layout = self.layout(screen_size);
+        let local_x = x - layout.origin.x;
+        let local_y = y - layout.origin.y;
+
+        if local_y < 0.0 || local_y >= layout.size.y {
+            return None;
+        }
+
+        for button in &self.buttons {
+            if local_x >= button.x && local_x < button.x + INPUT_MODE_TOGGLE_SIZE {
+                return Some(match button.kind {
+                    InputModeButtonKind::Mouse => ToolbarAction::SetTouchpadMode(false),
+                    InputModeButtonKind::Touchpad => ToolbarAction::SetTouchpadMode(true),
+                });
+            }
+        }
+
+        None
+    }
+
+    pub fn hovered_action(&self, screen_size: Vec2, x: f32, y: f32) -> Option<ToolbarAction> {
+        self.hit_test(screen_size, x, y)
+    }
+
+    pub fn build_instances(
+        &self,
+        screen_size: Vec2,
+        mouse_pos: Vec2,
+        touchpad_mode: bool,
+    ) -> Vec<InstanceData> {
+        let mut out = Vec::new();
+        let layout = self.layout(screen_size);
+        let hovered_action = self.hovered_action(screen_size, mouse_pos.x, mouse_pos.y);
+
+        out.push(InstanceData::new(
+            layout.origin.to_array(),
+            layout.size.to_array(),
+            0.0,
+            TOOLBAR_BG_COLOR,
+            0.0,
+            1.0,
+            false,
+        ));
+        out.push(InstanceData::new(
+            layout.origin.to_array(),
+            [layout.size.x, 1.0],
+            0.0,
+            TOOLBAR_BORDER_HIGHLIGHT,
+            0.0,
+            1.0,
+            false,
+        ));
+        out.push(InstanceData::new(
+            layout.origin.to_array(),
+            [1.0, layout.size.y],
+            0.0,
+            TOOLBAR_BORDER_HIGHLIGHT,
+            0.0,
+            1.0,
+            false,
+        ));
+        out.push(InstanceData::new(
+            [layout.origin.x, layout.origin.y + layout.size.y - 1.0],
+            [layout.size.x, 1.0],
+            0.0,
+            TOOLBAR_BORDER_SHADOW,
+            0.0,
+            1.0,
+            false,
+        ));
+        out.push(InstanceData::new(
+            [layout.origin.x + layout.size.x - 1.0, layout.origin.y],
+            [1.0, layout.size.y],
+            0.0,
+            TOOLBAR_BORDER_SHADOW,
+            0.0,
+            1.0,
+            false,
+        ));
+
+        for button in &self.buttons {
+            let action = match button.kind {
+                InputModeButtonKind::Mouse => ToolbarAction::SetTouchpadMode(false),
+                InputModeButtonKind::Touchpad => ToolbarAction::SetTouchpadMode(true),
+            };
+            let is_active = matches!(button.kind, InputModeButtonKind::Touchpad) == touchpad_mode;
+            let is_hovered = hovered_action == Some(action);
+            let button_color = if is_active && is_hovered {
+                Some(TOOLBAR_ACTIVE_HOVER_COLOR)
+            } else if is_active {
+                Some(TOOLBAR_ACTIVE_COLOR)
+            } else if is_hovered {
+                Some(TOOLBAR_HOVER_COLOR)
+            } else {
+                None
+            };
+
+            if let Some(button_color) = button_color {
+                out.push(InstanceData::new(
+                    [layout.origin.x + button.x + 1.0, layout.origin.y + 1.0],
+                    [INPUT_MODE_TOGGLE_SIZE - 2.0, INPUT_MODE_TOGGLE_SIZE - 2.0],
+                    0.0,
+                    button_color,
+                    0.0,
+                    1.0,
+                    false,
+                ));
+            }
+        }
+
+        out
+    }
+
+    pub fn build_icon_draws(
+        &self,
+        screen_size: Vec2,
+        mouse_pos: Vec2,
+        touchpad_mode: bool,
+        icons: &ToolbarIcons,
+    ) -> Vec<PreparedImageDraw> {
+        let mut out = Vec::new();
+        let layout = self.layout(screen_size);
+        let hovered_action = self.hovered_action(screen_size, mouse_pos.x, mouse_pos.y);
+        let atlas = icons.atlas_texture();
+
+        for button in &self.buttons {
+            let (uv_min, uv_max) = icons.uv_for_input_mode(button.kind);
+            let action = match button.kind {
+                InputModeButtonKind::Mouse => ToolbarAction::SetTouchpadMode(false),
+                InputModeButtonKind::Touchpad => ToolbarAction::SetTouchpadMode(true),
+            };
+            let is_active = matches!(button.kind, InputModeButtonKind::Touchpad) == touchpad_mode;
+            let is_hovered = hovered_action == Some(action);
+            let icon_alpha = if is_active || is_hovered { 1.0 } else { 0.85 };
+            let tint = [1.0, 1.0, 1.0, icon_alpha];
+            let origin_x = layout.origin.x
+                + button.x
+                + (INPUT_MODE_TOGGLE_SIZE - INPUT_MODE_ICON_SIZE) * 0.5;
+            let origin_y = layout.origin.y
+                + INPUT_MODE_TOGGLE_PAD
+                + (INPUT_MODE_TOGGLE_SIZE - INPUT_MODE_ICON_SIZE) * 0.5;
+
+            out.push(PreparedImageDraw {
+                texture: atlas,
+                instance: ImageInstanceData::new(
+                    [origin_x, origin_y],
+                    [INPUT_MODE_ICON_SIZE, INPUT_MODE_ICON_SIZE],
+                    [origin_x, origin_y],
+                    0.0,
+                    uv_min,
+                    uv_max,
+                    tint,
+                    false,
+                ),
+            });
+        }
+
+        out
+    }
+}
+
 fn matches_button_action(kind: BtnKind, action: ToolbarAction) -> bool {
     matches!(
         (kind, action),
@@ -438,8 +666,8 @@ fn matches_button_action(kind: BtnKind, action: ToolbarAction) -> bool {
 fn load_toolbar_atlas(
     ctx: &mut dyn RenderingBackend,
     icon_bytes: &[&[u8]],
-) -> (TextureId, [[[f32; 2]; 2]; 9]) {
-    debug_assert_eq!(icon_bytes.len(), 9, "toolbar atlas table must stay in sync");
+) -> (TextureId, [[[f32; 2]; 2]; 11]) {
+    debug_assert_eq!(icon_bytes.len(), 11, "toolbar atlas table must stay in sync");
 
     let decoded: Vec<_> = icon_bytes
         .iter()
@@ -452,21 +680,31 @@ fn load_toolbar_atlas(
 
     let (icon_width, icon_height) = decoded[0].dimensions();
     debug_assert_eq!(icon_width, icon_height, "toolbar icons should be square");
-    for image in &decoded[1..] {
-        let dims = image.dimensions();
-        assert_eq!(
-            dims,
-            (icon_width, icon_height),
-            "toolbar icons should share dimensions"
-        );
-    }
+    let icon_count = decoded.len() as u32;
+    let normalized: Vec<_> = decoded
+        .into_iter()
+        .map(|image| {
+            let dims = image.dimensions();
+            assert_eq!(dims.0, dims.1, "toolbar icons should be square");
+            if dims == (icon_width, icon_height) {
+                image
+            } else {
+                image::imageops::resize(
+                    &image,
+                    icon_width,
+                    icon_height,
+                    image::imageops::FilterType::Lanczos3,
+                )
+            }
+        })
+        .collect();
 
-    let atlas_width = icon_width * decoded.len() as u32;
+    let atlas_width = icon_width * icon_count;
     let atlas_height = icon_height;
     let mut atlas_pixels = vec![0u8; atlas_width as usize * atlas_height as usize * 4];
-    let mut uv_rects = [[[0.0; 2]; 2]; 9];
+    let mut uv_rects = [[[0.0; 2]; 2]; 11];
 
-    for (index, image) in decoded.iter().enumerate() {
+    for (index, image) in normalized.iter().enumerate() {
         let x_offset = index * icon_width as usize;
         let row_bytes = icon_width as usize * 4;
         for row in 0..icon_height as usize {

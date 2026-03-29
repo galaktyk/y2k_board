@@ -37,7 +37,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::ui::property_panel::{self, ColorTarget, LineArrowTarget, WidthTarget};
-use crate::ui::toolbar::{self, Toolbar, ToolbarAction};
+use crate::ui::toolbar::{self, InputModeToggle, Toolbar, ToolbarAction};
 
 const IMAGE_RAM_FLUSH_INTERVAL: Duration = Duration::from_secs(60);
 const IMAGE_RAM_FLUSH_INTERVAL_SECS: f64 = IMAGE_RAM_FLUSH_INTERVAL.as_secs_f64();
@@ -108,6 +108,7 @@ pub struct App {
     snapshot_path_user_selected: bool,
     camera: Camera,
     toolbar: Toolbar,
+    input_mode_toggle: InputModeToggle,
     toolbar_icons: toolbar::ToolbarIcons,
     input: InputState,
     spatial: SpatialGrid,
@@ -144,6 +145,7 @@ pub struct App {
 impl App {
     pub fn new() -> Self {
         let mut ctx = window::new_rendering_backend();
+        platform_cursor::prime_window_hook();
         let renderer = Renderer::new(&mut *ctx);
         let toolbar_icons = toolbar::ToolbarIcons::new(&mut *ctx);
         let snapshot_path = snapshot_io::default_snapshot_path();
@@ -160,6 +162,7 @@ impl App {
             snapshot_path_user_selected: false,
             camera: Camera::new(),
             toolbar: Toolbar::new(),
+            input_mode_toggle: InputModeToggle::new(),
             toolbar_icons,
             input: InputState::new(),
             spatial: SpatialGrid::new(),
@@ -394,6 +397,18 @@ impl App {
 
         if self
             .toolbar
+            .hovered_action(
+                self.screen_size,
+                self.input.mouse_pos.x,
+                self.input.mouse_pos.y,
+            )
+            .is_some()
+        {
+            return CursorIcon::Pointer;
+        }
+
+        if self
+            .input_mode_toggle
             .hovered_action(
                 self.screen_size,
                 self.input.mouse_pos.x,
@@ -1236,6 +1251,9 @@ impl App {
                 self.board.redo();
                 self.mark_board_structure_dirty();
             }
+            ToolbarAction::SetTouchpadMode(touchpad_mode) => {
+                self.input.touchpad_mode = touchpad_mode;
+            }
         }
     }
 }
@@ -1287,6 +1305,20 @@ impl EventHandler for App {
                 self.finish_text_edit(true);
             }
             if let Some(action) = self.toolbar.hit_test(self.screen_size, x, y) {
+                self.handle_toolbar_action(action);
+            }
+            self.input.mouse_pos = Vec2::new(x, y);
+            self.refresh_mouse_cursor();
+            self.request_redraw();
+            return;
+        }
+
+        if button == MouseButton::Left && self.input_mode_toggle.contains_point(self.screen_size, x, y)
+        {
+            if self.text_edit.is_some() {
+                self.finish_text_edit(true);
+            }
+            if let Some(action) = self.input_mode_toggle.hit_test(self.screen_size, x, y) {
                 self.handle_toolbar_action(action);
             }
             self.input.mouse_pos = Vec2::new(x, y);
@@ -1431,6 +1463,11 @@ impl EventHandler for App {
             self.input.mouse_pos.x,
             self.input.mouse_pos.y,
         );
+        let previous_input_mode_hover = self.input_mode_toggle.hovered_action(
+            self.screen_size,
+            self.input.mouse_pos.x,
+            self.input.mouse_pos.y,
+        );
         let previous_panel_hover = self.resolve_property_panel().and_then(|panel| {
             property_panel::hit_test(
                 self.screen_size,
@@ -1505,6 +1542,11 @@ impl EventHandler for App {
             self.input.mouse_pos.x,
             self.input.mouse_pos.y,
         );
+        let current_input_mode_hover = self.input_mode_toggle.hovered_action(
+            self.screen_size,
+            self.input.mouse_pos.x,
+            self.input.mouse_pos.y,
+        );
         let current_panel_hover = self.resolve_property_panel().and_then(|panel| {
             property_panel::hit_test(
                 self.screen_size,
@@ -1514,7 +1556,10 @@ impl EventHandler for App {
             )
         });
         self.refresh_mouse_cursor();
-        if previous_hover != current_hover || previous_panel_hover != current_panel_hover {
+        if previous_hover != current_hover
+            || previous_input_mode_hover != current_input_mode_hover
+            || previous_panel_hover != current_panel_hover
+        {
             self.request_redraw();
             return;
         }
@@ -1547,7 +1592,15 @@ impl EventHandler for App {
     }
 
     fn mouse_wheel_event(&mut self, dx: f32, dy: f32) {
-        input::on_scroll(&mut self.input, &mut self.camera, self.screen_size, dx, dy);
+        let wheel_ctrl = platform_cursor::consume_last_wheel_ctrl();
+        input::on_scroll(
+            &mut self.input,
+            &mut self.camera,
+            self.screen_size,
+            wheel_ctrl,
+            dx,
+            dy,
+        );
         self.request_redraw();
     }
 

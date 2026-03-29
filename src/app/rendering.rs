@@ -679,13 +679,24 @@ impl App {
             self.board.can_undo(),
             self.board.can_redo(),
         );
-        let tb_icon_draws = self.toolbar.build_icon_draws(
+        ui_bg_instances.extend(self.input_mode_toggle.build_instances(
+            self.screen_size,
+            self.input.mouse_pos,
+            self.input.touchpad_mode,
+        ));
+        let mut tb_icon_draws = self.toolbar.build_icon_draws(
             self.screen_size,
             self.input.mouse_pos,
             self.board.can_undo(),
             self.board.can_redo(),
             &self.toolbar_icons,
         );
+        tb_icon_draws.extend(self.input_mode_toggle.build_icon_draws(
+            self.screen_size,
+            self.input.mouse_pos,
+            self.input.touchpad_mode,
+            &self.toolbar_icons,
+        ));
         let mut ui_text_specs = self.toolbar.build_text_specs(
             self.screen_size,
             self.input.mouse_pos,

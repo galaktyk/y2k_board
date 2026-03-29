@@ -3,8 +3,15 @@ use glam::Vec2;
 use crate::camera::Camera;
 use crate::input::state::InputState;
 
-pub fn on_scroll(state: &mut InputState, camera: &mut Camera, screen_size: Vec2, dx: f32, dy: f32) {
-    if state.touchpad_mode && !state.ctrl_held {
+pub fn on_scroll(
+    state: &mut InputState,
+    camera: &mut Camera,
+    screen_size: Vec2,
+    wheel_ctrl: bool,
+    dx: f32,
+    dy: f32,
+) {
+    if state.touchpad_mode && !(state.ctrl_held || wheel_ctrl) {
         // In touchpad mode, interpret scroll as pan
         // Normalize by zoom so movement follows fingers 1:1 in world space
         camera.pan -= Vec2::new(dx, dy) / camera.zoom;

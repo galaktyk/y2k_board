@@ -1,4 +1,7 @@
 
+
+better color palette
+
 ---
 
 fix touchpad

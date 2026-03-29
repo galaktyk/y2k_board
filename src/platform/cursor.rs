@@ -1,7 +1,7 @@
 use miniquad::{window, CursorIcon};
 
 #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
-use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicUsize, Ordering};
 
 #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
 static ACTIVE_CUSTOM_CURSOR: AtomicUsize = AtomicUsize::new(0);
@@ -9,6 +9,27 @@ static ACTIVE_CUSTOM_CURSOR: AtomicUsize = AtomicUsize::new(0);
 static HOOKED_HWND: AtomicIsize = AtomicIsize::new(0);
 #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
 static ORIGINAL_WNDPROC: AtomicIsize = AtomicIsize::new(0);
+#[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
+static LAST_WHEEL_CTRL: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn prime_window_hook() {
+    #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
+    {
+        let _ = ensure_windows_cursor_hook();
+    }
+}
+
+pub(crate) fn consume_last_wheel_ctrl() -> bool {
+    #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
+    {
+        return LAST_WHEEL_CTRL.swap(false, Ordering::AcqRel);
+    }
+
+    #[cfg(any(target_arch = "wasm32", not(target_os = "windows")))]
+    {
+        false
+    }
+}
 
 pub(crate) fn set_cursor(cursor: CursorIcon) -> bool {
     match try_set_custom_cursor(cursor) {
@@ -168,7 +189,14 @@ unsafe extern "system" fn windows_cursor_wndproc(
     lparam: winapi::shared::minwindef::LPARAM,
 ) -> winapi::shared::minwindef::LRESULT {
     use std::mem::transmute;
-    use winapi::um::winuser::{CallWindowProcW, DefWindowProcW, SetCursor, WM_SETCURSOR, WNDPROC};
+    use winapi::um::winuser::{
+        CallWindowProcW, DefWindowProcW, SetCursor, MK_CONTROL, WM_MOUSEHWHEEL,
+        WM_MOUSEWHEEL, WM_SETCURSOR, WNDPROC,
+    };
+
+    if msg == WM_MOUSEWHEEL || msg == WM_MOUSEHWHEEL {
+        LAST_WHEEL_CTRL.store((wparam & MK_CONTROL as usize) != 0, Ordering::Release);
+    }
 
     if msg == WM_SETCURSOR {
         let cursor = active_custom_cursor();
