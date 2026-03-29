@@ -18,7 +18,7 @@ pub struct StatsPanelLayout {
 pub fn build_stats_text_specs(
     zoom: f32,
     element_count: usize,
-    char_count: usize,
+    _char_count: usize,
     renderer_memory: RendererMemoryStats,
     atlas_count: usize,
     atlas_total: usize,
@@ -31,20 +31,17 @@ pub fn build_stats_text_specs(
 ) -> Vec<UiTextSpec> {
     let text_color = [0.88f32, 0.92, 0.96, 1.0];
     let frame_label = if frame_ms >= 10.0 {
-        format!("FT   {:.1}MS", frame_ms)
+        format!("Frame time   {:.1}MS", frame_ms)
     } else if frame_ms >= 1.0 {
-        format!("FT   {:.2}MS", frame_ms)
+        format!("Frame time   {:.2}MS", frame_ms)
     } else {
-        format!("FT   {:.3}MS", frame_ms)
+        format!("Frame time   {:.3}MS", frame_ms)
     };
 
     let scene_mb = renderer_memory.active_scene_bytes as f64 / (1024.0 * 1024.0);
     let reserved_mb = renderer_memory.reserved_gpu_bytes as f64 / (1024.0 * 1024.0);
-    let shape_reserved_mb = renderer_memory.reserved_shape_instance_bytes as f64 / (1024.0 * 1024.0);
-    let line_reserved_mb = renderer_memory.reserved_line_instance_bytes as f64 / (1024.0 * 1024.0);
-    let text_reserved_mb = renderer_memory.reserved_text_instance_bytes as f64 / (1024.0 * 1024.0);
-    let image_reserved_mb = renderer_memory.reserved_image_instance_bytes as f64 / (1024.0 * 1024.0);
     let atlas_reserved_mb = renderer_memory.reserved_atlas_bytes as f64 / (1024.0 * 1024.0);
+
     let image_ram_mb = image_ram_used_bytes as f64 / (1024.0 * 1024.0);
     let image_ram_total_mb = image_ram_total_bytes as f64 / (1024.0 * 1024.0);
     let image_vram_mb = image_vram_used_bytes as f64 / (1024.0 * 1024.0);
@@ -52,19 +49,33 @@ pub fn build_stats_text_specs(
 
     // Lines listed top → bottom inside the panel
     let lines: Vec<String> = vec![
-        format!("ZOOM  {:.3}X", zoom),
-        format!("ELEM  {}", element_count),
-        format!("TEXT  {}", char_count),
-        format!("SCN   {:.1}MB", scene_mb),
-        format!("RDRV  {:.1}MB", reserved_mb),
-        format!("RSHP  {:.1}MB", shape_reserved_mb),
-        format!("RLIN  {:.1}MB", line_reserved_mb),
-        format!("RTXT  {:.1}MB", text_reserved_mb),
-        format!("RIMG  {:.1}MB", image_reserved_mb),
-        format!("RATL  {:.1}MB", atlas_reserved_mb),
-        format!("ATLAS {}/{}", atlas_count, atlas_total),
-        format!("IRAM  {:.1}MB/{:.0}MB", image_ram_mb, image_ram_total_mb),
-        format!("IVRAM {:.1}MB/{:.0}MB", image_vram_mb, image_vram_total_mb),
+        format!("Zoom  {:.3}X", zoom),
+        format!("Elements     {}", element_count),
+        format!("---Render Instances---"),
+        format!(
+            "Shape Draws  {}/{}",
+            renderer_memory.scene_shape_instances, renderer_memory.scene_shape_limit
+        ),
+        format!(
+            "Line Draws   {}/{}",
+            renderer_memory.scene_line_instances, renderer_memory.scene_line_limit
+        ),
+        format!(
+            "Text Glyphs  {}/{}",
+            renderer_memory.scene_text_instances, renderer_memory.scene_text_limit
+        ),
+        format!(
+            "Image Draws  {}/{}",
+            renderer_memory.scene_image_instances, renderer_memory.scene_image_limit
+        ),
+        format!("Scene Buffers  {:.1}MB", scene_mb),
+        format!("---GPU Memory---"),
+        format!("Reserved GPU  {:.1}MB", reserved_mb),
+        format!("Font Atlas    {:.1}MB", atlas_reserved_mb),
+        format!("---Image Caching---"),
+        format!("Image RAM     {:.1}MB/{:.0}MB", image_ram_mb, image_ram_total_mb),
+        format!("Image VRAM    {:.1}MB/{:.0}MB", image_vram_mb, image_vram_total_mb),
+        format!("Loaded Images {}/{}", atlas_count, atlas_total),
         format!("FPS   {:.0}", fps),
         frame_label,
     ];

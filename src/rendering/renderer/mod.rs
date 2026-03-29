@@ -18,11 +18,15 @@ const EMOJI_ATLAS_BYTES: usize = 1024 * 1024 * 4;
 pub struct RendererMemoryStats {
     pub reserved_gpu_bytes: usize,
     pub active_scene_bytes: usize,
-    pub reserved_shape_instance_bytes: usize,
-    pub reserved_line_instance_bytes: usize,
-    pub reserved_text_instance_bytes: usize,
-    pub reserved_image_instance_bytes: usize,
     pub reserved_atlas_bytes: usize,
+    pub scene_shape_instances: usize,
+    pub scene_shape_limit: usize,
+    pub scene_line_instances: usize,
+    pub scene_line_limit: usize,
+    pub scene_text_instances: usize,
+    pub scene_text_limit: usize,
+    pub scene_image_instances: usize,
+    pub scene_image_limit: usize,
 }
 
 pub struct Renderer {
@@ -61,7 +65,7 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub fn memory_stats(&self) -> RendererMemoryStats {
+    pub fn memory_stats(&self, scene_image_instances: usize) -> RendererMemoryStats {
         let reserved_shape_instance_bytes =
             MAX_SHAPE_INSTANCES * std::mem::size_of::<InstanceData>() * 2;
         let reserved_line_instance_bytes =
@@ -82,11 +86,15 @@ impl Renderer {
                 + self.scene_line_count * std::mem::size_of::<LineInstanceData>()
                 + self.scene_mono_text_count * std::mem::size_of::<TextInstanceData>()
                 + self.scene_color_text_count * std::mem::size_of::<TextInstanceData>(),
-            reserved_shape_instance_bytes,
-            reserved_line_instance_bytes,
-            reserved_text_instance_bytes,
-            reserved_image_instance_bytes,
             reserved_atlas_bytes,
+            scene_shape_instances: self.scene_shape_count,
+            scene_shape_limit: MAX_SHAPE_INSTANCES,
+            scene_line_instances: self.scene_line_count,
+            scene_line_limit: MAX_LINE_INSTANCES,
+            scene_text_instances: self.scene_mono_text_count + self.scene_color_text_count,
+            scene_text_limit: MAX_TEXT_INSTANCES * 2,
+            scene_image_instances,
+            scene_image_limit: MAX_IMAGE_INSTANCES,
         }
     }
 }

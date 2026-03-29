@@ -67,7 +67,7 @@ impl App {
         );
         self.draw_text_layers(board_mvp, move_drag_offset, rotate_drag_preview);
         self.draw_overlay_layers(board_mvp, move_drag_offset, rotate_drag_preview);
-        self.draw_screen_ui(move_drag_offset, rotate_drag_preview);
+        self.draw_screen_ui(move_drag_offset, rotate_drag_preview, image_draws.len());
 
         self.ctx.end_render_pass();
         self.ctx.commit_frame();
@@ -581,8 +581,83 @@ impl App {
 
     fn draw_screen_ui(
         &mut self,
-        move_drag_offset: Option<Vec2>,
-        rotate_drag_preview: Option<(f32, Vec2)>,
+        _move_drag_offset: Option<Vec2>,
+        _rotate_drag_preview: Option<(f32, Vec2)>,
+        scene_image_count: usize,
+    ) {
+        let screen_mvp = Renderer::screen_mvp(self.screen_size);
+        let (mono_count, color_count) = if let Some(text_draw) = self.cached_text_draw.as_ref() {
+            (text_draw.mono_instances.len(), text_draw.color_instances.len())
+        } else {
+            return;
+        };
+
+        let (ui_bg_instances, tb_icon_draws, mut ui_text_specs) = self.build_base_ui_elements();
+
+        let char_count = mono_count + color_count;
+        let renderer_memory = self.renderer.memory_stats(scene_image_count);
+
+        let mut stats_text_specs = stats::build_stats_text_specs(
+            self.camera.zoom,
+            self.board.elements.len(),
+            char_count,
+            renderer_memory,
+            self.image_manager.atlas_count(),
+            self.image_manager.atlas_capacity(),
+            self.image_manager.ram_used_bytes(),
+            self.image_manager.ram_capacity_bytes(),
+            self.image_manager.gpu_used_bytes(),
+            self.image_manager.gpu_capacity_bytes(),
+            self.fps,
+            self.frame_ms,
+        );
+        let mut stats_text_size = Vec2::ZERO;
+        for spec in &stats_text_specs {
+            let measured = self.text_system.measure_ui_text(spec);
+            stats_text_size.x = stats_text_size.x.max(spec.pos.x + measured.x);
+            stats_text_size.y = stats_text_size.y.max(spec.pos.y + measured.y);
+        }
+        let stats_layout = stats::build_stats_layout(stats_text_size, self.screen_size);
+        for spec in &mut stats_text_specs {
+            spec.pos += stats_layout.text_origin;
+        }
+
+        let mut final_ui_bg = ui_bg_instances;
+        let mut stats_bg = stats::build_stats_background_instances(&stats_layout);
+        final_ui_bg.append(&mut stats_bg);
+
+        ui_text_specs.extend(stats_text_specs);
+
+        self.renderer.draw_instances(
+            &mut *self.ctx,
+            &final_ui_bg,
+            screen_mvp,
+            self.screen_size,
+        );
+        self.renderer
+            .draw_image_draws(&mut *self.ctx, &tb_icon_draws, screen_mvp, None, None);
+
+        let ui_text_draw = self.text_system.build_ui_text_instances(
+            &mut *self.ctx,
+            self.renderer.text_atlas(),
+            self.renderer.emoji_atlas(),
+            &ui_text_specs,
+        );
+        self.renderer
+            .draw_text_instances(&mut *self.ctx, &ui_text_draw.mono_instances, screen_mvp);
+        self.renderer.draw_color_text_instances(
+            &mut *self.ctx,
+            &ui_text_draw.color_instances,
+            screen_mvp,
+        );
+    }
+
+    fn build_base_ui_elements(
+        &self,
+    ) -> (
+        Vec<crate::rendering::renderer::InstanceData>,
+        Vec<crate::rendering::renderer::PreparedImageDraw>,
+        Vec<crate::text::UiTextSpec>,
     ) {
         let mut ui_bg_instances = self.toolbar.build_instances(
             self.screen_size,
@@ -597,7 +672,6 @@ impl App {
             self.board.can_redo(),
             &self.toolbar_icons,
         );
-        let screen_mvp = Renderer::screen_mvp(self.screen_size);
         let mut ui_text_specs = self.toolbar.build_text_specs(
             self.screen_size,
             self.input.mouse_pos,
@@ -629,17 +703,7 @@ impl App {
                 if e.selected {
                     if let Some(handles) = crate::input::get_element_handles(e, self.camera.zoom) {
                         if handles.len() > 4 {
-                            let mut pos = handles[4];
-                            if let Some(offset) = move_drag_offset {
-                                pos += offset;
-                            }
-                            if let Some((angle, center)) = rotate_drag_preview {
-                                let rel = pos - center;
-                                let c = angle.cos();
-                                let s = angle.sin();
-                                pos = center
-                                    + glam::Vec2::new(rel.x * c - rel.y * s, rel.x * s + rel.y * c);
-                            }
+                            let pos = handles[4];
                             let screen_pos = self.camera.world_to_screen(pos, self.screen_size);
                             ui_text_specs.push(crate::text::UiTextSpec::top_center(
                                 "↻",
@@ -666,60 +730,6 @@ impl App {
             ));
         }
 
-        let Some(text_draw) = self.cached_text_draw.as_ref() else {
-            return;
-        };
-        let char_count = text_draw.mono_instances.len() + text_draw.color_instances.len();
-        let renderer_memory = self.renderer.memory_stats();
-        let mut stats_text_specs = stats::build_stats_text_specs(
-            self.camera.zoom,
-            self.board.elements.len(),
-            char_count,
-            renderer_memory,
-            self.image_manager.atlas_count(),
-            self.image_manager.atlas_capacity(),
-            self.image_manager.ram_used_bytes(),
-            self.image_manager.ram_capacity_bytes(),
-            self.image_manager.gpu_used_bytes(),
-            self.image_manager.gpu_capacity_bytes(),
-            self.fps,
-            self.frame_ms,
-        );
-        let mut stats_text_size = Vec2::ZERO;
-        for spec in &stats_text_specs {
-            let measured = self.text_system.measure_ui_text(spec);
-            stats_text_size.x = stats_text_size.x.max(spec.pos.x + measured.x);
-            stats_text_size.y = stats_text_size.y.max(spec.pos.y + measured.y);
-        }
-        let stats_layout = stats::build_stats_layout(stats_text_size, self.screen_size);
-        for spec in &mut stats_text_specs {
-            spec.pos += stats_layout.text_origin;
-        }
-        ui_text_specs.extend(stats_text_specs);
-        let mut stats_bg = stats::build_stats_background_instances(&stats_layout);
-        ui_bg_instances.append(&mut stats_bg);
-
-        self.renderer.draw_instances(
-            &mut *self.ctx,
-            &ui_bg_instances,
-            screen_mvp,
-            self.screen_size,
-        );
-        self.renderer
-            .draw_image_draws(&mut *self.ctx, &tb_icon_draws, screen_mvp, None, None);
-
-        let ui_text_draw = self.text_system.build_ui_text_instances(
-            &mut *self.ctx,
-            self.renderer.text_atlas(),
-            self.renderer.emoji_atlas(),
-            &ui_text_specs,
-        );
-        self.renderer
-            .draw_text_instances(&mut *self.ctx, &ui_text_draw.mono_instances, screen_mvp);
-        self.renderer.draw_color_text_instances(
-            &mut *self.ctx,
-            &ui_text_draw.color_instances,
-            screen_mvp,
-        );
+        (ui_bg_instances, tb_icon_draws, ui_text_specs)
     }
 }
