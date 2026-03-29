@@ -1,20 +1,18 @@
 mod edit;
+mod atlas;
+mod style;
+mod fonts;
+mod layout;
 
 use std::collections::{HashMap, HashSet};
-use std::io::Cursor as IoCursor;
 use std::sync::Arc;
 
-#[cfg(target_arch = "wasm32")]
-use cosmic_text::Fallback;
 use cosmic_text::{
-    fontdb, Attrs, Buffer, CacheKey, Color, Cursor, Family, FontSystem, Metrics, Motion, Shaping,
-    SwashCache, SwashContent, SwashImage, Wrap,
+    Buffer, CacheKey, FontSystem, Motion, Shaping,
+    SwashCache, SwashContent, Wrap, fontdb,
 };
 use glam::Vec2;
 use miniquad::{RenderingBackend, TextureId};
-#[cfg(target_arch = "wasm32")]
-use unicode_script::Script;
-use woff2_patched::convert_woff2_to_ttf;
 
 use crate::board::{Board, Element, TextData};
 use crate::palette;
@@ -22,18 +20,18 @@ use crate::platform::browser_io;
 use crate::rendering::renderer::TextInstanceData;
 
 pub use edit::{TextEditSession, TextEditSnapshot};
-
-const TEXT_ATLAS_SIZE: usize = 1024;
-const EMOJI_ATLAS_SIZE: usize = 1024;
-const ATLAS_GAP: usize = 2;
-const FALLBACK_GLYPH_SIZE: usize = 8;
-const PRIMARY_UI_FONT: BundledFontAsset = BundledFontAsset {
-    bytes: include_bytes!("../../fonts/W95FA.otf"),
-    family_hint: "W95FA",
+pub use atlas::{Atlas, AtlasEntry, TEXT_ATLAS_SIZE, EMOJI_ATLAS_SIZE, ATLAS_GAP, FALLBACK_GLYPH_SIZE};
+pub use style::{
+    text_metrics, default_text_attrs,
+    cosmic_color_to_rgba, SELECTION_COLOR, CARET_COLOR
 };
-
-const SELECTION_COLOR: [f32; 4] = palette::TEXT_SELECTION_COLOR;
-const CARET_COLOR: [f32; 4] = palette::GRAY_3;
+pub use fonts::{
+    new_font_system, configure_bundled_font_defaults, decode_browser_font_bytes
+};
+pub use layout::{
+    LineOffsets, global_byte_to_cursor, cursor_to_global_byte,
+    selection_range, caret_geometry
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UiTextAnchor {
@@ -165,6 +163,25 @@ pub struct TextSystem {
     layout_cache: Option<(u64, CachedLayout)>,
     /// Monotonic counter for active-edit layout invalidation.
     edit_generation: u64,
+}
+
+pub struct ResolvedGlyph {
+    pub kind: AtlasKind,
+    pub entry: AtlasEntry,
+}
+
+#[derive(Clone, Copy)]
+pub enum AtlasKind {
+    Mono,
+    Color,
+}
+
+fn inverse_rotate_point(element: &Element, point: Vec2) -> Vec2 {
+    let center = element.pos + element.size * 0.5;
+    let delta = point - center;
+    let c = element.rotation.cos();
+    let s = element.rotation.sin();
+    center + Vec2::new(delta.x * c + delta.y * s, -delta.x * s + delta.y * c)
 }
 
 impl TextSystem {
@@ -957,400 +974,4 @@ impl TextSystem {
 
         self.overlay_ready = true;
     }
-}
-
-#[cfg(target_arch = "wasm32")]
-#[derive(Debug, Default, Clone, Copy)]
-struct WasmFontFallback;
-
-#[cfg(target_arch = "wasm32")]
-impl Fallback for WasmFontFallback {
-    fn common_fallback(&self) -> &[&'static str] {
-        // Dummy fallback since wasm can't access browser fonts anyway.
-        &[]
-    }
-
-    fn forbidden_fallback(&self) -> &[&'static str] {
-        // Dummy fallback since wasm can't access browser fonts anyway.
-        &[]
-    }
-
-    fn script_fallback(&self, script: Script, _locale: &str) -> &[&'static str] {
-        // Dummy fallback since wasm can't access browser fonts anyway.
-        &[]
-    }
-}
-
-fn new_font_system() -> FontSystem {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let mut db = fontdb::Database::new();
-        db.set_monospace_family("W95FA");
-        db.set_sans_serif_family("W95FA");
-        db.set_serif_family("W95FA");
-        return FontSystem::new_with_locale_and_db_and_fallback(
-            "en-US".to_string(),
-            db,
-            WasmFontFallback,
-        );
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        FontSystem::new()
-    }
-}
-
-#[derive(Clone, Copy)]
-struct BundledFontAsset {
-    bytes: &'static [u8],
-    family_hint: &'static str,
-}
-
-fn configure_bundled_font_defaults(font_system: &mut FontSystem) {
-    let bundled_family = {
-        let db = font_system.db_mut();
-        let family = load_bundled_font(db, PRIMARY_UI_FONT)
-            .unwrap_or_else(|| PRIMARY_UI_FONT.family_hint.to_string());
-
-        db.set_sans_serif_family(family.clone());
-        family
-    };
-
-    debug_assert!(!bundled_family.is_empty());
-}
-
-fn load_bundled_font(db: &mut fontdb::Database, asset: BundledFontAsset) -> Option<String> {
-    let ids = db.load_font_source(fontdb::Source::Binary(Arc::new(asset.bytes.to_vec())));
-    ids.first()
-        .and_then(|id| db.face(*id))
-        .and_then(|face| face.families.first())
-        .map(|(name, _)| name.clone())
-        .or_else(|| Some(asset.family_hint.to_string()))
-}
-
-fn decode_browser_font_bytes(bytes: Vec<u8>) -> Option<Vec<u8>> {
-    if bytes.starts_with(b"wOF2") {
-        println!("[font] decoding woff2 payload bytes={}", bytes.len());
-        let mut cursor = IoCursor::new(bytes);
-        match convert_woff2_to_ttf(&mut cursor) {
-            Ok(decoded) => {
-                println!("[font] decoded woff2 to sfnt bytes={}", decoded.len());
-                Some(decoded)
-            }
-            Err(err) => {
-                eprintln!("[font] failed to decode woff2 payload: {err}");
-                None
-            }
-        }
-    } else {
-        Some(bytes)
-    }
-}
-
-fn text_metrics(font_size: f32, line_height: Option<f32>) -> Metrics {
-    let font_size = font_size.max(8.0);
-    Metrics::new(
-        font_size,
-        line_height.unwrap_or((font_size * 1.35).max(font_size + 4.0)),
-    )
-}
-
-fn default_text_attrs(content: &str, color: [f32; 4]) -> Attrs<'static> {
-    Attrs::new()
-        .family(preferred_family_for_text(content))
-        .color(rgba_to_cosmic_color(color))
-}
-
-fn preferred_family_for_text(text: &str) -> Family<'static> {
-    if text.chars().any(is_emoji_like) {
-        Family::Name("Noto Emoji")
-    } else if text.chars().any(is_symbol_like) {
-        Family::Name("DejaVu Sans")
-    } else {
-        Family::SansSerif
-    }
-}
-
-fn is_emoji_like(ch: char) -> bool {
-    let codepoint = ch as u32;
-    matches!(codepoint, 0x1F300..=0x1FAFF | 0xFE0E..=0xFE0F)
-}
-
-fn is_symbol_like(ch: char) -> bool {
-    let codepoint = ch as u32;
-    matches!(codepoint, 0x2190..=0x21FF | 0x2300..=0x23FF | 0x25A0..=0x25FF | 0x2600..=0x27BF)
-}
-
-pub fn cosmic_color_to_rgba(color: Color) -> [f32; 4] {
-    [
-        color.r() as f32 / 255.0,
-        color.g() as f32 / 255.0,
-        color.b() as f32 / 255.0,
-        color.a() as f32 / 255.0,
-    ]
-}
-
-#[derive(Clone, Copy)]
-struct AtlasEntry {
-    x: usize,
-    y: usize,
-    width: usize,
-    height: usize,
-    left: i32,
-    top: i32,
-}
-
-impl AtlasEntry {
-    fn uv_min(&self, atlas_size: f32) -> [f32; 2] {
-        [self.x as f32 / atlas_size, self.y as f32 / atlas_size]
-    }
-
-    fn uv_max(&self, atlas_size: f32) -> [f32; 2] {
-        [
-            (self.x + self.width) as f32 / atlas_size,
-            (self.y + self.height) as f32 / atlas_size,
-        ]
-    }
-}
-
-struct Atlas {
-    size: usize,
-    next_x: usize,
-    next_y: usize,
-    row_h: usize,
-    entries: HashMap<CacheKey, AtlasEntry>,
-    /// Pre-reserved ■ glyph for use when the atlas overflows.
-    fallback: Option<AtlasEntry>,
-}
-
-impl Atlas {
-    fn new(size: usize, reserve_overlay_pixel: bool) -> Self {
-        let (next_x, row_h, fallback) = if reserve_overlay_pixel {
-            // x=0: 1×1 overlay pixel (selection/caret), then ATLAS_GAP, then
-            // FALLBACK_GLYPH_SIZE×FALLBACK_GLYPH_SIZE filled square (■ for overflow).
-            let fb_x = 1 + ATLAS_GAP;
-            let fb_size = FALLBACK_GLYPH_SIZE;
-            let entry = AtlasEntry {
-                x: fb_x,
-                y: 0,
-                width: fb_size,
-                height: fb_size,
-                left: 0,
-                top: fb_size as i32,
-            };
-            (fb_x + fb_size + ATLAS_GAP, fb_size, Some(entry))
-        } else {
-            (0, 0, None)
-        };
-        Self {
-            size,
-            next_x,
-            next_y: 0,
-            row_h,
-            entries: HashMap::new(),
-            fallback,
-        }
-    }
-
-    fn insert(
-        &mut self,
-        ctx: &mut dyn RenderingBackend,
-        texture: TextureId,
-        cache_key: CacheKey,
-        image: &SwashImage,
-    ) -> Option<AtlasEntry> {
-        if let Some(entry) = self.entries.get(&cache_key) {
-            return Some(*entry);
-        }
-
-        let width = image.placement.width as usize;
-        let height = image.placement.height as usize;
-        if width == 0 || height == 0 {
-            return None; // whitespace / zero-size glyph — nothing to draw
-        }
-
-        let Some((x, y)) = self.pack(width, height) else {
-            // Atlas is full — show ■ so the overflow is visually apparent.
-            return self.fallback;
-        };
-        let bytes = atlas_bytes(image)?;
-        ctx.texture_update_part(
-            texture,
-            x as i32,
-            y as i32,
-            width as i32,
-            height as i32,
-            &bytes,
-        );
-
-        let entry = AtlasEntry {
-            x,
-            y,
-            width,
-            height,
-            left: image.placement.left,
-            top: image.placement.top,
-        };
-        self.entries.insert(cache_key, entry);
-        Some(entry)
-    }
-
-    fn pack(&mut self, width: usize, height: usize) -> Option<(usize, usize)> {
-        if width > self.size || height > self.size {
-            return None;
-        }
-        if self.next_x + width > self.size {
-            self.next_x = 0;
-            self.next_y += self.row_h + ATLAS_GAP;
-            self.row_h = 0;
-        }
-        if self.next_y + height > self.size {
-            return None;
-        }
-
-        let out = (self.next_x, self.next_y);
-        self.next_x += width + ATLAS_GAP;
-        self.row_h = self.row_h.max(height);
-        Some(out)
-    }
-}
-
-#[derive(Clone, Copy)]
-enum AtlasKind {
-    Mono,
-    Color,
-}
-
-struct ResolvedGlyph {
-    kind: AtlasKind,
-    entry: AtlasEntry,
-}
-
-fn selection_range(cursor_byte: usize, anchor_byte: Option<usize>) -> Option<(usize, usize)> {
-    let anchor_byte = anchor_byte?;
-    if anchor_byte == cursor_byte {
-        return None;
-    }
-    Some((anchor_byte.min(cursor_byte), anchor_byte.max(cursor_byte)))
-}
-
-fn caret_geometry(buffer: &Buffer, cursor: Cursor) -> Option<(f32, f32, f32)> {
-    let mut last_matching_run = None;
-
-    for run in buffer.layout_runs() {
-        if run.line_i != cursor.line {
-            continue;
-        }
-        last_matching_run = Some((
-            run.line_w,
-            run.line_top,
-            run.line_height,
-            run.glyphs.is_empty(),
-        ));
-        // Handle cursor at the very beginning (leftmost edge)
-        if cursor.index == 0 {
-            return Some((0.0, run.line_top, run.line_height));
-        }
-        if let Some((x, _)) = run.highlight(cursor, cursor) {
-            return Some((x, run.line_top, run.line_height));
-        }
-        if run.glyphs.is_empty() {
-            return Some((0.0, run.line_top, run.line_height));
-        }
-    }
-
-    last_matching_run.map(|(line_w, line_top, line_height, glyphs_empty)| {
-        let x = if glyphs_empty { 0.0 } else { line_w };
-        (x, line_top, line_height)
-    })
-}
-
-fn atlas_bytes(image: &SwashImage) -> Option<Vec<u8>> {
-    match image.content {
-        SwashContent::Mask => Some(image.data.clone()),
-        SwashContent::Color => Some(image.data.clone()),
-        SwashContent::SubpixelMask => {
-            let mut bytes =
-                Vec::with_capacity((image.placement.width * image.placement.height) as usize);
-            for chunk in image.data.chunks_exact(3) {
-                let alpha =
-                    ((u16::from(chunk[0]) + u16::from(chunk[1]) + u16::from(chunk[2])) / 3) as u8;
-                bytes.push(alpha);
-            }
-            Some(bytes)
-        }
-    }
-}
-
-fn inverse_rotate_point(element: &Element, point: Vec2) -> Vec2 {
-    let center = element.pos + element.size * 0.5;
-    let delta = point - center;
-    let c = element.rotation.cos();
-    let s = element.rotation.sin();
-    center + Vec2::new(delta.x * c + delta.y * s, -delta.x * s + delta.y * c)
-}
-
-fn rgba_to_cosmic_color(color: [f32; 4]) -> Color {
-    Color::rgba(
-        (color[0].clamp(0.0, 1.0) * 255.0) as u8,
-        (color[1].clamp(0.0, 1.0) * 255.0) as u8,
-        (color[2].clamp(0.0, 1.0) * 255.0) as u8,
-        (color[3].clamp(0.0, 1.0) * 255.0) as u8,
-    )
-}
-
-/// Cached line byte-offset table for a string, used to convert between a
-/// flat byte index and a (line, column) `Cursor` without repeated scanning.
-#[derive(Clone, Default, PartialEq, Eq)]
-pub(super) struct LineOffsets {
-    /// Byte offset of the first character on each line.
-    starts: Vec<usize>,
-    /// Byte offset one past the last character on each line (excluding `\n`).
-    ends: Vec<usize>,
-}
-
-impl LineOffsets {
-    fn build(text: &str) -> Self {
-        let mut starts = Vec::new();
-        let mut ends = Vec::new();
-        let mut offset = 0usize;
-        for segment in text.split('\n') {
-            starts.push(offset);
-            ends.push(offset + segment.len());
-            offset += segment.len() + 1;
-        }
-        if starts.is_empty() {
-            starts.push(0);
-            ends.push(0);
-        }
-        Self { starts, ends }
-    }
-
-    fn byte_to_cursor(&self, text: &str, global_byte: usize) -> Cursor {
-        let target = global_byte.min(text.len());
-        let line = self
-            .starts
-            .partition_point(|&s| s <= target)
-            .saturating_sub(1);
-        Cursor::new(line, target - self.starts[line])
-    }
-
-    fn cursor_to_byte(&self, text: &str, cursor: Cursor) -> usize {
-        match self.starts.get(cursor.line) {
-            Some(&line_start) => {
-                let segment_len = self.ends[cursor.line] - line_start;
-                (line_start + cursor.index.min(segment_len)).min(text.len())
-            }
-            None => text.len(),
-        }
-    }
-}
-
-fn global_byte_to_cursor(text: &str, global_byte: usize) -> Cursor {
-    LineOffsets::build(text).byte_to_cursor(text, global_byte)
-}
-
-fn cursor_to_global_byte(text: &str, cursor: Cursor) -> usize {
-    LineOffsets::build(text).cursor_to_byte(text, cursor)
 }

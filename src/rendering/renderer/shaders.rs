@@ -387,7 +387,7 @@ void main() {
     } else if (v_shape < 4.5) {
         vec2 p = (uv - 0.5) * v_size;
         vec2 outer_r = abs(v_size) * 0.5;
-        float width = max(v_stroke_width * u_world_per_px, u_world_per_px * 1.0);
+        float width = max((v_stroke_width + 1.0) * u_world_per_px, u_world_per_px * 2.0);
         float aa = max(u_world_per_px * 0.75, 0.0001);
         vec2 inner_r = max(outer_r - vec2(width), vec2(0.0001));
         float outer_sd = ellipse_signed_distance(p, outer_r);

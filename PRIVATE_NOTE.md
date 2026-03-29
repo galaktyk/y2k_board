@@ -1,7 +1,12 @@
 
 fix touchpad
 
+mouse/touchpad swich icon bottom left
 
+---
+add ui framework
+settings
+theme
 
 ---
 
@@ -14,6 +19,10 @@ how text size works:
 just use the same atlas just scale it up and down, on every text in the whole container
 i don't care if text will be blurry
 
+
+
+---
+add frame tool
 
 ---
 
@@ -32,8 +41,6 @@ laser tool
 ---
 
 
-
-add frame tool
 
 ---
 thumbnail swtitch with zoom level is not reliable,
