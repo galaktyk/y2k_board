@@ -63,7 +63,10 @@ impl App {
     pub(super) fn text_cursor_from_screen(&mut self, id: u64, screen_pos: Vec2) -> Option<usize> {
         let world = self.camera.screen_to_world(screen_pos, self.screen_size);
         let element = self.board.element(id)?;
-        let is_active_edit = self.text_edit.as_ref().map_or(false, |edit| edit.element_id() == id);
+        let is_active_edit = self
+            .text_edit
+            .as_ref()
+            .map_or(false, |edit| edit.element_id() == id);
         let content = self
             .text_edit
             .as_ref()
@@ -108,7 +111,9 @@ impl App {
     }
 
     pub(super) fn selected_text(&self) -> Option<String> {
-        self.text_edit.as_ref().and_then(TextEditSession::selected_text)
+        self.text_edit
+            .as_ref()
+            .and_then(TextEditSession::selected_text)
     }
 
     pub(super) fn current_text(&self) -> Option<&str> {

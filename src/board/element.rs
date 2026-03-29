@@ -1,6 +1,8 @@
+use crate::palette;
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
-use crate::palette;
+
+use super::geometry::line_aabb;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ShapeType {
@@ -50,6 +52,14 @@ pub fn default_line_stroke_width() -> u8 {
 
 pub fn default_line_arrow_disabled() -> bool {
     false
+}
+
+pub fn default_line_bend() -> f32 {
+    0.0
+}
+
+pub fn default_line_midpoint_shift() -> f32 {
+    0.0
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -209,6 +219,14 @@ pub struct Element {
     pub line_arrow_start: bool,
     #[serde(default = "default_line_arrow_disabled")]
     pub line_arrow_end: bool,
+    #[serde(default = "default_line_bend")]
+    pub line_bend: f32,
+    #[serde(default = "default_line_midpoint_shift")]
+    pub line_midpoint_shift: f32,
+    #[serde(default)]
+    pub line_start_normal: Option<Vec2>,
+    #[serde(default)]
+    pub line_end_normal: Option<Vec2>,
     pub selected: bool,
     #[serde(default)]
     pub text: Option<TextData>,
@@ -219,6 +237,18 @@ pub struct Element {
 }
 
 impl Element {
+    pub fn line_endpoints(&self) -> (Vec2, Vec2) {
+        (self.pos, self.pos + self.size)
+    }
+
+    pub fn is_curved_line(&self) -> bool {
+        self.shape == ShapeType::Line
+            && (self.line_bend.abs() > 0.001
+                || self.line_midpoint_shift.abs() > 0.001
+                || self.line_start_normal.is_some()
+                || self.line_end_normal.is_some())
+    }
+
     pub fn is_sticky_note(&self) -> bool {
         self.kind == ElementKind::StickyNote
     }
@@ -267,7 +297,10 @@ impl Element {
             self.border_width = style.border_width.unwrap_or(0);
         }
         if self.uses_stroke_width() {
-            self.stroke_width = style.stroke_width.unwrap_or(DEFAULT_LINE_STROKE_WIDTH).max(1);
+            self.stroke_width = style
+                .stroke_width
+                .unwrap_or(DEFAULT_LINE_STROKE_WIDTH)
+                .max(1);
             self.line_arrow_start = style.line_arrow_start.unwrap_or(false);
             self.line_arrow_end = style.line_arrow_end.unwrap_or(false);
         }
@@ -293,12 +326,7 @@ impl Element {
 
     pub fn aabb(&self) -> (Vec2, Vec2) {
         match self.shape {
-            ShapeType::Line => {
-                let end = self.pos + self.size;
-                let min = self.pos.min(end);
-                let max = self.pos.max(end);
-                (min, max)
-            }
+            ShapeType::Line => line_aabb(self, 0.0),
             _ => {
                 let center = self.pos + self.size * 0.5;
                 let hs = self.size * 0.5;

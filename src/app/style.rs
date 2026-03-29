@@ -1,11 +1,7 @@
-use crate::board::{Element, ShapeType, ElementStyleSnapshot};
+use crate::board::{Element, ElementStyleSnapshot, ShapeType};
 use crate::ui::property_panel::{ColorTarget, LineArrowTarget, WidthTarget};
 
-pub fn tabs(
-    show_text: bool,
-    show_fill: bool,
-    show_stroke: bool,
-) -> [Option<ColorTarget>; 3] {
+pub fn tabs(show_text: bool, show_fill: bool, show_stroke: bool) -> [Option<ColorTarget>; 3] {
     [
         show_text.then_some(ColorTarget::Text),
         show_fill.then_some(ColorTarget::Fill),
@@ -36,7 +32,9 @@ pub fn color_for_selection(selected: &[&Element], target: ColorTarget) -> [f32; 
     };
 
     match target {
-        ColorTarget::Text => first.current_text_color().unwrap_or(crate::board::DEFAULT_TEXT_COLOR),
+        ColorTarget::Text => first
+            .current_text_color()
+            .unwrap_or(crate::board::DEFAULT_TEXT_COLOR),
         ColorTarget::Fill => first.color,
         ColorTarget::Stroke => first.effective_stroke_color(),
     }
@@ -50,7 +48,11 @@ pub fn color_for_box_defaults(style: crate::board::BoxToolStyle, target: ColorTa
     }
 }
 
-pub fn apply_box_color(style: &mut crate::board::BoxToolStyle, target: ColorTarget, color: [f32; 4]) {
+pub fn apply_box_color(
+    style: &mut crate::board::BoxToolStyle,
+    target: ColorTarget,
+    color: [f32; 4],
+) {
     match target {
         ColorTarget::Text => style.text_color = color,
         ColorTarget::Fill => style.fill_color = color,
@@ -70,7 +72,10 @@ pub fn updated_style_with_color(
             after.fill_color = color;
         }
         ColorTarget::Stroke
-            if matches!(element.shape, ShapeType::Rect | ShapeType::Ellipse | ShapeType::Line) =>
+            if matches!(
+                element.shape,
+                ShapeType::Rect | ShapeType::Ellipse | ShapeType::Line
+            ) =>
         {
             after.stroke_color = color;
             if element.shape == ShapeType::Line {

@@ -88,9 +88,7 @@ impl InstanceData {
     }
 
     fn pack_flags(selected: bool, arrow_start: bool, arrow_end: bool) -> u8 {
-        (selected as u8)
-            | ((arrow_start as u8) << 1)
-            | ((arrow_end as u8) << 2)
+        (selected as u8) | ((arrow_start as u8) << 1) | ((arrow_end as u8) << 2)
     }
 }
 

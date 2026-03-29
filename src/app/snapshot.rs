@@ -7,7 +7,11 @@ use std::path::Path;
 use crate::board::Element;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn copy_assets(elements: &[Element], source_root: &Path, target_root: &Path) -> std::io::Result<()> {
+pub fn copy_assets(
+    elements: &[Element],
+    source_root: &Path,
+    target_root: &Path,
+) -> std::io::Result<()> {
     if source_root == target_root {
         return Ok(());
     }

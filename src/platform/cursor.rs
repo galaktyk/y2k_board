@@ -45,7 +45,9 @@ fn try_set_custom_cursor(cursor: CursorIcon) -> CustomCursorResult {
 fn try_set_custom_cursor(cursor: CursorIcon) -> CustomCursorResult {
     if !ensure_windows_cursor_hook() {
         return match cursor {
-            CursorIcon::Default | CursorIcon::Pointer | CursorIcon::Help => CustomCursorResult::Pending,
+            CursorIcon::Default | CursorIcon::Pointer | CursorIcon::Help => {
+                CustomCursorResult::Pending
+            }
             _ => CustomCursorResult::NotHandled,
         };
     }
@@ -97,9 +99,18 @@ fn windows_cursor_handles() -> &'static WindowsCursorHandles {
 
     static CURSORS: OnceLock<WindowsCursorHandles> = OnceLock::new();
     CURSORS.get_or_init(|| WindowsCursorHandles {
-        default: load_png_cursor(include_bytes!("../../assets/cursor/default_cursor.png"), (0, 0)) as usize,
-        pointer: load_png_cursor(include_bytes!("../../assets/cursor/pointer_cursor.png"), (12, 0)) as usize,
-        sticky: load_png_cursor(include_bytes!("../../assets/cursor/sticky_cursor.png"), (0, 0)) as usize,
+        default: load_png_cursor(
+            include_bytes!("../../assets/cursor/default_cursor.png"),
+            (0, 0),
+        ) as usize,
+        pointer: load_png_cursor(
+            include_bytes!("../../assets/cursor/pointer_cursor.png"),
+            (12, 0),
+        ) as usize,
+        sticky: load_png_cursor(
+            include_bytes!("../../assets/cursor/sticky_cursor.png"),
+            (0, 0),
+        ) as usize,
     })
 }
 
@@ -197,8 +208,8 @@ unsafe fn create_rgba_cursor(
     use winapi::shared::minwindef::FALSE;
     use winapi::shared::windef::HBITMAP;
     use winapi::um::wingdi::{
-        CreateBitmap, CreateDIBSection, DeleteObject, BITMAPINFO, BITMAPV5HEADER,
-        BI_BITFIELDS, DIB_RGB_COLORS,
+        CreateBitmap, CreateDIBSection, DeleteObject, BITMAPINFO, BITMAPV5HEADER, BI_BITFIELDS,
+        DIB_RGB_COLORS,
     };
     use winapi::um::winuser::{CreateIconIndirect, GetDC, ReleaseDC, ICONINFO};
 

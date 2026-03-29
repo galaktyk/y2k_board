@@ -35,7 +35,10 @@ impl fmt::Display for SnapshotError {
         match self {
             #[cfg(target_arch = "wasm32")]
             SnapshotError::UnsupportedPlatform => {
-                write!(f, "snapshot save/load is only implemented for native desktop builds")
+                write!(
+                    f,
+                    "snapshot save/load is only implemented for native desktop builds"
+                )
             }
             SnapshotError::Io(err) => write!(f, "{err}"),
             SnapshotError::Encode(err) => write!(f, "{err}"),

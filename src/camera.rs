@@ -7,7 +7,10 @@ pub struct Camera {
 
 impl Camera {
     pub fn new() -> Self {
-        Self { pan: Vec2::ZERO, zoom: 1.0 }
+        Self {
+            pan: Vec2::ZERO,
+            zoom: 1.0,
+        }
     }
 
     /// World → screen pixel.

@@ -5,22 +5,9 @@ mod snapshot;
 mod style;
 mod text_editing;
 
-
-
-use miniquad::*;
-use glam::Vec2;
-use std::collections::HashSet;
-#[cfg(not(target_arch = "wasm32"))]
-use std::path::Path;
-use std::path::PathBuf;
-use std::sync::{Arc, Condvar, Mutex};
-#[cfg(not(target_arch = "wasm32"))]
-use std::thread;
-use std::thread::JoinHandle;
-use std::time::Duration;
 use crate::board::{
-    Board, Element, ElementPropertyChange, ElementPropertyPatch, ElementStyleSnapshot,
-    ShapeType, ToolStyleDefaults,
+    Board, Element, ElementPropertyChange, ElementPropertyPatch, ElementStyleSnapshot, ShapeType,
+    ToolStyleDefaults,
 };
 use crate::camera::Camera;
 use crate::images::ImageManager;
@@ -32,14 +19,25 @@ use crate::platform::cursor as platform_cursor;
 use crate::platform::ime::{self, BrowserTextInputEvent};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::platform::snapshot::{PlatformSnapshotDialogAdapter, SnapshotDialogAdapter};
-use crate::rendering::renderer::Renderer;
 use crate::rendering::cache::BoardRenderCache;
-use crate::{snapshot as snapshot_io, ui};
+use crate::rendering::renderer::Renderer;
 use crate::spatial::SpatialGrid;
 use crate::text::{PreparedTextDraw, TextEditSession, TextEditSnapshot, TextSystem};
+use crate::{snapshot as snapshot_io, ui};
+use glam::Vec2;
+use miniquad::*;
+use std::collections::HashSet;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::{Arc, Condvar, Mutex};
+#[cfg(not(target_arch = "wasm32"))]
+use std::thread;
+use std::thread::JoinHandle;
+use std::time::Duration;
 
-use crate::ui::toolbar::{self, Toolbar, ToolbarAction};
 use crate::ui::property_panel::{self, ColorTarget, LineArrowTarget, WidthTarget};
+use crate::ui::toolbar::{self, Toolbar, ToolbarAction};
 
 const IMAGE_RAM_FLUSH_INTERVAL: Duration = Duration::from_secs(60);
 const IMAGE_RAM_FLUSH_INTERVAL_SECS: f64 = IMAGE_RAM_FLUSH_INTERVAL.as_secs_f64();
@@ -126,11 +124,11 @@ pub struct App {
     text_dirty: bool,
     cached_text_edit_snapshot: Option<TextEditSnapshot>,
     // ── stats ─────────────────────────────────────────────────────────────
-    last_frame:   f64,
-    frame_ms:     f32,
-    fps:          f32,
-    fps_accum:    f32,
-    fps_frames:   u32,
+    last_frame: f64,
+    frame_ms: f32,
+    fps: f32,
+    fps_accum: f32,
+    fps_frames: u32,
 }
 
 impl App {
@@ -175,11 +173,11 @@ impl App {
             cached_text_draw: None,
             text_dirty: true,
             cached_text_edit_snapshot: None,
-            last_frame:  now,
-            frame_ms:    0.0,
-            fps:         0.0,
-            fps_accum:   0.0,
-            fps_frames:  0,
+            last_frame: now,
+            frame_ms: 0.0,
+            fps: 0.0,
+            fps_accum: 0.0,
+            fps_frames: 0,
         };
         app.refresh_mouse_cursor();
         app.request_redraw();
@@ -190,8 +188,6 @@ impl App {
     /// This is O(N) where N is the number of elements on the board.
     /// Called when board structure changes or after drag-and-drop.
     fn rebuild_spatial(&mut self) {
-
-
         // [HOT] Rebuilding spatial grid
         self.spatial.clear();
         for e in &self.board.elements {
@@ -264,7 +260,8 @@ impl App {
         self.snapshot_path = loaded.path.clone();
         self.snapshot_path_user_selected = true;
         let asset_root = snapshot_io::snapshot_root(&self.snapshot_path);
-        self.image_manager.set_asset_root(&mut *self.ctx, asset_root);
+        self.image_manager
+            .set_asset_root(&mut *self.ctx, asset_root);
         self.board = Board::new();
         self.board.restore_snapshot(loaded.data);
         self.reset_transient_app_state();
@@ -293,7 +290,10 @@ impl App {
                         picked_file.name
                     };
 
-                    match snapshot_io::load_from_bytes(&picked_file.bytes, PathBuf::from(snapshot_name).as_path()) {
+                    match snapshot_io::load_from_bytes(
+                        &picked_file.bytes,
+                        PathBuf::from(snapshot_name).as_path(),
+                    ) {
                         Ok(loaded) => self.apply_loaded_snapshot(loaded),
                         Err(err) => {
                             eprintln!("Failed to load snapshot: {err}");
@@ -304,7 +304,9 @@ impl App {
                 BrowserFileKind::Image => {
                     let anchor = base_anchor + Vec2::splat(imported_image_count as f32 * 24.0);
                     imported_image_count += 1;
-                    if let Err(err) = self.import_image_from_bytes_at(&picked_file.bytes, anchor, false) {
+                    if let Err(err) =
+                        self.import_image_from_bytes_at(&picked_file.bytes, anchor, false)
+                    {
                         eprintln!("Failed to import image: {err}");
                         had_error = true;
                     }
@@ -380,7 +382,11 @@ impl App {
 
         if self
             .toolbar
-            .hovered_action(self.screen_size, self.input.mouse_pos.x, self.input.mouse_pos.y)
+            .hovered_action(
+                self.screen_size,
+                self.input.mouse_pos.x,
+                self.input.mouse_pos.y,
+            )
             .is_some()
         {
             return CursorIcon::Pointer;
@@ -447,7 +453,10 @@ impl App {
             mib(gpu_bytes),
         );
         if before_ram == 0 && stats.entries_cleared == 0 {
-            println!("[image] RAM clear source={} cache already empty", trigger.label());
+            println!(
+                "[image] RAM clear source={} cache already empty",
+                trigger.label()
+            );
         }
         self.image_ram_flush_deadline = miniquad::date::now() + IMAGE_RAM_FLUSH_INTERVAL_SECS;
         if trigger.should_request_redraw() {
@@ -551,7 +560,12 @@ impl App {
     }
 
     fn resolve_selection_property_panel(&self) -> Option<ResolvedPropertyPanel> {
-        let selected: Vec<&Element> = self.board.elements.iter().filter(|element| element.selected).collect();
+        let selected: Vec<&Element> = self
+            .board
+            .elements
+            .iter()
+            .filter(|element| element.selected)
+            .collect();
         if selected.is_empty() {
             return None;
         }
@@ -562,7 +576,10 @@ impl App {
             .all(|element| matches!(element.shape, ShapeType::Rect | ShapeType::Ellipse));
         let can_text = selected.iter().all(|element| element.can_host_text());
         let can_stroke = selected.iter().all(|element| {
-            matches!(element.shape, ShapeType::Rect | ShapeType::Ellipse | ShapeType::Line)
+            matches!(
+                element.shape,
+                ShapeType::Rect | ShapeType::Ellipse | ShapeType::Line
+            )
         });
 
         if !can_fill && !can_text && !can_stroke {
@@ -581,7 +598,9 @@ impl App {
             .iter()
             .find(|element| element.uses_stroke_width())
             .map(|element| element.stroke_width.clamp(1, 16));
-        let show_line_arrows = selected.iter().all(|element| element.shape == ShapeType::Line);
+        let show_line_arrows = selected
+            .iter()
+            .all(|element| element.shape == ShapeType::Line);
         let line_arrow_start = show_line_arrows.then(|| selected[0].line_arrow_start);
         let line_arrow_end = show_line_arrows.then(|| selected[0].line_arrow_end);
 
@@ -601,7 +620,15 @@ impl App {
     }
 
     fn resolve_tool_property_panel(&self) -> Option<ResolvedPropertyPanel> {
-        let (title, tabs, active_color, border_width, stroke_width, line_arrow_start, line_arrow_end) = match self.toolbar.active_tool {
+        let (
+            title,
+            tabs,
+            active_color,
+            border_width,
+            stroke_width,
+            line_arrow_start,
+            line_arrow_end,
+        ) = match self.toolbar.active_tool {
             ui::tool::Tool::Rect => {
                 let tabs = style::tabs(true, true, true);
                 let active = self.resolve_panel_target(tabs)?;
@@ -746,10 +773,11 @@ impl App {
                     return;
                 }
 
-                self.board.apply_operation(crate::board::BoardOperation::SetProperty {
-                    changes,
-                    sync_connected_lines: false,
-                });
+                self.board
+                    .apply_operation(crate::board::BoardOperation::SetProperty {
+                        changes,
+                        sync_connected_lines: false,
+                    });
                 self.mark_elements_dirty(ids);
             }
         }
@@ -784,10 +812,11 @@ impl App {
                     return;
                 }
 
-                self.board.apply_operation(crate::board::BoardOperation::SetProperty {
-                    changes,
-                    sync_connected_lines: true,
-                });
+                self.board
+                    .apply_operation(crate::board::BoardOperation::SetProperty {
+                        changes,
+                        sync_connected_lines: true,
+                    });
                 self.mark_elements_dirty(ids);
             }
         }
@@ -804,7 +833,11 @@ impl App {
                 target,
                 before: ids
                     .iter()
-                    .filter_map(|id| self.board.element(*id).map(|element| (*id, element.style_snapshot())))
+                    .filter_map(|id| {
+                        self.board
+                            .element(*id)
+                            .map(|element| (*id, element.style_snapshot()))
+                    })
                     .collect(),
             },
         });
@@ -826,7 +859,8 @@ impl App {
                 let ids: Vec<u64> = before.iter().map(|(id, _)| *id).collect();
                 for (id, _) in before {
                     if let Some(element) = self.board.element_mut(*id) {
-                        if let Some(after) = style::updated_style_with_width(element, target, width) {
+                        if let Some(after) = style::updated_style_with_width(element, target, width)
+                        {
                             element.apply_style_snapshot(after);
                         }
                     }
@@ -859,10 +893,11 @@ impl App {
                     .collect();
 
                 if !changes.is_empty() {
-                    self.board.apply_operation(crate::board::BoardOperation::SetProperty {
-                        changes,
-                        sync_connected_lines: true,
-                    });
+                    self.board
+                        .apply_operation(crate::board::BoardOperation::SetProperty {
+                            changes,
+                            sync_connected_lines: true,
+                        });
                     self.mark_elements_dirty(ids);
                 } else {
                     self.request_redraw();
@@ -871,12 +906,25 @@ impl App {
         }
     }
 
-    fn apply_tool_panel_color(&mut self, tool: ui::tool::Tool, target: ColorTarget, color: [f32; 4]) {
+    fn apply_tool_panel_color(
+        &mut self,
+        tool: ui::tool::Tool,
+        target: ColorTarget,
+        color: [f32; 4],
+    ) {
         match tool {
-            ui::tool::Tool::Rect => style::apply_box_color(&mut self.tool_style_defaults.rect, target, color),
-            ui::tool::Tool::Ellipse => style::apply_box_color(&mut self.tool_style_defaults.ellipse, target, color),
-            ui::tool::Tool::Sticky => style::apply_box_color(&mut self.tool_style_defaults.sticky, target, color),
-            ui::tool::Tool::Text => style::apply_box_color(&mut self.tool_style_defaults.text, target, color),
+            ui::tool::Tool::Rect => {
+                style::apply_box_color(&mut self.tool_style_defaults.rect, target, color)
+            }
+            ui::tool::Tool::Ellipse => {
+                style::apply_box_color(&mut self.tool_style_defaults.ellipse, target, color)
+            }
+            ui::tool::Tool::Sticky => {
+                style::apply_box_color(&mut self.tool_style_defaults.sticky, target, color)
+            }
+            ui::tool::Tool::Text => {
+                style::apply_box_color(&mut self.tool_style_defaults.text, target, color)
+            }
             ui::tool::Tool::Line => {
                 if target == ColorTarget::Stroke {
                     self.tool_style_defaults.line.color = color;
@@ -888,17 +936,32 @@ impl App {
 
     fn apply_tool_panel_width(&mut self, tool: ui::tool::Tool, target: WidthTarget, width: u8) {
         match tool {
-            ui::tool::Tool::Rect if target == WidthTarget::Border => self.tool_style_defaults.rect.border_width = width,
-            ui::tool::Tool::Ellipse if target == WidthTarget::Border => self.tool_style_defaults.ellipse.border_width = width,
-            ui::tool::Tool::Sticky if target == WidthTarget::Border => self.tool_style_defaults.sticky.border_width = width,
-            ui::tool::Tool::Text if target == WidthTarget::Border => self.tool_style_defaults.text.border_width = width,
-            ui::tool::Tool::Line if target == WidthTarget::Stroke => self.tool_style_defaults.line.stroke_width = width,
+            ui::tool::Tool::Rect if target == WidthTarget::Border => {
+                self.tool_style_defaults.rect.border_width = width
+            }
+            ui::tool::Tool::Ellipse if target == WidthTarget::Border => {
+                self.tool_style_defaults.ellipse.border_width = width
+            }
+            ui::tool::Tool::Sticky if target == WidthTarget::Border => {
+                self.tool_style_defaults.sticky.border_width = width
+            }
+            ui::tool::Tool::Text if target == WidthTarget::Border => {
+                self.tool_style_defaults.text.border_width = width
+            }
+            ui::tool::Tool::Line if target == WidthTarget::Stroke => {
+                self.tool_style_defaults.line.stroke_width = width
+            }
             ui::tool::Tool::Select => {}
             _ => {}
         }
     }
 
-    fn apply_tool_panel_arrow(&mut self, tool: ui::tool::Tool, target: LineArrowTarget, enabled: bool) {
+    fn apply_tool_panel_arrow(
+        &mut self,
+        tool: ui::tool::Tool,
+        target: LineArrowTarget,
+        enabled: bool,
+    ) {
         if tool != ui::tool::Tool::Line {
             return;
         }
@@ -935,7 +998,6 @@ impl App {
     /// Synchronizes the board's CPU state with the GPU render cache.
     /// This is a high-cost operation if structure or visibility is dirty.
     fn sync_board_render_cache(&mut self) {
-
         if self.board_cache_dirty {
             self.rebuild_board_cache();
         }
@@ -989,7 +1051,8 @@ impl App {
                 self.snapshot_path = path.clone();
                 self.snapshot_path_user_selected = true;
                 let asset_root = snapshot_io::snapshot_root(&self.snapshot_path);
-                self.image_manager.set_asset_root(&mut *self.ctx, asset_root);
+                self.image_manager
+                    .set_asset_root(&mut *self.ctx, asset_root);
                 self.board.clear_transient_state(true);
                 self.request_redraw();
                 println!("Saved snapshot to {}", path.display());
@@ -1084,7 +1147,8 @@ impl EventHandler for App {
                     if self.text_edit.is_some() {
                         self.finish_text_edit(true);
                     }
-                    if let Some(hit) = property_panel::hit_test(self.screen_size, &panel.view, x, y) {
+                    if let Some(hit) = property_panel::hit_test(self.screen_size, &panel.view, x, y)
+                    {
                         self.apply_property_panel_hit(hit);
                     }
                     self.request_redraw();
@@ -1107,7 +1171,8 @@ impl EventHandler for App {
         }
 
         let previous_active = self.input.active_text_id;
-        let selected_before: std::collections::HashSet<u64> = self.board.selected_ids().into_iter().collect();
+        let selected_before: std::collections::HashSet<u64> =
+            self.board.selected_ids().into_iter().collect();
 
         let order_changed = input::on_mouse_down(
             &mut self.input,
@@ -1121,8 +1186,12 @@ impl EventHandler for App {
             button,
         );
 
-        let selected_after: std::collections::HashSet<u64> = self.board.selected_ids().into_iter().collect();
-        let changed_ids: Vec<u64> = selected_before.symmetric_difference(&selected_after).copied().collect();
+        let selected_after: std::collections::HashSet<u64> =
+            self.board.selected_ids().into_iter().collect();
+        let changed_ids: Vec<u64> = selected_before
+            .symmetric_difference(&selected_after)
+            .copied()
+            .collect();
         if !changed_ids.is_empty() {
             self.mark_elements_dirty(changed_ids);
         }
@@ -1166,7 +1235,8 @@ impl EventHandler for App {
         let had_drag = drag_mode_before_up != DragMode::None;
         let had_preview = self.input.preview.is_some();
         let active_before_up = self.input.active_text_id;
-        let selected_before: std::collections::HashSet<u64> = self.board.selected_ids().into_iter().collect();
+        let selected_before: std::collections::HashSet<u64> =
+            self.board.selected_ids().into_iter().collect();
 
         if let Some(tool) = input::on_mouse_up(
             &mut self.input,
@@ -1183,8 +1253,12 @@ impl EventHandler for App {
             self.toolbar.active_tool = tool;
         }
 
-        let selected_after: std::collections::HashSet<u64> = self.board.selected_ids().into_iter().collect();
-        let changed_ids: Vec<u64> = selected_before.symmetric_difference(&selected_after).copied().collect();
+        let selected_after: std::collections::HashSet<u64> =
+            self.board.selected_ids().into_iter().collect();
+        let changed_ids: Vec<u64> = selected_before
+            .symmetric_difference(&selected_after)
+            .copied()
+            .collect();
         if !changed_ids.is_empty() {
             self.mark_elements_dirty(changed_ids);
         }
@@ -1205,7 +1279,10 @@ impl EventHandler for App {
         if had_drag || had_preview {
             self.spatial_dirty = true;
         }
-        if matches!(drag_mode_before_up, DragMode::MoveSelected | DragMode::ResizingHandle(_) | DragMode::Rotating) {
+        if matches!(
+            drag_mode_before_up,
+            DragMode::MoveSelected | DragMode::ResizingHandle(_) | DragMode::Rotating
+        ) {
             self.mark_board_structure_dirty();
             return;
         }
@@ -1217,20 +1294,32 @@ impl EventHandler for App {
     }
 
     fn mouse_motion_event(&mut self, x: f32, y: f32) {
-        let previous_hover = self
-            .toolbar
-            .hovered_action(self.screen_size, self.input.mouse_pos.x, self.input.mouse_pos.y);
-        let previous_panel_hover = self
-            .resolve_property_panel()
-            .and_then(|panel| property_panel::hit_test(self.screen_size, &panel.view, self.input.mouse_pos.x, self.input.mouse_pos.y));
+        let previous_hover = self.toolbar.hovered_action(
+            self.screen_size,
+            self.input.mouse_pos.x,
+            self.input.mouse_pos.y,
+        );
+        let previous_panel_hover = self.resolve_property_panel().and_then(|panel| {
+            property_panel::hit_test(
+                self.screen_size,
+                &panel.view,
+                self.input.mouse_pos.x,
+                self.input.mouse_pos.y,
+            )
+        });
         let mouse_pos = Vec2::new(x, y);
 
         if self.property_width_drag.is_some() {
             self.input.mouse_pos = mouse_pos;
-            let target = self.property_width_drag.as_ref().map(WidthDragState::target);
+            let target = self
+                .property_width_drag
+                .as_ref()
+                .map(WidthDragState::target);
             if let Some(panel) = self.resolve_property_panel() {
                 if let Some(target) = target {
-                    if let Some(width) = property_panel::width_at_x(self.screen_size, &panel.view, target, x) {
+                    if let Some(width) =
+                        property_panel::width_at_x(self.screen_size, &panel.view, target, x)
+                    {
                         self.preview_property_width(target, width);
                     }
                 }
@@ -1266,12 +1355,19 @@ impl EventHandler for App {
             y,
         );
 
-        let current_hover = self
-            .toolbar
-            .hovered_action(self.screen_size, self.input.mouse_pos.x, self.input.mouse_pos.y);
-        let current_panel_hover = self
-            .resolve_property_panel()
-            .and_then(|panel| property_panel::hit_test(self.screen_size, &panel.view, self.input.mouse_pos.x, self.input.mouse_pos.y));
+        let current_hover = self.toolbar.hovered_action(
+            self.screen_size,
+            self.input.mouse_pos.x,
+            self.input.mouse_pos.y,
+        );
+        let current_panel_hover = self.resolve_property_panel().and_then(|panel| {
+            property_panel::hit_test(
+                self.screen_size,
+                &panel.view,
+                self.input.mouse_pos.x,
+                self.input.mouse_pos.y,
+            )
+        });
         self.refresh_mouse_cursor();
         if previous_hover != current_hover || previous_panel_hover != current_panel_hover {
             self.request_redraw();
@@ -1350,7 +1446,10 @@ impl EventHandler for App {
 
 impl Drop for App {
     fn drop(&mut self) {
-        stop_image_ram_flush_waker(&self.image_ram_flush_stop, self.image_ram_flush_thread.take());
+        stop_image_ram_flush_waker(
+            &self.image_ram_flush_stop,
+            self.image_ram_flush_thread.take(),
+        );
         self.toolbar_icons.destroy(&mut *self.ctx);
     }
 }
@@ -1388,10 +1487,7 @@ fn spawn_image_ram_flush_waker() -> (Arc<(Mutex<bool>, Condvar)>, Option<JoinHan
     }
 }
 
-fn stop_image_ram_flush_waker(
-    stop: &Arc<(Mutex<bool>, Condvar)>,
-    thread: Option<JoinHandle<()>>,
-) {
+fn stop_image_ram_flush_waker(stop: &Arc<(Mutex<bool>, Condvar)>, thread: Option<JoinHandle<()>>) {
     let (lock, condvar) = &**stop;
     if let Ok(mut stopped) = lock.lock() {
         *stopped = true;
@@ -1405,4 +1501,3 @@ fn stop_image_ram_flush_waker(
 fn mib(bytes: usize) -> f32 {
     bytes as f32 / (1024.0 * 1024.0)
 }
-

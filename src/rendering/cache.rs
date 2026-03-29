@@ -52,7 +52,8 @@ impl BoardRenderCache {
             self.index_by_id.insert(element.id, index);
             self.id_by_index.push(element.id);
             let start = self.all_instances.len();
-            self.all_instances.extend(overlay::element_to_instances(element, 1.0));
+            self.all_instances
+                .extend(overlay::element_to_instances(element, 1.0));
             let end = self.all_instances.len();
             self.element_ranges.push(start..end);
         }
@@ -110,7 +111,9 @@ impl BoardRenderCache {
     /// Used for drag-preview of connected lines without mutating board state.
     pub fn patch_element_positions(&mut self, patches: &[(u64, Vec2, Vec2)]) {
         for &(id, pos, size) in patches {
-            let Some(&index) = self.index_by_id.get(&id) else { continue };
+            let Some(&index) = self.index_by_id.get(&id) else {
+                continue;
+            };
             let range = self.element_ranges[index].clone();
             for i in range {
                 self.all_instances[i].pos = pos.to_array();
@@ -139,8 +142,5 @@ pub fn element_in_expanded_view(camera: &Camera, screen_size: Vec2, element: &El
 
 fn element_in_range(element: &Element, range: VisibleRange) -> bool {
     let (min, max) = element.aabb();
-    min.x <= range.max.x
-        && max.x >= range.min.x
-        && min.y <= range.max.y
-        && max.y >= range.min.y
+    min.x <= range.max.x && max.x >= range.min.x && min.y <= range.max.y && max.y >= range.min.y
 }

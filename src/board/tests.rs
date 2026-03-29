@@ -1,5 +1,6 @@
 use glam::Vec2;
 
+use super::geometry::{line_curve, sample_cubic};
 use super::*;
 
 #[test]
@@ -17,6 +18,10 @@ fn text_bounds_keep_inner_box_centered() {
         stroke_width: default_line_stroke_width(),
         line_arrow_start: false,
         line_arrow_end: false,
+        line_bend: 0.0,
+        line_midpoint_shift: 0.0,
+        line_start_normal: None,
+        line_end_normal: None,
         selected: false,
         text: Some(TextData::default()),
         image: None,
@@ -48,6 +53,10 @@ fn bring_to_front_works() {
             stroke_width: default_line_stroke_width(),
             line_arrow_start: false,
             line_arrow_end: false,
+            line_bend: 0.0,
+            line_midpoint_shift: 0.0,
+            line_start_normal: None,
+            line_end_normal: None,
             selected: false,
             text: None,
             image: None,
@@ -66,6 +75,10 @@ fn bring_to_front_works() {
             stroke_width: default_line_stroke_width(),
             line_arrow_start: false,
             line_arrow_end: false,
+            line_bend: 0.0,
+            line_midpoint_shift: 0.0,
+            line_start_normal: None,
+            line_end_normal: None,
             selected: false,
             text: None,
             image: Some(ImageData {
@@ -91,6 +104,10 @@ fn bring_to_front_works() {
             stroke_width: default_line_stroke_width(),
             line_arrow_start: false,
             line_arrow_end: false,
+            line_bend: 0.0,
+            line_midpoint_shift: 0.0,
+            line_start_normal: None,
+            line_end_normal: None,
             selected: false,
             text: None,
             image: None,
@@ -100,7 +117,11 @@ fn bring_to_front_works() {
 
     assert!(board.bring_to_front(1));
     assert_eq!(
-        board.elements.iter().map(|element| element.id).collect::<Vec<_>>(),
+        board
+            .elements
+            .iter()
+            .map(|element| element.id)
+            .collect::<Vec<_>>(),
         vec![2, 3, 1]
     );
 }
@@ -122,6 +143,10 @@ fn hit_test_prioritizes_shape_layer_over_images() {
             stroke_width: default_line_stroke_width(),
             line_arrow_start: false,
             line_arrow_end: false,
+            line_bend: 0.0,
+            line_midpoint_shift: 0.0,
+            line_start_normal: None,
+            line_end_normal: None,
             selected: false,
             text: None,
             image: Some(ImageData {
@@ -147,6 +172,10 @@ fn hit_test_prioritizes_shape_layer_over_images() {
             stroke_width: default_line_stroke_width(),
             line_arrow_start: false,
             line_arrow_end: false,
+            line_bend: 0.0,
+            line_midpoint_shift: 0.0,
+            line_start_normal: None,
+            line_end_normal: None,
             selected: false,
             text: None,
             image: None,
@@ -174,6 +203,10 @@ fn hit_test_uses_board_order_within_shape_layer() {
             stroke_width: default_line_stroke_width(),
             line_arrow_start: false,
             line_arrow_end: false,
+            line_bend: 0.0,
+            line_midpoint_shift: 0.0,
+            line_start_normal: None,
+            line_end_normal: None,
             selected: false,
             text: None,
             image: None,
@@ -192,6 +225,10 @@ fn hit_test_uses_board_order_within_shape_layer() {
             stroke_width: default_line_stroke_width(),
             line_arrow_start: false,
             line_arrow_end: false,
+            line_bend: 0.0,
+            line_midpoint_shift: 0.0,
+            line_start_normal: None,
+            line_end_normal: None,
             selected: false,
             text: None,
             image: None,
@@ -219,6 +256,10 @@ fn hit_test_prioritizes_text_elements_over_images() {
             stroke_width: default_line_stroke_width(),
             line_arrow_start: false,
             line_arrow_end: false,
+            line_bend: 0.0,
+            line_midpoint_shift: 0.0,
+            line_start_normal: None,
+            line_end_normal: None,
             selected: false,
             text: None,
             image: Some(ImageData {
@@ -244,6 +285,10 @@ fn hit_test_prioritizes_text_elements_over_images() {
             stroke_width: default_line_stroke_width(),
             line_arrow_start: false,
             line_arrow_end: false,
+            line_bend: 0.0,
+            line_midpoint_shift: 0.0,
+            line_start_normal: None,
+            line_end_normal: None,
             selected: false,
             text: Some(TextData {
                 content: "hello".to_string(),
@@ -275,6 +320,10 @@ fn set_property_can_skip_connected_line_sync() {
             stroke_width: default_line_stroke_width(),
             line_arrow_start: false,
             line_arrow_end: false,
+            line_bend: 0.0,
+            line_midpoint_shift: 0.0,
+            line_start_normal: None,
+            line_end_normal: None,
             selected: false,
             text: None,
             image: None,
@@ -293,6 +342,10 @@ fn set_property_can_skip_connected_line_sync() {
             stroke_width: default_line_stroke_width(),
             line_arrow_start: false,
             line_arrow_end: false,
+            line_bend: 0.0,
+            line_midpoint_shift: 0.0,
+            line_start_normal: None,
+            line_end_normal: None,
             selected: false,
             text: None,
             image: None,
@@ -368,7 +421,10 @@ fn compute_drag_line_previews_tracks_resized_targets() {
 
     let previews = board.compute_drag_line_previews(&selected_ids, &preview_transforms);
 
-    assert_eq!(previews, vec![(2, Vec2::new(40.0, 10.0), Vec2::new(20.0, 0.0))]);
+    assert_eq!(
+        previews,
+        vec![(2, Vec2::new(40.0, 10.0), Vec2::new(20.0, 0.0))]
+    );
 }
 
 #[test]
@@ -393,12 +449,19 @@ fn compute_drag_line_previews_tracks_rotated_targets() {
     let selected_ids = std::collections::HashSet::from([1_u64]);
     let preview_transforms = std::collections::HashMap::from([(
         1_u64,
-        ElementTransform::new(Vec2::ZERO, Vec2::new(20.0, 20.0), std::f32::consts::FRAC_PI_2),
+        ElementTransform::new(
+            Vec2::ZERO,
+            Vec2::new(20.0, 20.0),
+            std::f32::consts::FRAC_PI_2,
+        ),
     )]);
 
     let previews = board.compute_drag_line_previews(&selected_ids, &preview_transforms);
 
-    assert_eq!(previews, vec![(2, Vec2::new(10.0, 20.0), Vec2::new(50.0, -10.0))]);
+    assert_eq!(
+        previews,
+        vec![(2, Vec2::new(10.0, 20.0), Vec2::new(50.0, -10.0))]
+    );
 }
 
 #[test]
@@ -420,6 +483,120 @@ fn line_style_snapshot_round_trip_preserves_arrowheads() {
     assert_eq!(line.stroke_width, 5);
 }
 
+#[test]
+fn line_curve_handle_round_trips_bend() {
+    let mut line = line_element(1, Vec2::ZERO, Vec2::new(120.0, 0.0));
+    line.line_bend = 36.0;
+
+    let handle = line_bend_handle_position(&line);
+    let offset = line_curve_handle_offset_from_handle(&line, handle);
+
+    assert!(offset.x.abs() < 0.001);
+    assert!((offset.y - 36.0).abs() < 0.001);
+}
+
+#[test]
+fn line_curve_handle_stays_on_rendered_curve() {
+    let mut line = line_element(1, Vec2::ZERO, Vec2::new(120.0, 20.0));
+    line.line_start_normal = Some(Vec2::new(1.0, 0.0));
+    line.line_end_normal = Some(Vec2::new(0.0, -1.0));
+    line.line_bend = 28.0;
+
+    let curve = line_curve(&line).unwrap();
+    let handle = line_bend_handle_position(&line);
+
+    assert!((handle - sample_cubic(curve, 0.5)).length() < 0.001);
+}
+
+#[test]
+fn line_curve_handle_can_shift_along_chord() {
+    let mut line = line_element(1, Vec2::ZERO, Vec2::new(120.0, 0.0));
+    let target_handle = Vec2::new(78.0, 24.0);
+    let offset = line_curve_handle_offset_from_handle(&line, target_handle);
+    line.line_midpoint_shift = offset.x;
+    line.line_bend = offset.y;
+
+    let curve = line_curve(&line).unwrap();
+    let handle = line_bend_handle_position(&line);
+
+    assert!(line.line_midpoint_shift > 0.0);
+    assert!((handle - target_handle).length() < 0.001);
+    assert!((handle - sample_cubic(curve, 0.5)).length() < 0.001);
+}
+
+#[test]
+fn curved_line_aabb_expands_beyond_chord() {
+    let mut line = line_element(1, Vec2::ZERO, Vec2::new(120.0, 0.0));
+    line.line_bend = 48.0;
+
+    let (min, max) = line.aabb();
+
+    assert!(min.y < 0.0);
+    assert!(max.y > 0.0);
+    assert!(max.x >= 120.0);
+}
+
+#[test]
+fn connected_line_updates_store_face_normals() {
+    let mut board = Board::new();
+    board.elements = vec![
+        rect_element(1, Vec2::ZERO, Vec2::new(20.0, 20.0)),
+        line_element(2, Vec2::new(20.0, 10.0), Vec2::new(40.0, 0.0)),
+    ];
+    board.line_attachments.insert(
+        2,
+        LineEndpoints {
+            start: Some(LineAnchor {
+                target_id: 1,
+                norm_pos: Vec2::new(1.0, 0.5),
+            }),
+            end: None,
+        },
+    );
+    board.connected_lines.insert(1, vec![2]);
+
+    board.update_connected_lines(1);
+
+    let line = board.element(2).unwrap();
+    assert_eq!(line.line_start_normal, Some(Vec2::new(1.0, 0.0)));
+    assert_eq!(line.line_end_normal, None);
+}
+
+#[test]
+fn short_connected_line_controls_do_not_overshoot_deeply() {
+    let mut line = line_element(1, Vec2::ZERO, Vec2::new(40.0, 0.0));
+    line.line_start_normal = Some(Vec2::new(1.0, 0.0));
+    line.line_end_normal = Some(Vec2::new(0.0, -1.0));
+
+    let curve = line_curve(&line).unwrap();
+
+    assert!((curve.c1 - curve.p0).length() < 24.0);
+    assert!((curve.c2 - curve.p3).length() < 24.0);
+}
+
+#[test]
+fn connected_line_end_tangent_stays_outside_target() {
+    let mut line = line_element(1, Vec2::new(-100.0, 0.0), Vec2::new(100.0, 0.0));
+    line.line_end_normal = Some(Vec2::new(-1.0, 0.0));
+
+    let curve = line_curve(&line).unwrap();
+    let pre_end = sample_cubic(curve, 0.99);
+
+    assert!(pre_end.x < curve.p3.x);
+}
+
+#[test]
+fn opposite_facing_edge_controls_both_point_outward() {
+    let mut line = line_element(1, Vec2::new(100.0, 40.0), Vec2::new(200.0, 0.0));
+    line.line_start_normal = Some(Vec2::new(-1.0, 0.0));
+    line.line_end_normal = Some(Vec2::new(1.0, 0.0));
+
+    let curve = line_curve(&line).unwrap();
+
+    assert!(curve.c1.x < curve.p0.x);
+    assert!(curve.c2.x > curve.p3.x);
+}
+
 fn rect_element(id: u64, pos: Vec2, size: Vec2) -> Element {
     Element {
         id,
@@ -434,6 +611,10 @@ fn rect_element(id: u64, pos: Vec2, size: Vec2) -> Element {
         stroke_width: default_line_stroke_width(),
         line_arrow_start: false,
         line_arrow_end: false,
+        line_bend: 0.0,
+        line_midpoint_shift: 0.0,
+        line_start_normal: None,
+        line_end_normal: None,
         selected: false,
         text: None,
         image: None,
@@ -455,6 +636,10 @@ fn line_element(id: u64, pos: Vec2, size: Vec2) -> Element {
         stroke_width: default_line_stroke_width(),
         line_arrow_start: false,
         line_arrow_end: false,
+        line_bend: 0.0,
+        line_midpoint_shift: 0.0,
+        line_start_normal: None,
+        line_end_normal: None,
         selected: false,
         text: None,
         image: None,

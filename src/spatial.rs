@@ -1,10 +1,13 @@
-use std::collections::{HashMap, HashSet};
 use glam::Vec2;
+use std::collections::{HashMap, HashSet};
 
 const CELL_SIZE: f32 = 512.0;
 
 fn cell(p: Vec2) -> (i32, i32) {
-    (p.x.div_euclid(CELL_SIZE) as i32, p.y.div_euclid(CELL_SIZE) as i32)
+    (
+        p.x.div_euclid(CELL_SIZE) as i32,
+        p.y.div_euclid(CELL_SIZE) as i32,
+    )
 }
 
 pub struct SpatialGrid {
@@ -13,7 +16,9 @@ pub struct SpatialGrid {
 
 impl SpatialGrid {
     pub fn new() -> Self {
-        Self { cells: HashMap::new() }
+        Self {
+            cells: HashMap::new(),
+        }
     }
 
     pub fn clear(&mut self) {

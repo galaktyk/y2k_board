@@ -189,7 +189,8 @@ pub extern "C" fn mg_browser_file_selected(
         String::new()
     } else {
         let name_bytes = unsafe { Vec::from_raw_parts(name_ptr, name_len, name_len) };
-        String::from_utf8(name_bytes).unwrap_or_else(|err| String::from_utf8_lossy(&err.into_bytes()).into_owned())
+        String::from_utf8(name_bytes)
+            .unwrap_or_else(|err| String::from_utf8_lossy(&err.into_bytes()).into_owned())
     };
     let bytes = if data_len == 0 {
         Vec::new()
@@ -219,7 +220,10 @@ pub extern "C" fn mg_browser_font_loaded(data_ptr: *mut u8, data_len: usize) {
         return;
     }
 
-    println!("[font] browser delivered font payload bytes={}", bytes.len());
+    println!(
+        "[font] browser delivered font payload bytes={}",
+        bytes.len()
+    );
 
     let mut queue = browser_font_queue()
         .lock()

@@ -1,9 +1,8 @@
 use glam::Vec2;
 
-
 use crate::board::{
-    world_to_local_norm, Board, BoardOperation, Element, ElementKind,
-    ElementPropertyChange, ElementPropertyPatch, ElementTransform, LineAnchor,
+    line_curve_handle_offset_from_handle, world_to_local_norm, Board, BoardOperation, Element,
+    ElementKind, ElementPropertyChange, ElementPropertyPatch, ElementTransform, LineAnchor,
     LineConnectionChange, LineEndpoints, ShapeType, ToolStyleDefaults,
 };
 use crate::camera::Camera;
@@ -20,7 +19,7 @@ const DRAG_START_DISTANCE: f32 = 3.0;
 const STICKY_NOTE_SIZE: f32 = 128.0;
 pub const COMPUTE_TEXT_LAYOUT_DEBOUNCE: f64 = 0.10;
 
-// The pan velocity smoothing factor, between 0 and 1. 
+// The pan velocity smoothing factor, between 0 and 1.
 // Higher values make the velocity change more smoothly but also more slowly.
 const PAN_VELOCITY_SMOOTHING: f32 = 0.45;
 
@@ -56,7 +55,8 @@ fn finalize_pan_glide(state: &mut InputState, zoom: f32) {
     {
         state.pan_velocity = Vec2::ZERO;
     } else if launch_speed_screen > PAN_GLIDE_MAX_LAUNCH_SPEED_SCREEN {
-        state.pan_velocity = state.pan_velocity.normalize() * (PAN_GLIDE_MAX_LAUNCH_SPEED_SCREEN / zoom);
+        state.pan_velocity =
+            state.pan_velocity.normalize() * (PAN_GLIDE_MAX_LAUNCH_SPEED_SCREEN / zoom);
     }
     state.pan_velocity_sample_time = None;
 }
@@ -75,6 +75,10 @@ fn sticky_note_element(tool_style_defaults: &ToolStyleDefaults, pos: Vec2) -> El
         stroke_width: crate::board::DEFAULT_LINE_STROKE_WIDTH,
         line_arrow_start: false,
         line_arrow_end: false,
+        line_bend: 0.0,
+        line_midpoint_shift: 0.0,
+        line_start_normal: None,
+        line_end_normal: None,
         selected: false,
         text: Some(crate::board::TextData {
             content: String::new(),
@@ -86,24 +90,29 @@ fn sticky_note_element(tool_style_defaults: &ToolStyleDefaults, pos: Vec2) -> El
     }
 }
 
-fn begin_transform_drag(
-    state: &mut InputState,
-    board: &Board,
-    drag_mode: DragMode,
-    world: Vec2,
-) {
+fn begin_transform_drag(state: &mut InputState, board: &Board, drag_mode: DragMode, world: Vec2) {
     state.pending_drag_mode = DragMode::None;
     state.drag_mode = drag_mode;
     state.move_origin = board
         .elements
         .iter()
         .filter(|element| element.selected)
-        .map(|element| (element.id, element.pos, element.size, element.rotation))
+        .map(|element| {
+            (
+                element.id,
+                element.pos,
+                element.size,
+                element.rotation,
+                element.line_bend,
+                element.line_midpoint_shift,
+            )
+        })
         .collect();
     state.move_start_world = world;
     state.move_delta = Vec2::ZERO;
     state.rotate_delta = 0.0;
-    state.transform_bounds_origin = current_multi_selection_bounds(state, board).or_else(|| board.selected_bounds());
+    state.transform_bounds_origin =
+        current_multi_selection_bounds(state, board).or_else(|| board.selected_bounds());
     state.drag_selection_bounds = state.transform_bounds_origin;
 }
 
@@ -160,7 +169,7 @@ fn transform_ids(state: &InputState) -> Vec<u64> {
     state
         .move_origin
         .iter()
-        .map(|&(id, _, _, _)| id)
+        .map(|&(id, _, _, _, _, _)| id)
         .collect()
 }
 
@@ -168,7 +177,7 @@ fn move_transform_changes(state: &InputState) -> Vec<ElementPropertyChange> {
     state
         .move_origin
         .iter()
-        .filter_map(|&(id, orig_pos, orig_size, orig_rot)| {
+        .filter_map(|&(id, orig_pos, orig_size, orig_rot, _, _)| {
             let before = ElementTransform::new(orig_pos, orig_size, orig_rot);
             let after = ElementTransform::new(orig_pos + state.move_delta, orig_size, orig_rot);
             (before != after).then_some(ElementPropertyChange {
@@ -185,11 +194,19 @@ fn rotation_angle_delta(start_world: Vec2, current_world: Vec2, center: Vec2) ->
     current_vec.y.atan2(current_vec.x) - start_vec.y.atan2(start_vec.x)
 }
 
-fn selection_handle_hit(state: &InputState, board: &Board, world: Vec2, zoom: f32) -> Option<DragMode> {
+fn selection_handle_hit(
+    state: &InputState,
+    board: &Board,
+    world: Vec2,
+    zoom: f32,
+) -> Option<DragMode> {
     let hit_radius = handle_hit_radius(zoom);
     if board.selected_count() > 1 {
         let bounds = current_multi_selection_bounds(state, board)?;
-        for (index, point) in get_selection_bounds_handles(bounds, zoom).iter().enumerate() {
+        for (index, point) in get_selection_bounds_handles(bounds, zoom)
+            .iter()
+            .enumerate()
+        {
             let delta = world - *point;
             if delta.length_squared() < hit_radius * hit_radius {
                 return Some(match index {
@@ -205,7 +222,12 @@ fn selection_handle_hit(state: &InputState, board: &Board, world: Vec2, zoom: f3
         return None;
     }
 
-    for element in board.elements.iter().filter(|element| element.selected).rev() {
+    for element in board
+        .elements
+        .iter()
+        .filter(|element| element.selected)
+        .rev()
+    {
         if let Some(handles) = get_element_handles(element, zoom) {
             for (index, point) in handles.iter().enumerate() {
                 let delta = world - *point;
@@ -214,6 +236,7 @@ fn selection_handle_hit(state: &InputState, board: &Board, world: Vec2, zoom: f3
                         match index {
                             0 => DragMode::ResizingHandle(HandleDir::LineStart),
                             1 => DragMode::ResizingHandle(HandleDir::LineEnd),
+                            2 => DragMode::ResizingHandle(HandleDir::LineCurve),
                             _ => unreachable!(),
                         }
                     } else {
@@ -234,13 +257,23 @@ fn selection_handle_hit(state: &InputState, board: &Board, world: Vec2, zoom: f3
     None
 }
 
-fn selection_edge_hit(state: &InputState, board: &Board, world: Vec2, zoom: f32) -> Option<DragMode> {
+fn selection_edge_hit(
+    state: &InputState,
+    board: &Board,
+    world: Vec2,
+    zoom: f32,
+) -> Option<DragMode> {
     if board.selected_count() > 1 {
         let bounds = current_multi_selection_bounds(state, board)?;
         return edge_handle_hit(bounds, world, zoom).map(DragMode::ResizingHandle);
     }
 
-    for element in board.elements.iter().filter(|element| element.selected).rev() {
+    for element in board
+        .elements
+        .iter()
+        .filter(|element| element.selected)
+        .rev()
+    {
         let Some(bounds) = element_resize_bounds(element) else {
             continue;
         };
@@ -259,7 +292,9 @@ fn resize_cursor(dir: HandleDir) -> miniquad::CursorIcon {
         HandleDir::TR | HandleDir::BL => miniquad::CursorIcon::NESWResize,
         HandleDir::Left | HandleDir::Right => miniquad::CursorIcon::EWResize,
         HandleDir::Top | HandleDir::Bottom => miniquad::CursorIcon::NSResize,
-        HandleDir::LineStart | HandleDir::LineEnd => miniquad::CursorIcon::Default,
+        HandleDir::LineStart | HandleDir::LineEnd | HandleDir::LineCurve => {
+            miniquad::CursorIcon::Default
+        }
     }
 }
 
@@ -280,11 +315,15 @@ pub fn hover_cursor(
 
     let world = camera.screen_to_world(state.mouse_pos, screen_size);
 
-    if let Some(DragMode::ResizingHandle(dir)) = selection_handle_hit(state, board, world, camera.zoom) {
+    if let Some(DragMode::ResizingHandle(dir)) =
+        selection_handle_hit(state, board, world, camera.zoom)
+    {
         return resize_cursor(dir);
     }
 
-    if let Some(DragMode::ResizingHandle(dir)) = selection_edge_hit(state, board, world, camera.zoom) {
+    if let Some(DragMode::ResizingHandle(dir)) =
+        selection_edge_hit(state, board, world, camera.zoom)
+    {
         return resize_cursor(dir);
     }
 
@@ -297,7 +336,12 @@ fn connection_helper_hit(board: &Board, world: Vec2, zoom: f32) -> Option<Connec
     }
 
     let hit_radius = handle_hit_radius(zoom);
-    for element in board.elements.iter().filter(|element| element.selected).rev() {
+    for element in board
+        .elements
+        .iter()
+        .filter(|element| element.selected)
+        .rev()
+    {
         let Some(helpers) = get_connection_helpers(element, zoom) else {
             continue;
         };
@@ -323,24 +367,30 @@ fn rotate_point(point: Vec2, center: Vec2, angle: f32) -> Vec2 {
     let offset = point - center;
     let cos_a = angle.cos();
     let sin_a = angle.sin();
-    center + Vec2::new(
-        offset.x * cos_a - offset.y * sin_a,
-        offset.x * sin_a + offset.y * cos_a,
-    )
+    center
+        + Vec2::new(
+            offset.x * cos_a - offset.y * sin_a,
+            offset.x * sin_a + offset.y * cos_a,
+        )
 }
 
 fn inverse_rotate_point(point: Vec2, center: Vec2, angle: f32) -> Vec2 {
     let offset = point - center;
     let cos_a = angle.cos();
     let sin_a = angle.sin();
-    center + Vec2::new(
-        offset.x * cos_a + offset.y * sin_a,
-        -offset.x * sin_a + offset.y * cos_a,
-    )
+    center
+        + Vec2::new(
+            offset.x * cos_a + offset.y * sin_a,
+            -offset.x * sin_a + offset.y * cos_a,
+        )
 }
 
 fn scale_point_from_anchor(point: Vec2, anchor: Vec2, scale_x: f32, scale_y: f32) -> Vec2 {
-    anchor + Vec2::new((point.x - anchor.x) * scale_x, (point.y - anchor.y) * scale_y)
+    anchor
+        + Vec2::new(
+            (point.x - anchor.x) * scale_x,
+            (point.y - anchor.y) * scale_y,
+        )
 }
 
 fn rotate_vector(vector: Vec2, angle: f32) -> Vec2 {
@@ -431,10 +481,26 @@ fn element_corners(element: &Element) -> Vec<Vec2> {
     let center = element.pos + element.size * 0.5;
     let half_size = element.size * 0.5;
     vec![
-        rotate_point(center + Vec2::new(-half_size.x, -half_size.y), center, element.rotation),
-        rotate_point(center + Vec2::new(half_size.x, -half_size.y), center, element.rotation),
-        rotate_point(center + Vec2::new(half_size.x, half_size.y), center, element.rotation),
-        rotate_point(center + Vec2::new(-half_size.x, half_size.y), center, element.rotation),
+        rotate_point(
+            center + Vec2::new(-half_size.x, -half_size.y),
+            center,
+            element.rotation,
+        ),
+        rotate_point(
+            center + Vec2::new(half_size.x, -half_size.y),
+            center,
+            element.rotation,
+        ),
+        rotate_point(
+            center + Vec2::new(half_size.x, half_size.y),
+            center,
+            element.rotation,
+        ),
+        rotate_point(
+            center + Vec2::new(-half_size.x, half_size.y),
+            center,
+            element.rotation,
+        ),
     ]
 }
 
@@ -475,25 +541,6 @@ fn selection_bounds_from_selected_elements_in_frame(
     })
 }
 
-fn rect_edge_anchor(norm_pos: Vec2) -> Vec2 {
-    let mut snapped = norm_pos.clamp(Vec2::ZERO, Vec2::ONE);
-    let dist_left = snapped.x;
-    let dist_right = 1.0 - snapped.x;
-    let dist_top = snapped.y;
-    let dist_bottom = 1.0 - snapped.y;
-
-    let min_x = dist_left.min(dist_right);
-    let min_y = dist_top.min(dist_bottom);
-
-    if min_x <= min_y {
-        snapped.x = if dist_left <= dist_right { 0.0 } else { 1.0 };
-    } else {
-        snapped.y = if dist_top <= dist_bottom { 0.0 } else { 1.0 };
-    }
-
-    snapped
-}
-
 fn ellipse_edge_anchor(norm_pos: Vec2) -> Vec2 {
     let centered = norm_pos * 2.0 - Vec2::ONE;
     if centered.length_squared() <= 0.0001 {
@@ -504,14 +551,66 @@ fn ellipse_edge_anchor(norm_pos: Vec2) -> Vec2 {
     (boundary + Vec2::ONE) * 0.5
 }
 
-fn line_anchor_from_drop(target: &Element, world: Vec2) -> Option<LineAnchor> {
-    let norm_pos = match target.shape {
-        ShapeType::Rect | ShapeType::Image => rect_edge_anchor(world_to_local_norm(world, target)),
-        ShapeType::Ellipse => ellipse_edge_anchor(world_to_local_norm(world, target)),
-        ShapeType::Line => return None,
-    };
+fn point_inside_hook_target(target: &Element, world: Vec2) -> bool {
+    let norm = world_to_local_norm(world, target);
 
-    Some(LineAnchor {
+    match target.shape {
+        ShapeType::Rect | ShapeType::Image => {
+            norm.x >= 0.0 && norm.x <= 1.0 && norm.y >= 0.0 && norm.y <= 1.0
+        }
+        ShapeType::Ellipse => {
+            let centered = norm * 2.0 - Vec2::ONE;
+            centered.length_squared() <= 1.0
+        }
+        ShapeType::Line => false,
+    }
+}
+
+fn line_anchor_from_drop(
+    target: &Element,
+    world: Vec2,
+    _reference_world: Vec2,
+) -> Option<LineAnchor> {
+    let mut best: Option<(f32, Vec2)> = None;
+
+    match target.shape {
+        ShapeType::Rect | ShapeType::Image => {
+            let local = world_to_local_norm(world, target).clamp(Vec2::ZERO, Vec2::ONE);
+            let candidates = [
+                Vec2::new(0.0, local.y),
+                Vec2::new(1.0, local.y),
+                Vec2::new(local.x, 0.0),
+                Vec2::new(local.x, 1.0),
+            ];
+
+            for norm_pos in candidates {
+                let distance = (anchored_position_from_element(target, norm_pos) - world).length();
+
+                match best {
+                    Some((best_distance, _)) if distance >= best_distance => {}
+                    _ => best = Some((distance, norm_pos)),
+                }
+            }
+        }
+        ShapeType::Ellipse => {
+            let candidates = [
+                ellipse_edge_anchor(world_to_local_norm(world, target)),
+                ellipse_edge_anchor(world_to_local_norm(_reference_world, target)),
+            ];
+
+            for norm_pos in candidates {
+                let distance = (anchored_position_from_element(target, norm_pos) - world).length();
+
+                match best {
+                    Some((best_distance, _)) if distance >= best_distance => {}
+                    _ => best = Some((distance, norm_pos)),
+                }
+            }
+        }
+        ShapeType::Line => return None,
+    }
+
+    best.map(|(_, norm_pos)| LineAnchor {
         target_id: target.id,
         norm_pos,
     })
@@ -540,55 +639,12 @@ fn snap_radius(zoom: f32) -> f32 {
     SNAP_RADIUS_PX * world_units_per_screen_px(zoom)
 }
 
-fn point_to_element_edge_dist(element: &Element, world: Vec2) -> f32 {
-    let center = element.pos + element.size * 0.5;
-    let cos_r = (-element.rotation).cos();
-    let sin_r = (-element.rotation).sin();
-    let dx = world.x - center.x;
-    let dy = world.y - center.y;
-    let local = Vec2::new(dx * cos_r - dy * sin_r, dx * sin_r + dy * cos_r);
-    let half_size = (element.size * 0.5).abs();
-
-    match element.shape {
-        ShapeType::Rect | ShapeType::Image => {
-            let dx = local.x.abs() - half_size.x;
-            let dy = local.y.abs() - half_size.y;
-            
-            if dx <= 0.0 && dy <= 0.0 {
-                // Inside the rectangle
-                (-dx).min(-dy)
-            } else {
-                // Outside the rectangle
-                let odx = dx.max(0.0);
-                let ody = dy.max(0.0);
-                (odx * odx + ody * ody).sqrt()
-            }
-        }
-        ShapeType::Ellipse => {
-            if half_size.x <= 0.0 || half_size.y <= 0.0 {
-                return (local.x * local.x + local.y * local.y).sqrt();
-            }
-            let normalized = local / half_size;
-            let len = normalized.length();
-            
-            // For ellipse, dist to edge is roughly |len - 1| * average_radius
-            // or we find the closest point on the ellipse boundary.
-            let edge_point = if len > 0.0001 {
-                (normalized / len) * half_size
-            } else {
-                Vec2::new(half_size.x, 0.0)
-            };
-            (local - edge_point).length()
-        }
-        ShapeType::Line => 1e9, // Should not happen for anchors
-    }
-}
-
 fn find_line_anchor(
     board: &Board,
     spatial: &SpatialGrid,
     line_id: u64,
     world: Vec2,
+    reference_world: Vec2,
     snap_radius: f32,
 ) -> Option<LineAnchor> {
     let query_min = world - Vec2::splat(snap_radius);
@@ -606,9 +662,13 @@ fn find_line_anchor(
             continue;
         }
 
-        let dist = point_to_element_edge_dist(target, world);
-        if dist < min_dist {
-            if let Some(norm_pos) = line_anchor_from_drop(target, world) {
+        if let Some(norm_pos) = line_anchor_from_drop(target, world, reference_world) {
+            let dist = if point_inside_hook_target(target, world) {
+                0.0
+            } else {
+                (anchored_position_from_element(target, norm_pos.norm_pos) - world).length()
+            };
+            if dist < min_dist {
                 min_dist = dist;
                 best_anchor = Some(norm_pos);
             }
@@ -637,8 +697,22 @@ fn resolved_line_endpoints(
     let snap_radius = snap_radius(zoom);
 
     Some(LineEndpoints {
-        start: find_line_anchor(board, spatial, line_id, line.pos, snap_radius),
-        end: find_line_anchor(board, spatial, line_id, line.pos + line.size, snap_radius),
+        start: find_line_anchor(
+            board,
+            spatial,
+            line_id,
+            line.pos,
+            line.pos + line.size,
+            snap_radius,
+        ),
+        end: find_line_anchor(
+            board,
+            spatial,
+            line_id,
+            line.pos + line.size,
+            line.pos,
+            snap_radius,
+        ),
     })
 }
 
@@ -671,14 +745,14 @@ fn line_connection_change_for_handle_release(
             after.start = if ctrl_held {
                 None
             } else {
-                find_line_anchor(board, spatial, line_id, start_world, snap_radius)
+                find_line_anchor(board, spatial, line_id, start_world, end_world, snap_radius)
             }
         }
         HandleDir::LineEnd => {
             after.end = if ctrl_held {
                 None
             } else {
-                find_line_anchor(board, spatial, line_id, end_world, snap_radius)
+                find_line_anchor(board, spatial, line_id, end_world, start_world, snap_radius)
             }
         }
         _ => return None,
@@ -721,14 +795,25 @@ fn new_line_connections(
 ) -> Option<LineConnectionChange> {
     let after = resolved_line_endpoints(board, spatial, line_id, zoom, ctrl_held)?;
 
-    (!matches!(after, LineEndpoints { start: None, end: None })).then_some(LineConnectionChange {
+    (!matches!(
+        after,
+        LineEndpoints {
+            start: None,
+            end: None
+        }
+    ))
+    .then_some(LineConnectionChange {
         id: line_id,
         before: LineEndpoints::default(),
         after,
     })
 }
 
-fn resized_selection_bounds(bounds: SelectionBounds, dir: HandleDir, world: Vec2) -> Option<SelectionBounds> {
+fn resized_selection_bounds(
+    bounds: SelectionBounds,
+    dir: HandleDir,
+    world: Vec2,
+) -> Option<SelectionBounds> {
     let center = bounds.center();
     let local_world = inverse_rotate_point(world, center, bounds.rotation);
     let min = bounds.min();
@@ -791,14 +876,62 @@ fn group_resize_from_handle(
     let height = bounds.size.y.max(1.0);
 
     match dir {
-        HandleDir::TL => Some((rotate_point(max, center, bounds.rotation), (max.x - local_world.x) / width, (max.y - local_world.y) / height)),
-        HandleDir::TR => Some((rotate_point(Vec2::new(min.x, max.y), center, bounds.rotation), (local_world.x - min.x) / width, (max.y - local_world.y) / height)),
-        HandleDir::BR => Some((rotate_point(min, center, bounds.rotation), (local_world.x - min.x) / width, (local_world.y - min.y) / height)),
-        HandleDir::BL => Some((rotate_point(Vec2::new(max.x, min.y), center, bounds.rotation), (max.x - local_world.x) / width, (local_world.y - min.y) / height)),
-        HandleDir::Top => Some((rotate_point(Vec2::new((min.x + max.x) * 0.5, max.y), center, bounds.rotation), 1.0, (max.y - local_world.y) / height)),
-        HandleDir::Right => Some((rotate_point(Vec2::new(min.x, (min.y + max.y) * 0.5), center, bounds.rotation), (local_world.x - min.x) / width, 1.0)),
-        HandleDir::Bottom => Some((rotate_point(Vec2::new((min.x + max.x) * 0.5, min.y), center, bounds.rotation), 1.0, (local_world.y - min.y) / height)),
-        HandleDir::Left => Some((rotate_point(Vec2::new(max.x, (min.y + max.y) * 0.5), center, bounds.rotation), (max.x - local_world.x) / width, 1.0)),
+        HandleDir::TL => Some((
+            rotate_point(max, center, bounds.rotation),
+            (max.x - local_world.x) / width,
+            (max.y - local_world.y) / height,
+        )),
+        HandleDir::TR => Some((
+            rotate_point(Vec2::new(min.x, max.y), center, bounds.rotation),
+            (local_world.x - min.x) / width,
+            (max.y - local_world.y) / height,
+        )),
+        HandleDir::BR => Some((
+            rotate_point(min, center, bounds.rotation),
+            (local_world.x - min.x) / width,
+            (local_world.y - min.y) / height,
+        )),
+        HandleDir::BL => Some((
+            rotate_point(Vec2::new(max.x, min.y), center, bounds.rotation),
+            (max.x - local_world.x) / width,
+            (local_world.y - min.y) / height,
+        )),
+        HandleDir::Top => Some((
+            rotate_point(
+                Vec2::new((min.x + max.x) * 0.5, max.y),
+                center,
+                bounds.rotation,
+            ),
+            1.0,
+            (max.y - local_world.y) / height,
+        )),
+        HandleDir::Right => Some((
+            rotate_point(
+                Vec2::new(min.x, (min.y + max.y) * 0.5),
+                center,
+                bounds.rotation,
+            ),
+            (local_world.x - min.x) / width,
+            1.0,
+        )),
+        HandleDir::Bottom => Some((
+            rotate_point(
+                Vec2::new((min.x + max.x) * 0.5, min.y),
+                center,
+                bounds.rotation,
+            ),
+            1.0,
+            (local_world.y - min.y) / height,
+        )),
+        HandleDir::Left => Some((
+            rotate_point(
+                Vec2::new(max.x, (min.y + max.y) * 0.5),
+                center,
+                bounds.rotation,
+            ),
+            (max.x - local_world.x) / width,
+            1.0,
+        )),
         _ => None,
     }
 }
@@ -905,8 +1038,7 @@ pub fn on_mouse_down(
                 state.last_click_id = Some(id);
                 state.last_click_at = Some(now);
 
-                let already_selected = board
-                    .is_selected(id);
+                let already_selected = board.is_selected(id);
                 if !already_selected {
                     board.deselect_all();
                     board.select_only(id);
@@ -1040,7 +1172,7 @@ pub fn on_mouse_up(
                     let line_connection_changes: Vec<LineConnectionChange> = state
                         .move_origin
                         .iter()
-                        .map(|&(id, _, _, _)| id)
+                        .map(|&(id, _, _, _, _, _)| id)
                         .filter_map(|id| {
                             line_connection_change_for_move_release(
                                 board,
@@ -1068,7 +1200,14 @@ pub fn on_mouse_up(
                     let end_anchor = if state.ctrl_held {
                         None
                     } else {
-                        find_line_anchor(board, spatial, u64::MAX, world, snap_radius)
+                        find_line_anchor(
+                            board,
+                            spatial,
+                            u64::MAX,
+                            world,
+                            connection_drag.start_world,
+                            snap_radius,
+                        )
                     };
                     let end_world = end_anchor
                         .as_ref()
@@ -1092,6 +1231,10 @@ pub fn on_mouse_up(
                             stroke_width: tool_style_defaults.line.stroke_width,
                             line_arrow_start: tool_style_defaults.line.arrow_start,
                             line_arrow_end: tool_style_defaults.line.arrow_end,
+                            line_bend: 0.0,
+                            line_midpoint_shift: 0.0,
+                            line_start_normal: None,
+                            line_end_normal: None,
                             selected: false,
                             text: None,
                             image: None,
@@ -1100,7 +1243,11 @@ pub fn on_mouse_up(
                         board.deselect_all();
                         board.select_only(new_id);
                         board.apply_operation(BoardOperation::SetLineConnections {
-                            changes: vec![connection_line_change(new_id, &connection_drag, end_anchor)],
+                            changes: vec![connection_line_change(
+                                new_id,
+                                &connection_drag,
+                                end_anchor,
+                            )],
                         });
                         state.selection_bounds = None;
                     }
@@ -1120,7 +1267,8 @@ pub fn on_mouse_up(
                 state.selection_bounds = state.drag_selection_bounds;
             }
             _ => {
-                let changes = board.selected_transform_changes(&state.move_origin);
+                let mut changes = board.selected_transform_changes(&state.move_origin);
+                changes.extend(board.selected_line_curve_changes(&state.move_origin));
                 if !changes.is_empty() {
                     board.apply_operation(BoardOperation::SetProperty {
                         changes,
@@ -1210,7 +1358,9 @@ pub fn on_mouse_up(
                 board.apply_operation(BoardOperation::AddElement(element));
                 board.deselect_all();
                 board.select_only(new_id);
-                if let Some(change) = new_line_connections(board, spatial, new_id, camera.zoom, state.ctrl_held) {
+                if let Some(change) =
+                    new_line_connections(board, spatial, new_id, camera.zoom, state.ctrl_held)
+                {
                     board.apply_operation(BoardOperation::SetLineConnections {
                         changes: vec![change],
                     });
@@ -1253,7 +1403,11 @@ pub fn on_mouse_move(
     if state.panning {
         if state.touchpad_mode {
             // In touchpad mode, pan-drag (Space+Drag) becomes zoom
-            let factor = if delta_screen.y < 0.0 { 1.05f32 } else { 1.0 / 1.05 };
+            let factor = if delta_screen.y < 0.0 {
+                1.05f32
+            } else {
+                1.0 / 1.05
+            };
             camera.zoom_toward(state.mouse_pos, screen_size, factor);
             return;
         }
@@ -1271,7 +1425,9 @@ pub fn on_mouse_move(
             if dt > 0.0 {
                 let instant_velocity = pan_delta / dt;
                 state.pan_velocity = if state.pan_velocity.length_squared() > 0.0 {
-                    state.pan_velocity.lerp(instant_velocity, PAN_VELOCITY_SMOOTHING)
+                    state
+                        .pan_velocity
+                        .lerp(instant_velocity, PAN_VELOCITY_SMOOTHING)
                 } else {
                     instant_velocity
                 };
@@ -1288,12 +1444,20 @@ pub fn on_mouse_move(
         if pending_delta.length_squared() >= DRAG_START_DISTANCE * DRAG_START_DISTANCE {
             match state.pending_drag_mode {
                 DragMode::MoveSelected => {
-                    begin_transform_drag(state, board, DragMode::MoveSelected, state.pending_drag_start_world);
+                    begin_transform_drag(
+                        state,
+                        board,
+                        DragMode::MoveSelected,
+                        state.pending_drag_start_world,
+                    );
                 }
                 DragMode::MarqueeSelect => {
                     begin_marquee_drag(state, state.pending_drag_start_world);
                 }
-                DragMode::ResizingHandle(_) | DragMode::Rotating | DragMode::CreatingConnection | DragMode::None => {
+                DragMode::ResizingHandle(_)
+                | DragMode::Rotating
+                | DragMode::CreatingConnection
+                | DragMode::None => {
                     clear_pending_drag(state);
                 }
             }
@@ -1302,7 +1466,8 @@ pub fn on_mouse_move(
 
     if state.drag_mode != DragMode::None {
         if state.drag_mode == DragMode::MarqueeSelect {
-            state.marquee_bounds = Some(SelectionBounds::from_points(state.move_start_world, world));
+            state.marquee_bounds =
+                Some(SelectionBounds::from_points(state.move_start_world, world));
             return;
         }
 
@@ -1312,7 +1477,14 @@ pub fn on_mouse_move(
                 let anchor = if state.ctrl_held {
                     None
                 } else {
-                    find_line_anchor(board, spatial, u64::MAX, world, snap_radius)
+                    find_line_anchor(
+                        board,
+                        spatial,
+                        u64::MAX,
+                        world,
+                        connection_drag.start_world,
+                        snap_radius,
+                    )
                 };
 
                 if let Some(anchor) = anchor {
@@ -1344,14 +1516,16 @@ pub fn on_mouse_move(
             let Some(bounds) = state.transform_bounds_origin else {
                 return;
             };
-            state.rotate_delta = rotation_angle_delta(state.move_start_world, world, bounds.center());
-            state.drag_selection_bounds = Some(bounds.with_rotation(bounds.rotation + state.rotate_delta));
+            state.rotate_delta =
+                rotation_angle_delta(state.move_start_world, world, bounds.center());
+            state.drag_selection_bounds =
+                Some(bounds.with_rotation(bounds.rotation + state.rotate_delta));
             return;
         }
 
         let snap_radius = snap_radius(camera.zoom);
         let origins = state.move_origin.clone();
-        for (id, orig_pos, orig_size, orig_rot) in origins {
+        for (id, orig_pos, orig_size, orig_rot, _orig_bend, _orig_midpoint_shift) in origins {
             if !board.element(id).map(|e| e.selected).unwrap_or(false) {
                 continue;
             }
@@ -1360,7 +1534,8 @@ pub fn on_mouse_move(
                 DragMode::Rotating => {
                     if !is_group_transform {
                         let center = orig_pos + orig_size * 0.5;
-                        let angle_diff = rotation_angle_delta(state.move_start_world, world, center);
+                        let angle_diff =
+                            rotation_angle_delta(state.move_start_world, world, center);
                         let element = board.element_mut(id).unwrap();
                         element.rotation = orig_rot + angle_diff;
                     }
@@ -1378,135 +1553,151 @@ pub fn on_mouse_move(
 
                         let element = board.element_mut(id).unwrap();
                         if element.shape == ShapeType::Line {
-                                    let start = scale_point_from_anchor_in_frame(
-                                        orig_pos,
-                                        anchor,
-                                        scale_x,
-                                        scale_y,
-                                        bounds.center(),
-                                        bounds.rotation,
-                                    );
-                                    let end = scale_point_from_anchor_in_frame(
-                                        orig_pos + orig_size,
-                                        anchor,
-                                        scale_x,
-                                        scale_y,
-                                        bounds.center(),
-                                        bounds.rotation,
-                                    );
-                                    element.pos = start;
-                                    element.size = end - start;
-                                } else {
-                                    resize_rotated_element_in_frame(
-                                        element,
-                                        orig_pos,
-                                        orig_size,
-                                        orig_rot,
-                                        anchor,
-                                        scale_x,
-                                        scale_y,
-                                        bounds,
-                                    );
-                                }
-                            } else {
-                                let element_shape = board.element(id).unwrap().shape;
-                                if element_shape == ShapeType::Line {
-                                    match dir {
-                                        HandleDir::LineStart => {
-                                            let old_end = orig_pos + orig_size;
-                                            let target_pos = orig_pos + state.move_delta;
+                            let start = scale_point_from_anchor_in_frame(
+                                orig_pos,
+                                anchor,
+                                scale_x,
+                                scale_y,
+                                bounds.center(),
+                                bounds.rotation,
+                            );
+                            let end = scale_point_from_anchor_in_frame(
+                                orig_pos + orig_size,
+                                anchor,
+                                scale_x,
+                                scale_y,
+                                bounds.center(),
+                                bounds.rotation,
+                            );
+                            element.pos = start;
+                            element.size = end - start;
+                        } else {
+                            resize_rotated_element_in_frame(
+                                element, orig_pos, orig_size, orig_rot, anchor, scale_x, scale_y,
+                                bounds,
+                            );
+                        }
+                    } else {
+                        let element_shape = board.element(id).unwrap().shape;
+                        if element_shape == ShapeType::Line {
+                            match dir {
+                                HandleDir::LineStart => {
+                                    let old_end = orig_pos + orig_size;
+                                    let target_pos = orig_pos + state.move_delta;
 
-                                            let snapped_pos = if state.ctrl_held {
-                                                None
-                                            } else {
-                                                find_line_anchor(board, spatial, id, target_pos, snap_radius).and_then(
-                                                    |anchor| anchored_position_from_anchor(board, &anchor),
-                                                )
-                                            };
+                                    let snapped_pos = if state.ctrl_held {
+                                        None
+                                    } else {
+                                        find_line_anchor(
+                                            board,
+                                            spatial,
+                                            id,
+                                            target_pos,
+                                            old_end,
+                                            snap_radius,
+                                        )
+                                        .and_then(
+                                            |anchor| anchored_position_from_anchor(board, &anchor),
+                                        )
+                                    };
 
-                                            let element = board.element_mut(id).unwrap();
-                                            element.pos = snapped_pos.unwrap_or(target_pos);
-                                            element.size = old_end - element.pos;
-                                        }
-                                        HandleDir::LineEnd => {
-                                            let target_end = orig_pos + orig_size + state.move_delta;
-
-                                            let snapped_end = if state.ctrl_held {
-                                                None
-                                            } else {
-                                                find_line_anchor(board, spatial, id, target_end, snap_radius).and_then(
-                                                    |anchor| anchored_position_from_anchor(board, &anchor),
-                                                )
-                                            };
-
-                                            let element = board.element_mut(id).unwrap();
-                                            element.size = snapped_end.unwrap_or(target_end) - element.pos;
-                                        }
-                                        _ => {}
-                                    }
-                                } else {
                                     let element = board.element_mut(id).unwrap();
-                                    let c = orig_rot.cos();
-                                    let s = orig_rot.sin();
-                                    let dx = state.move_delta.x;
-                                    let dy = state.move_delta.y;
-                                    let l_dx = dx * c + dy * s;
-                                    let l_dy = -dx * s + dy * c;
-
-                                    let mut new_pos = orig_pos;
-                                    let mut new_size = orig_size;
-
-                                    match dir {
-                                        HandleDir::TL => {
-                                            new_pos += Vec2::new(l_dx, l_dy);
-                                            new_size -= Vec2::new(l_dx, l_dy);
-                                        }
-                                        HandleDir::TR => {
-                                            new_pos.y += l_dy;
-                                            new_size.x += l_dx;
-                                            new_size.y -= l_dy;
-                                        }
-                                        HandleDir::BL => {
-                                            new_pos.x += l_dx;
-                                            new_size.x -= l_dx;
-                                            new_size.y += l_dy;
-                                        }
-                                        HandleDir::BR => {
-                                            new_size += Vec2::new(l_dx, l_dy);
-                                        }
-                                        HandleDir::Top => {
-                                            new_pos.y += l_dy;
-                                            new_size.y -= l_dy;
-                                        }
-                                        HandleDir::Right => {
-                                            new_size.x += l_dx;
-                                        }
-                                        HandleDir::Bottom => {
-                                            new_size.y += l_dy;
-                                        }
-                                        HandleDir::Left => {
-                                            new_pos.x += l_dx;
-                                            new_size.x -= l_dx;
-                                        }
-                                        _ => {}
-                                    }
-
-                                    let local_center = new_pos + new_size * 0.5;
-                                    let orig_local_center = orig_pos + orig_size * 0.5;
-                                    let d_cx = local_center.x - orig_local_center.x;
-                                    let d_cy = local_center.y - orig_local_center.y;
-                                    let w_dcx = d_cx * c - d_cy * s;
-                                    let w_dcy = d_cx * s + d_cy * c;
-                                    let w_center =
-                                        orig_pos + orig_size * 0.5 + Vec2::new(w_dcx, w_dcy);
-
-                                    element.size = new_size;
-                                    element.pos = w_center - new_size * 0.5;
+                                    element.pos = snapped_pos.unwrap_or(target_pos);
+                                    element.size = old_end - element.pos;
                                 }
+                                HandleDir::LineEnd => {
+                                    let target_end = orig_pos + orig_size + state.move_delta;
+
+                                    let snapped_end = if state.ctrl_held {
+                                        None
+                                    } else {
+                                        find_line_anchor(
+                                            board,
+                                            spatial,
+                                            id,
+                                            target_end,
+                                            orig_pos,
+                                            snap_radius,
+                                        )
+                                        .and_then(
+                                            |anchor| anchored_position_from_anchor(board, &anchor),
+                                        )
+                                    };
+
+                                    let element = board.element_mut(id).unwrap();
+                                    element.size = snapped_end.unwrap_or(target_end) - element.pos;
+                                }
+                                HandleDir::LineCurve => {
+                                    let element = board.element_mut(id).unwrap();
+                                    let curve_offset =
+                                        line_curve_handle_offset_from_handle(element, world);
+                                    element.line_midpoint_shift = curve_offset.x;
+                                    element.line_bend = curve_offset.y;
+                                }
+                                _ => {}
                             }
-                            if board.element(id).unwrap().text.is_some() {
-                                state.enqueue_resize_text_recompute(id);
+                        } else {
+                            let element = board.element_mut(id).unwrap();
+                            let c = orig_rot.cos();
+                            let s = orig_rot.sin();
+                            let dx = state.move_delta.x;
+                            let dy = state.move_delta.y;
+                            let l_dx = dx * c + dy * s;
+                            let l_dy = -dx * s + dy * c;
+
+                            let mut new_pos = orig_pos;
+                            let mut new_size = orig_size;
+
+                            match dir {
+                                HandleDir::TL => {
+                                    new_pos += Vec2::new(l_dx, l_dy);
+                                    new_size -= Vec2::new(l_dx, l_dy);
+                                }
+                                HandleDir::TR => {
+                                    new_pos.y += l_dy;
+                                    new_size.x += l_dx;
+                                    new_size.y -= l_dy;
+                                }
+                                HandleDir::BL => {
+                                    new_pos.x += l_dx;
+                                    new_size.x -= l_dx;
+                                    new_size.y += l_dy;
+                                }
+                                HandleDir::BR => {
+                                    new_size += Vec2::new(l_dx, l_dy);
+                                }
+                                HandleDir::Top => {
+                                    new_pos.y += l_dy;
+                                    new_size.y -= l_dy;
+                                }
+                                HandleDir::Right => {
+                                    new_size.x += l_dx;
+                                }
+                                HandleDir::Bottom => {
+                                    new_size.y += l_dy;
+                                }
+                                HandleDir::Left => {
+                                    new_pos.x += l_dx;
+                                    new_size.x -= l_dx;
+                                }
+                                _ => {}
                             }
+
+                            let local_center = new_pos + new_size * 0.5;
+                            let orig_local_center = orig_pos + orig_size * 0.5;
+                            let d_cx = local_center.x - orig_local_center.x;
+                            let d_cy = local_center.y - orig_local_center.y;
+                            let w_dcx = d_cx * c - d_cy * s;
+                            let w_dcy = d_cx * s + d_cy * c;
+                            let w_center = orig_pos + orig_size * 0.5 + Vec2::new(w_dcx, w_dcy);
+
+                            element.size = new_size;
+                            element.pos = w_center - new_size * 0.5;
+                        }
+                    }
+                    if board.element(id).unwrap().text.is_some() {
+                        state.enqueue_resize_text_recompute(id);
+                    }
                 }
                 DragMode::MoveSelected => {
                     let element = board.element_mut(id).unwrap();
@@ -1518,11 +1709,9 @@ pub fn on_mouse_move(
         if is_group_transform {
             if let DragMode::ResizingHandle(dir) = state.drag_mode {
                 if let Some(bounds) = state.transform_bounds_origin {
-                    state.drag_selection_bounds = selection_bounds_from_selected_elements_in_frame(
-                        board,
-                        bounds.rotation,
-                    )
-                    .or_else(|| resized_selection_bounds(bounds, dir, world));
+                    state.drag_selection_bounds =
+                        selection_bounds_from_selected_elements_in_frame(board, bounds.rotation)
+                            .or_else(|| resized_selection_bounds(bounds, dir, world));
                 }
             }
         } else {
@@ -1570,6 +1759,10 @@ pub fn on_mouse_move(
             stroke_width: preview_line_stroke_width(&active_tool, tool_style_defaults),
             line_arrow_start: preview_line_arrow_start(&active_tool, tool_style_defaults),
             line_arrow_end: preview_line_arrow_end(&active_tool, tool_style_defaults),
+            line_bend: 0.0,
+            line_midpoint_shift: 0.0,
+            line_start_normal: None,
+            line_end_normal: None,
             selected: false,
             text: if matches!(shape, ShapeType::Rect | ShapeType::Ellipse) {
                 Some(crate::board::TextData {
@@ -1664,5 +1857,116 @@ fn connection_line_change(
             }),
             end,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use glam::Vec2;
+
+    use super::*;
+    use crate::spatial::SpatialGrid;
+
+    fn rect_target(id: u64, pos: Vec2, size: Vec2) -> Element {
+        Element {
+            id,
+            shape: ShapeType::Rect,
+            kind: ElementKind::Generic,
+            pos,
+            size,
+            rotation: 0.0,
+            color: [1.0, 0.0, 0.0, 1.0],
+            stroke_color: crate::board::default_stroke_color(),
+            border_width: crate::board::default_border_width(),
+            stroke_width: crate::board::default_line_stroke_width(),
+            line_arrow_start: false,
+            line_arrow_end: false,
+            line_bend: 0.0,
+            line_midpoint_shift: 0.0,
+            line_start_normal: None,
+            line_end_normal: None,
+            selected: false,
+            text: None,
+            image: None,
+            text_layout_generation: 0,
+        }
+    }
+
+    #[test]
+    fn line_hook_accepts_drop_inside_target_on_nearest_face() {
+        let target = rect_target(1, Vec2::ZERO, Vec2::new(100.0, 80.0));
+
+        let anchor =
+            line_anchor_from_drop(&target, Vec2::new(75.0, 40.0), Vec2::new(-40.0, 40.0))
+                .unwrap();
+
+        assert_eq!(anchor.norm_pos, Vec2::new(1.0, 0.5));
+    }
+
+    #[test]
+    fn line_hook_uses_nearest_face() {
+        let target = rect_target(1, Vec2::ZERO, Vec2::new(100.0, 80.0));
+
+        let anchor =
+            line_anchor_from_drop(&target, Vec2::new(-4.0, 40.0), Vec2::new(-80.0, 40.0)).unwrap();
+
+        assert_eq!(anchor.norm_pos, Vec2::new(0.0, 0.5));
+    }
+
+    #[test]
+    fn line_hook_allows_opposite_facing_right_edge() {
+        let target = rect_target(1, Vec2::ZERO, Vec2::new(100.0, 80.0));
+
+        let anchor =
+            line_anchor_from_drop(&target, Vec2::new(104.0, 40.0), Vec2::new(-80.0, 40.0))
+                .unwrap();
+
+        assert_eq!(anchor.norm_pos, Vec2::new(1.0, 0.5));
+    }
+
+    #[test]
+    fn find_line_anchor_accepts_cursor_deep_inside_target() {
+        let target = rect_target(1, Vec2::ZERO, Vec2::new(100.0, 80.0));
+        let mut board = Board::new();
+        board.elements.push(target.clone());
+
+        let (aabb_min, aabb_max) = target.aabb();
+        let mut spatial = SpatialGrid::new();
+        spatial.insert(target.id, aabb_min, aabb_max);
+
+        let anchor = find_line_anchor(
+            &board,
+            &spatial,
+            u64::MAX,
+            Vec2::new(75.0, 40.0),
+            Vec2::new(-40.0, 40.0),
+            12.0,
+        )
+        .unwrap();
+
+        assert_eq!(anchor.norm_pos, Vec2::new(1.0, 0.5));
+    }
+
+    #[test]
+    fn find_line_anchor_accepts_opposite_facing_right_edge() {
+        let target = rect_target(1, Vec2::ZERO, Vec2::new(100.0, 80.0));
+        let mut board = Board::new();
+        board.elements.push(target.clone());
+
+        let (aabb_min, aabb_max) = target.aabb();
+        let mut spatial = SpatialGrid::new();
+        spatial.insert(target.id, aabb_min, aabb_max);
+
+        let anchor = find_line_anchor(
+            &board,
+            &spatial,
+            u64::MAX,
+            Vec2::new(104.0, 40.0),
+            Vec2::new(-80.0, 40.0),
+            12.0,
+        )
+        .unwrap();
+
+        assert_eq!(anchor.norm_pos, Vec2::new(1.0, 0.5));
     }
 }

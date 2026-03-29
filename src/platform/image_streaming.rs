@@ -64,9 +64,8 @@ pub extern "C" fn mg_embedded_asset_loaded(
     let relative_path = if relative_path_len == 0 {
         String::new()
     } else {
-        let bytes = unsafe {
-            Vec::from_raw_parts(relative_path_ptr, relative_path_len, relative_path_len)
-        };
+        let bytes =
+            unsafe { Vec::from_raw_parts(relative_path_ptr, relative_path_len, relative_path_len) };
         String::from_utf8(bytes)
             .unwrap_or_else(|err| String::from_utf8_lossy(&err.into_bytes()).into_owned())
     };

@@ -71,7 +71,11 @@ impl Renderer {
         ctx.draw(0, 6, instances.len() as i32);
     }
 
-    pub fn upload_scene_instances(&mut self, ctx: &mut dyn RenderingBackend, instances: &[InstanceData]) {
+    pub fn upload_scene_instances(
+        &mut self,
+        ctx: &mut dyn RenderingBackend,
+        instances: &[InstanceData],
+    ) {
         self.scene_shape_count = instances.len();
         if instances.is_empty() {
             return;
@@ -96,7 +100,7 @@ impl Renderer {
         let mut u_move_offset = [0.0, 0.0];
         let mut u_rotate_center = [0.0, 0.0];
         let mut u_rotate_angle = 0.0;
-        
+
         if let Some(offset) = move_drag_offset {
             u_move_offset = offset.to_array();
         } else if let Some((angle, center)) = rotate_drag_preview {
@@ -170,10 +174,16 @@ impl Renderer {
         self.scene_color_text_count = color_instances.len();
 
         if !mono_instances.is_empty() {
-            ctx.buffer_update(self.scene_mono_text_buffer, BufferSource::slice(mono_instances));
+            ctx.buffer_update(
+                self.scene_mono_text_buffer,
+                BufferSource::slice(mono_instances),
+            );
         }
         if !color_instances.is_empty() {
-            ctx.buffer_update(self.scene_color_text_buffer, BufferSource::slice(color_instances));
+            ctx.buffer_update(
+                self.scene_color_text_buffer,
+                BufferSource::slice(color_instances),
+            );
         }
     }
 
@@ -191,7 +201,7 @@ impl Renderer {
         let mut u_move_offset = [0.0, 0.0];
         let mut u_rotate_center = [0.0, 0.0];
         let mut u_rotate_angle = 0.0;
-        
+
         if let Some(offset) = move_drag_offset {
             u_move_offset = offset.to_array();
         } else if let Some((angle, center)) = rotate_drag_preview {
@@ -246,7 +256,7 @@ impl Renderer {
         let mut u_move_offset = [0.0, 0.0];
         let mut u_rotate_center = [0.0, 0.0];
         let mut u_rotate_angle = 0.0;
-        
+
         if let Some(offset) = move_drag_offset {
             u_move_offset = offset.to_array();
         } else if let Some((angle, center)) = rotate_drag_preview {

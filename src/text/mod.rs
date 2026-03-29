@@ -4,12 +4,12 @@ use std::collections::{HashMap, HashSet};
 use std::io::Cursor as IoCursor;
 use std::sync::Arc;
 
+#[cfg(target_arch = "wasm32")]
+use cosmic_text::Fallback;
 use cosmic_text::{
     fontdb, Attrs, Buffer, CacheKey, Color, Cursor, Family, FontSystem, Metrics, Motion, Shaping,
     SwashCache, SwashContent, SwashImage, Wrap,
 };
-#[cfg(target_arch = "wasm32")]
-use cosmic_text::Fallback;
 use glam::Vec2;
 use miniquad::{RenderingBackend, TextureId};
 #[cfg(target_arch = "wasm32")]
@@ -53,7 +53,12 @@ pub struct UiTextSpec {
 }
 
 impl UiTextSpec {
-    pub fn top_left(content: impl Into<String>, pos: Vec2, font_size: f32, color: [f32; 4]) -> Self {
+    pub fn top_left(
+        content: impl Into<String>,
+        pos: Vec2,
+        font_size: f32,
+        color: [f32; 4],
+    ) -> Self {
         Self {
             content: content.into(),
             pos,
@@ -65,7 +70,12 @@ impl UiTextSpec {
         }
     }
 
-    pub fn top_center(content: impl Into<String>, pos: Vec2, font_size: f32, color: [f32; 4]) -> Self {
+    pub fn top_center(
+        content: impl Into<String>,
+        pos: Vec2,
+        font_size: f32,
+        color: [f32; 4],
+    ) -> Self {
         Self {
             content: content.into(),
             pos,
@@ -197,7 +207,10 @@ impl TextSystem {
         }
 
         let db = self.font_system.db_mut();
-        println!("[font] applying {} browser-loaded fonts", loaded_fonts.len());
+        println!(
+            "[font] applying {} browser-loaded fonts",
+            loaded_fonts.len()
+        );
         for bytes in loaded_fonts {
             let decoded = decode_browser_font_bytes(bytes);
             let Some(decoded) = decoded else {
@@ -350,13 +363,20 @@ impl TextSystem {
                             .color_opt
                             .map(cosmic_color_to_rgba)
                             .unwrap_or(spec.color);
-                        (physical.cache_key, physical.x, physical.y, glyph_color, line_x)
+                        (
+                            physical.cache_key,
+                            physical.x,
+                            physical.y,
+                            glyph_color,
+                            line_x,
+                        )
                     })
                 })
                 .collect();
 
             for (cache_key, phys_x, phys_y, glyph_color, line_x) in glyph_data {
-                let Some(resolved) = self.resolve_glyph(ctx, text_atlas, emoji_atlas, cache_key) else {
+                let Some(resolved) = self.resolve_glyph(ctx, text_atlas, emoji_atlas, cache_key)
+                else {
                     continue;
                 };
 
@@ -379,7 +399,8 @@ impl TextSystem {
                     0.0,
                     resolved.entry.uv_min(atlas_size as f32),
                     resolved.entry.uv_max(atlas_size as f32),
-                    instance_color, false,
+                    instance_color,
+                    false,
                 );
 
                 match resolved.kind {
@@ -408,19 +429,30 @@ impl TextSystem {
         let prev_element_ranges = std::mem::take(&mut prepared.element_ranges);
         let prev_element_range_index = std::mem::take(&mut prepared.element_range_index);
 
-        prepared.mono_instances.reserve(prev_mono_instances.capacity());
-        prepared.color_instances.reserve(prev_color_instances.capacity());
-        prepared.element_ranges.reserve(prev_element_ranges.capacity());
+        prepared
+            .mono_instances
+            .reserve(prev_mono_instances.capacity());
+        prepared
+            .color_instances
+            .reserve(prev_color_instances.capacity());
+        prepared
+            .element_ranges
+            .reserve(prev_element_ranges.capacity());
         prepared
             .element_range_index
             .reserve(prev_element_range_index.len());
         prepared.caret_pos = None;
         for element in &board.elements {
-            let content = if let Some(edit) = active_edit.filter(|edit| edit.element_id == element.id) {
-                edit.content
-            } else {
-                element.text.as_ref().map(|text| text.content.as_str()).unwrap_or_default()
-            };
+            let content =
+                if let Some(edit) = active_edit.filter(|edit| edit.element_id == element.id) {
+                    edit.content
+                } else {
+                    element
+                        .text
+                        .as_ref()
+                        .map(|text| text.content.as_str())
+                        .unwrap_or_default()
+                };
 
             let is_active_edit = active_edit
                 .as_ref()
@@ -442,12 +474,18 @@ impl TextSystem {
             if !is_active_edit {
                 if let Some(&prev_range_index) = prev_element_range_index.get(&element.id) {
                     let prev_range = &prev_element_ranges[prev_range_index as usize];
-                    if prev_range.generation == element.text_layout_generation && !prev_range.was_active_edit {
+                    if prev_range.generation == element.text_layout_generation
+                        && !prev_range.was_active_edit
+                    {
                         let pos_diff = element.pos - Vec2::from(prev_range.element_pos);
                         let rot_diff = element.rotation - prev_range.element_rotation;
 
                         let new_selected = if element.selected { 1 } else { 0 };
-                        let text_color = element.text.as_ref().map(|t| t.color).unwrap_or(palette::BLACK);
+                        let text_color = element
+                            .text
+                            .as_ref()
+                            .map(|t| t.color)
+                            .unwrap_or(palette::BLACK);
                         let new_color_u8 = [
                             (text_color[0] * 255.0) as u8,
                             (text_color[1] * 255.0) as u8,
@@ -459,10 +497,12 @@ impl TextSystem {
                         let origin_i16 = [origin_f32[0] as i16, origin_f32[1] as i16];
 
                         prepared.mono_instances.extend_from_slice(
-                            &prev_mono_instances[prev_range.mono_start as usize..prev_range.mono_end as usize],
+                            &prev_mono_instances
+                                [prev_range.mono_start as usize..prev_range.mono_end as usize],
                         );
                         prepared.color_instances.extend_from_slice(
-                            &prev_color_instances[prev_range.color_start as usize..prev_range.color_end as usize],
+                            &prev_color_instances
+                                [prev_range.color_start as usize..prev_range.color_end as usize],
                         );
 
                         let mono_end = prepared.mono_instances.len();
@@ -568,9 +608,12 @@ impl TextSystem {
                                 .color_opt
                                 .map(cosmic_color_to_rgba)
                                 .unwrap_or(default_color);
-                            let Some(resolved) =
-                                self.resolve_glyph(ctx, text_atlas, emoji_atlas, physical.cache_key)
-                            else {
+                            let Some(resolved) = self.resolve_glyph(
+                                ctx,
+                                text_atlas,
+                                emoji_atlas,
+                                physical.cache_key,
+                            ) else {
                                 continue;
                             };
 
@@ -622,8 +665,7 @@ impl TextSystem {
                 };
 
             for (cache_key, phys_x, phys_y, glyph_color) in glyph_data {
-                let resolved =
-                    self.resolve_glyph(ctx, text_atlas, emoji_atlas, cache_key);
+                let resolved = self.resolve_glyph(ctx, text_atlas, emoji_atlas, cache_key);
                 let Some(resolved) = resolved else {
                     continue;
                 };
@@ -651,7 +693,8 @@ impl TextSystem {
                     element.rotation,
                     resolved.entry.uv_min(atlas_size as f32),
                     resolved.entry.uv_max(atlas_size as f32),
-                    instance_color, element.selected,
+                    instance_color,
+                    element.selected,
                 );
 
                 match resolved.kind {
@@ -767,7 +810,8 @@ impl TextSystem {
                         element.rotation,
                         uv_min,
                         uv_max,
-                        SELECTION_COLOR, element.selected,
+                        SELECTION_COLOR,
+                        element.selected,
                     ));
                 }
             }
@@ -783,7 +827,8 @@ impl TextSystem {
                 element.rotation,
                 uv_min,
                 uv_max,
-                CARET_COLOR, element.selected,
+                CARET_COLOR,
+                element.selected,
             ));
             caret_pos = Some(world_pos);
         }
@@ -794,12 +839,7 @@ impl TextSystem {
     /// Ensure a layout is cached for the given element. Returns true if the
     /// cache entry exists (hit or freshly inserted), false if layout failed.
     /// Overwrites the single cache slot when a miss occurs.
-    fn ensure_layout_cached(
-        &mut self,
-        element: &Element,
-        content: &str,
-        generation: u64,
-    ) -> bool {
+    fn ensure_layout_cached(&mut self, element: &Element, content: &str, generation: u64) -> bool {
         // Check cache hit
         if let Some((id, ref cached)) = self.layout_cache {
             if id == element.id && cached.generation == generation {
@@ -833,12 +873,15 @@ impl TextSystem {
         buffer.shape_until_scroll(&mut self.font_system, true);
 
         // Overwrite the single cache slot
-        self.layout_cache = Some((element.id, CachedLayout {
-            buffer,
-            world_min,
-            default_color: text.color,
-            generation,
-        }));
+        self.layout_cache = Some((
+            element.id,
+            CachedLayout {
+                buffer,
+                world_min,
+                default_color: text.color,
+                generation,
+            },
+        ));
 
         true
     }
@@ -916,8 +959,6 @@ impl TextSystem {
     }
 }
 
-
-
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug, Default, Clone, Copy)]
 struct WasmFontFallback;
@@ -937,7 +978,6 @@ impl Fallback for WasmFontFallback {
     fn script_fallback(&self, script: Script, _locale: &str) -> &[&'static str] {
         // Dummy fallback since wasm can't access browser fonts anyway.
         &[]
-        
     }
 }
 
@@ -1202,7 +1242,12 @@ fn caret_geometry(buffer: &Buffer, cursor: Cursor) -> Option<(f32, f32, f32)> {
         if run.line_i != cursor.line {
             continue;
         }
-        last_matching_run = Some((run.line_w, run.line_top, run.line_height, run.glyphs.is_empty()));
+        last_matching_run = Some((
+            run.line_w,
+            run.line_top,
+            run.line_height,
+            run.glyphs.is_empty(),
+        ));
         // Handle cursor at the very beginning (leftmost edge)
         if cursor.index == 0 {
             return Some((0.0, run.line_top, run.line_height));
@@ -1255,7 +1300,6 @@ fn rgba_to_cosmic_color(color: [f32; 4]) -> Color {
     )
 }
 
-
 /// Cached line byte-offset table for a string, used to convert between a
 /// flat byte index and a (line, column) `Cursor` without repeated scanning.
 #[derive(Clone, Default, PartialEq, Eq)]
@@ -1285,7 +1329,10 @@ impl LineOffsets {
 
     fn byte_to_cursor(&self, text: &str, global_byte: usize) -> Cursor {
         let target = global_byte.min(text.len());
-        let line = self.starts.partition_point(|&s| s <= target).saturating_sub(1);
+        let line = self
+            .starts
+            .partition_point(|&s| s <= target)
+            .saturating_sub(1);
         Cursor::new(line, target - self.starts[line])
     }
 

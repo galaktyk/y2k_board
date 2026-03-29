@@ -1,8 +1,8 @@
 use miniquad::*;
 
 use super::shaders::{
-    COLOR_TEXT_FRAGMENT_SRC, FRAGMENT_SRC, GRID_FRAGMENT_SRC, GRID_VERTEX_SRC,
-    IMAGE_FRAGMENT_SRC, TEXT_FRAGMENT_SRC, TEXT_VERTEX_SRC, VERTEX_SRC,
+    COLOR_TEXT_FRAGMENT_SRC, FRAGMENT_SRC, GRID_FRAGMENT_SRC, GRID_VERTEX_SRC, IMAGE_FRAGMENT_SRC,
+    TEXT_FRAGMENT_SRC, TEXT_VERTEX_SRC, VERTEX_SRC,
 };
 use super::{
     ImageInstanceData, InstanceData, Renderer, TextInstanceData, MAX_IMAGE_INSTANCES,
@@ -306,7 +306,11 @@ impl Renderer {
 
         let grid_pipeline = ctx.new_pipeline(
             &[BufferLayout::default()],
-            &[VertexAttribute::with_buffer("a_pos", VertexFormat::Float2, 0)],
+            &[VertexAttribute::with_buffer(
+                "a_pos",
+                VertexFormat::Float2,
+                0,
+            )],
             grid_shader,
             PipelineParams {
                 color_blend: Some(BlendState::new(

@@ -1,6 +1,8 @@
-use glam::Vec2;
-use crate::rendering::renderer::{InstanceData, TextInstanceData, MAX_SHAPE_INSTANCES, MAX_TEXT_INSTANCES};
+use crate::rendering::renderer::{
+    InstanceData, TextInstanceData, MAX_SHAPE_INSTANCES, MAX_TEXT_INSTANCES,
+};
 use crate::text::UiTextSpec;
+use glam::Vec2;
 
 const STATS_TEXT_SIZE: f32 = 12.0;
 const STATS_LINE_HEIGHT: f32 = 14.0;
@@ -16,7 +18,7 @@ pub struct StatsPanelLayout {
 
 /// Build screen-space text specs for the stats overlay.
 pub fn build_stats_text_specs(
-    zoom:      f32,
+    zoom: f32,
     shapes_count: usize,
     char_count: usize,
     atlas_count: usize,
@@ -25,8 +27,8 @@ pub fn build_stats_text_specs(
     image_ram_total_bytes: usize,
     image_vram_used_bytes: usize,
     image_vram_total_bytes: usize,
-    fps:       f32,
-    frame_ms:  f32,
+    fps: f32,
+    frame_ms: f32,
 ) -> Vec<UiTextSpec> {
     let text_color = [0.88f32, 0.92, 0.96, 1.0];
     let frame_label = if frame_ms >= 10.0 {
@@ -42,7 +44,9 @@ pub fn build_stats_text_specs(
     let text_bytes = MAX_TEXT_INSTANCES * std::mem::size_of::<TextInstanceData>();
     let total_mb: f64 = (shape_bytes + text_bytes) as f64 / (1024.0 * 1024.0);
 
-    let mb_usage: f64 = ((shapes_count * std::mem::size_of::<InstanceData>()) as f64 + (char_count * std::mem::size_of::<TextInstanceData>()) as f64) / (1024.0 * 1024.0);
+    let mb_usage: f64 = ((shapes_count * std::mem::size_of::<InstanceData>()) as f64
+        + (char_count * std::mem::size_of::<TextInstanceData>()) as f64)
+        / (1024.0 * 1024.0);
     let image_ram_mb = image_ram_used_bytes as f64 / (1024.0 * 1024.0);
     let image_ram_total_mb = image_ram_total_bytes as f64 / (1024.0 * 1024.0);
     let image_vram_mb = image_vram_used_bytes as f64 / (1024.0 * 1024.0);
@@ -64,8 +68,13 @@ pub fn build_stats_text_specs(
     let mut text_specs = Vec::with_capacity(lines.len());
     for (i, line) in lines.iter().enumerate() {
         text_specs.push(
-            UiTextSpec::top_left(line, Vec2::new(0.0, i as f32 * STATS_LINE_HEIGHT), STATS_TEXT_SIZE, text_color)
-                .with_line_height(STATS_LINE_HEIGHT),
+            UiTextSpec::top_left(
+                line,
+                Vec2::new(0.0, i as f32 * STATS_LINE_HEIGHT),
+                STATS_TEXT_SIZE,
+                text_color,
+            )
+            .with_line_height(STATS_LINE_HEIGHT),
         );
     }
 
@@ -96,6 +105,7 @@ pub fn build_stats_background_instances(layout: &StatsPanelLayout) -> Vec<Instan
         0.0,
         [0.04, 0.05, 0.07, 0.80],
         0.0,
-        1.0, false,
+        1.0,
+        false,
     )]
 }

@@ -1,6 +1,6 @@
-use glam::Vec2;
 use super::element::{Element, ElementStyleSnapshot};
 use super::geometry::rotate_point;
+use glam::Vec2;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ElementTransform {
@@ -11,11 +11,19 @@ pub struct ElementTransform {
 
 impl ElementTransform {
     pub fn new(pos: Vec2, size: Vec2, rotation: f32) -> Self {
-        Self { pos, size, rotation }
+        Self {
+            pos,
+            size,
+            rotation,
+        }
     }
 }
 
-pub fn apply_transform(element: &mut Element, before: Option<ElementTransform>, after: ElementTransform) {
+pub fn apply_transform(
+    element: &mut Element,
+    before: Option<ElementTransform>,
+    after: ElementTransform,
+) {
     let size_changed = before.map_or(element.size != after.size, |b| b.size != after.size);
     element.pos = after.pos;
     element.size = after.size;
@@ -35,6 +43,12 @@ pub fn rotate_element(element: &mut Element, center: Vec2, angle: f32) {
         let end = rotate_point(element.pos + element.size, center, angle);
         element.pos = start;
         element.size = end - start;
+        if let Some(normal) = element.line_start_normal {
+            element.line_start_normal = Some(rotate_point(normal, Vec2::ZERO, angle));
+        }
+        if let Some(normal) = element.line_end_normal {
+            element.line_end_normal = Some(rotate_point(normal, Vec2::ZERO, angle));
+        }
     } else {
         let element_center = element.pos + element.size * 0.5;
         let rotated_center = rotate_point(element_center, center, angle);
@@ -56,6 +70,12 @@ pub enum ElementPropertyPatch {
     Text {
         before: Option<crate::board::element::TextData>,
         after: Option<crate::board::element::TextData>,
+    },
+    LineCurve {
+        before_bend: f32,
+        after_bend: f32,
+        before_midpoint_shift: f32,
+        after_midpoint_shift: f32,
     },
 }
 
@@ -83,14 +103,25 @@ pub struct LineConnectionChange {
 pub enum BoardOperation {
     AddElement(Element),
     DeleteElement(Element),
-    MoveElements { ids: Vec<u64>, delta: Vec2 },
-    RotateElements { ids: Vec<u64>, center: Vec2, angle: f32 },
-    SetElementRotations { changes: Vec<ElementRotationChange> },
+    MoveElements {
+        ids: Vec<u64>,
+        delta: Vec2,
+    },
+    RotateElements {
+        ids: Vec<u64>,
+        center: Vec2,
+        angle: f32,
+    },
+    SetElementRotations {
+        changes: Vec<ElementRotationChange>,
+    },
     SetProperty {
         changes: Vec<ElementPropertyChange>,
         sync_connected_lines: bool,
     },
-    SetLineConnections { changes: Vec<LineConnectionChange> },
+    SetLineConnections {
+        changes: Vec<LineConnectionChange>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -168,9 +199,22 @@ pub fn inverse(op: &BoardOperation) -> BoardOperation {
                                 after: *before,
                             }
                         }
-                        ElementPropertyPatch::Text { before, after } => ElementPropertyPatch::Text {
-                            before: after.clone(),
-                            after: before.clone(),
+                        ElementPropertyPatch::Text { before, after } => {
+                            ElementPropertyPatch::Text {
+                                before: after.clone(),
+                                after: before.clone(),
+                            }
+                        }
+                        ElementPropertyPatch::LineCurve {
+                            before_bend,
+                            after_bend,
+                            before_midpoint_shift,
+                            after_midpoint_shift,
+                        } => ElementPropertyPatch::LineCurve {
+                            before_bend: *after_bend,
+                            after_bend: *before_bend,
+                            before_midpoint_shift: *after_midpoint_shift,
+                            after_midpoint_shift: *before_midpoint_shift,
                         },
                     },
                 })
@@ -204,7 +248,10 @@ pub fn log_operation(op: &BoardOperation) {
             );
         }
         BoardOperation::DeleteElement(element) => {
-            println!("[ops] DELETE_ELEMENT id={} shape={:?}", element.id, element.shape);
+            println!(
+                "[ops] DELETE_ELEMENT id={} shape={:?}",
+                element.id, element.shape
+            );
         }
         BoardOperation::MoveElements { ids, delta } => {
             println!(
@@ -228,9 +275,7 @@ pub fn log_operation(op: &BoardOperation) {
             for change in changes {
                 println!(
                     "[ops]   id={} rot={:.3}->{:.3}",
-                    change.id,
-                    change.before,
-                    change.after,
+                    change.id, change.before, change.after,
                 );
             }
         }
@@ -281,8 +326,29 @@ pub fn log_operation(op: &BoardOperation) {
                         println!(
                             "[ops]   id={} text len={} -> {}",
                             change.id,
-                            before.as_ref().map(|text| text.content.chars().count()).unwrap_or(0),
-                            after.as_ref().map(|text| text.content.chars().count()).unwrap_or(0),
+                            before
+                                .as_ref()
+                                .map(|text| text.content.chars().count())
+                                .unwrap_or(0),
+                            after
+                                .as_ref()
+                                .map(|text| text.content.chars().count())
+                                .unwrap_or(0),
+                        );
+                    }
+                    ElementPropertyPatch::LineCurve {
+                        before_bend,
+                        after_bend,
+                        before_midpoint_shift,
+                        after_midpoint_shift,
+                    } => {
+                        println!(
+                            "[ops]   id={} line_curve bend {:.1} -> {:.1} shift {:.1} -> {:.1}",
+                            change.id,
+                            before_bend,
+                            after_bend,
+                            before_midpoint_shift,
+                            after_midpoint_shift,
                         );
                     }
                 }

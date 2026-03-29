@@ -2,16 +2,7 @@
 
 use crate::palette;
 
-
-use crate::board::{
-    ShapeType, DEFAULT_ELLIPSE_COLOR, DEFAULT_LINE_COLOR,
-    DEFAULT_RECT_COLOR,
-};
-
-
-
-
-
+use crate::board::{ShapeType, DEFAULT_ELLIPSE_COLOR, DEFAULT_LINE_COLOR, DEFAULT_RECT_COLOR};
 
 pub fn default_color(shape: ShapeType) -> [f32; 4] {
     match shape {

@@ -140,7 +140,12 @@ pub fn contains_point(screen_size: Vec2, view: &PropertyPanelView, x: f32, y: f3
         && y < layout.origin.y + layout.size.y
 }
 
-pub fn hit_test(screen_size: Vec2, view: &PropertyPanelView, x: f32, y: f32) -> Option<PropertyPanelHit> {
+pub fn hit_test(
+    screen_size: Vec2,
+    view: &PropertyPanelView,
+    x: f32,
+    y: f32,
+) -> Option<PropertyPanelHit> {
     let point = Vec2::new(x, y);
     let layout = layout(screen_size, view);
 
@@ -158,7 +163,10 @@ pub fn hit_test(screen_size: Vec2, view: &PropertyPanelView, x: f32, y: f32) -> 
 
     for (target, rect) in &layout.width_tracks {
         if rect.contains(point) {
-            return Some(PropertyPanelHit::Width(*target, width_from_track(*rect, x, *target)));
+            return Some(PropertyPanelHit::Width(
+                *target,
+                width_from_track(*rect, x, *target),
+            ));
         }
     }
 
@@ -171,7 +179,11 @@ pub fn hit_test(screen_size: Vec2, view: &PropertyPanelView, x: f32, y: f32) -> 
     None
 }
 
-pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: Vec2) -> Vec<InstanceData> {
+pub fn build_instances(
+    screen_size: Vec2,
+    view: &PropertyPanelView,
+    mouse_pos: Vec2,
+) -> Vec<InstanceData> {
     let mut out = Vec::new();
     let layout = layout(screen_size, view);
     let hovered = hit_test(screen_size, view, mouse_pos.x, mouse_pos.y);
@@ -182,7 +194,8 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
         0.0,
         PANEL_BG_COLOR,
         0.0,
-        1.0, false,
+        1.0,
+        false,
     ));
     out.push(InstanceData::new(
         layout.origin.to_array(),
@@ -190,7 +203,8 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
         0.0,
         PANEL_BORDER_HIGHLIGHT,
         0.0,
-        1.0, false,
+        1.0,
+        false,
     ));
     out.push(InstanceData::new(
         layout.origin.to_array(),
@@ -198,7 +212,8 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
         0.0,
         PANEL_BORDER_HIGHLIGHT,
         0.0,
-        1.0, false,
+        1.0,
+        false,
     ));
     out.push(InstanceData::new(
         [layout.origin.x, layout.origin.y + layout.size.y - 1.0],
@@ -206,7 +221,8 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
         0.0,
         PANEL_BORDER_SHADOW,
         0.0,
-        1.0, false,
+        1.0,
+        false,
     ));
     out.push(InstanceData::new(
         [layout.origin.x + layout.size.x - 1.0, layout.origin.y],
@@ -214,7 +230,8 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
         0.0,
         PANEL_BORDER_SHADOW,
         0.0,
-        1.0, false,
+        1.0,
+        false,
     ));
 
     for (target, rect) in &layout.tab_rects {
@@ -234,17 +251,23 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
             0.0,
             background,
             0.0,
-            1.0, false,
+            1.0,
+            false,
         ));
 
-        let border = if is_active { view.active_color } else { PANEL_BORDER_SHADOW };
+        let border = if is_active {
+            view.active_color
+        } else {
+            PANEL_BORDER_SHADOW
+        };
         out.push(InstanceData::new(
             [rect.x, rect.y + rect.h - 1.0],
             [rect.w, 1.0],
             0.0,
             border,
             0.0,
-            1.0, false,
+            1.0,
+            false,
         ));
     }
 
@@ -261,7 +284,8 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
             0.0,
             color,
             0.0,
-            1.0, false,
+            1.0,
+            false,
         ));
 
         let border = if Some(index) == selected_color_index {
@@ -277,7 +301,8 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
             0.0,
             border,
             0.0,
-            1.0, false,
+            1.0,
+            false,
         ));
         out.push(InstanceData::new(
             [rect.x - 1.0, rect.y + rect.h],
@@ -285,7 +310,8 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
             0.0,
             border,
             0.0,
-            1.0, false,
+            1.0,
+            false,
         ));
         out.push(InstanceData::new(
             [rect.x - 1.0, rect.y - 1.0],
@@ -293,7 +319,8 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
             0.0,
             border,
             0.0,
-            1.0, false,
+            1.0,
+            false,
         ));
         out.push(InstanceData::new(
             [rect.x + rect.w, rect.y - 1.0],
@@ -301,7 +328,8 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
             0.0,
             border,
             0.0,
-            1.0, false,
+            1.0,
+            false,
         ));
     }
 
@@ -310,37 +338,44 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
             continue;
         };
         let is_hovered = matches!(hovered, Some(PropertyPanelHit::Width(hover_target, _)) if hover_target == *target);
-            out.push(InstanceData::new(
-                [track.x, track.y],
-                [track.w, track.h],
-                0.0,
-                PANEL_ACTIVE_COLOR,
-                0.0,
-                1.0, false,
-            ));
+        out.push(InstanceData::new(
+            [track.x, track.y],
+            [track.w, track.h],
+            0.0,
+            PANEL_ACTIVE_COLOR,
+            0.0,
+            1.0,
+            false,
+        ));
 
-            let min_width = f32::from(target.min_width());
-            let fill = (f32::from(width.clamp(target.min_width(), 16)) - min_width)
-                / (16.0 - min_width).max(0.0001);
-            out.push(InstanceData::new(
-                [track.x, track.y],
-                [track.w * fill, track.h],
-                0.0,
-                PANEL_SLIDER_FILL_COLOR,
-                0.0,
-                1.0, false,
-            ));
+        let min_width = f32::from(target.min_width());
+        let fill = (f32::from(width.clamp(target.min_width(), 16)) - min_width)
+            / (16.0 - min_width).max(0.0001);
+        out.push(InstanceData::new(
+            [track.x, track.y],
+            [track.w * fill, track.h],
+            0.0,
+            PANEL_SLIDER_FILL_COLOR,
+            0.0,
+            1.0,
+            false,
+        ));
 
-            let knob_x = track.x + track.w * fill - SLIDER_KNOB_SIZE * 0.5;
-            let knob_color = if is_hovered { PANEL_HOVER_COLOR } else { PANEL_BORDER_HIGHLIGHT };
-            out.push(InstanceData::new(
-                [knob_x, track.y - (SLIDER_KNOB_SIZE - track.h) * 0.5],
-                [SLIDER_KNOB_SIZE, SLIDER_KNOB_SIZE],
-                0.0,
-                knob_color,
-                0.0,
-                1.0, false,
-            ));
+        let knob_x = track.x + track.w * fill - SLIDER_KNOB_SIZE * 0.5;
+        let knob_color = if is_hovered {
+            PANEL_HOVER_COLOR
+        } else {
+            PANEL_BORDER_HIGHLIGHT
+        };
+        out.push(InstanceData::new(
+            [knob_x, track.y - (SLIDER_KNOB_SIZE - track.h) * 0.5],
+            [SLIDER_KNOB_SIZE, SLIDER_KNOB_SIZE],
+            0.0,
+            knob_color,
+            0.0,
+            1.0,
+            false,
+        ));
     }
 
     for (target, rect) in &layout.arrow_rects {
@@ -360,7 +395,8 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
             0.0,
             background,
             0.0,
-            1.0, false,
+            1.0,
+            false,
         ));
         out.push(InstanceData::new(
             [rect.x, rect.y],
@@ -368,7 +404,8 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
             0.0,
             PANEL_BORDER_HIGHLIGHT,
             0.0,
-            1.0, false,
+            1.0,
+            false,
         ));
         out.push(InstanceData::new(
             [rect.x, rect.y],
@@ -376,7 +413,8 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
             0.0,
             PANEL_BORDER_HIGHLIGHT,
             0.0,
-            1.0, false,
+            1.0,
+            false,
         ));
         out.push(InstanceData::new(
             [rect.x, rect.y + rect.h - 1.0],
@@ -384,7 +422,8 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
             0.0,
             PANEL_BORDER_SHADOW,
             0.0,
-            1.0, false,
+            1.0,
+            false,
         ));
         out.push(InstanceData::new(
             [rect.x + rect.w - 1.0, rect.y],
@@ -392,7 +431,8 @@ pub fn build_instances(screen_size: Vec2, view: &PropertyPanelView, mouse_pos: V
             0.0,
             PANEL_BORDER_SHADOW,
             0.0,
-            1.0, false,
+            1.0,
+            false,
         ));
     }
 
@@ -490,7 +530,8 @@ fn layout(screen_size: Vec2, view: &PropertyPanelView) -> PropertyPanelLayout {
     y += TAB_HEIGHT + 10.0;
 
     let rows = palette::PALETTE.len().div_ceil(SWATCH_COLUMNS);
-    let grid_width = SWATCH_COLUMNS as f32 * SWATCH_SIZE + (SWATCH_COLUMNS as f32 - 1.0) * SWATCH_GAP;
+    let grid_width =
+        SWATCH_COLUMNS as f32 * SWATCH_SIZE + (SWATCH_COLUMNS as f32 - 1.0) * SWATCH_GAP;
     let grid_x = PANEL_PADDING + (PANEL_WIDTH - PANEL_PADDING * 2.0 - grid_width) * 0.5;
     let mut swatch_rects = Vec::with_capacity(palette::PALETTE.len());
     for index in 0..palette::PALETTE.len() {
@@ -604,12 +645,21 @@ fn arrow_enabled(view: &PropertyPanelView, target: LineArrowTarget) -> Option<bo
 fn width_from_track(track: Rect, x: f32, target: WidthTarget) -> u8 {
     let t = ((x - track.x) / track.w).clamp(0.0, 1.0);
     let min_width = f32::from(target.min_width());
-    (min_width + (16.0 - min_width) * t).round().clamp(min_width, 16.0) as u8
+    (min_width + (16.0 - min_width) * t)
+        .round()
+        .clamp(min_width, 16.0) as u8
 }
 
-pub fn width_at_x(screen_size: Vec2, view: &PropertyPanelView, target: WidthTarget, x: f32) -> Option<u8> {
+pub fn width_at_x(
+    screen_size: Vec2,
+    view: &PropertyPanelView,
+    target: WidthTarget,
+    x: f32,
+) -> Option<u8> {
     layout(screen_size, view)
         .width_tracks
         .into_iter()
-        .find_map(|(track_target, track)| (track_target == target).then(|| width_from_track(track, x, target)))
+        .find_map(|(track_target, track)| {
+            (track_target == target).then(|| width_from_track(track, x, target))
+        })
 }

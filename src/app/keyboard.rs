@@ -1,4 +1,3 @@
-
 use cosmic_text::Motion;
 use miniquad::{window, KeyCode, KeyMods};
 
@@ -258,7 +257,8 @@ impl App {
             return false;
         }
 
-        self.board.apply_operation(BoardOperation::SetElementRotations { changes });
+        self.board
+            .apply_operation(BoardOperation::SetElementRotations { changes });
         self.input.selection_bounds = None;
         self.mark_elements_dirty(ids);
         true

@@ -4,28 +4,24 @@ use miniquad::PassAction;
 use crate::board::ElementTransform;
 use crate::input::{DragMode, COMPUTE_TEXT_LAYOUT_DEBOUNCE};
 use crate::rendering::renderer::{Renderer, TextInstanceData};
-use crate::rendering::transform::{
-    offset_instance, rotate_instance,
-    rotate_point,
-};
+use crate::rendering::transform::{offset_instance, rotate_instance, rotate_point};
 use crate::stats;
 use crate::text::TextEditSession;
 use crate::ui::overlay;
 
 use super::App;
 
-
 // The pan glide friction coefficient, in world units per second per world unit of velocity.
 const PAN_GLIDE_FRICTION_PER_SECOND: f32 = 5.0;
 
-// When the pan velocity (in world units per second) multiplied by the zoom level is below this threshold, 
+// When the pan velocity (in world units per second) multiplied by the zoom level is below this threshold,
 // we stop panning to prevent imperceptibly slow movement and drifting.
 const PAN_GLIDE_STOP_SPEED_SCREEN: f32 = 8.0;
 
 // Maximum delta time to apply pan glide, to prevent large jumps after long frames or when resuming from a paused state.
 const PAN_GLIDE_MAX_DT_SECS: f32 = 1.0 / 50.0;
 
-// When resizing multiple text elements, 
+// When resizing multiple text elements,
 // we only process a limited number per frame to avoid UI jank.
 const RESIZE_TEXT_RECOMPUTE_BATCH: usize = 8;
 
@@ -44,7 +40,11 @@ impl App {
             && self.input.move_origin.len() > 1)
             .then_some(self.input.rotate_delta)
             .filter(|angle| angle.abs() > 0.0)
-            .zip(self.input.transform_bounds_origin.map(|bounds| bounds.center()));
+            .zip(
+                self.input
+                    .transform_bounds_origin
+                    .map(|bounds| bounds.center()),
+            );
         let image_draws = self.build_image_draws();
 
         self.ctx.begin_default_pass(PassAction::clear_color(
@@ -58,7 +58,12 @@ impl App {
             .draw_background_grid(&mut *self.ctx, &self.camera, self.screen_size);
 
         let board_mvp = Renderer::camera_mvp(&self.camera, self.screen_size);
-        self.draw_board_layers(board_mvp, move_drag_offset, rotate_drag_preview, &image_draws);
+        self.draw_board_layers(
+            board_mvp,
+            move_drag_offset,
+            rotate_drag_preview,
+            &image_draws,
+        );
         self.draw_text_layers(board_mvp, move_drag_offset, rotate_drag_preview);
         self.draw_overlay_layers(board_mvp, move_drag_offset, rotate_drag_preview);
         self.draw_screen_ui(move_drag_offset, rotate_drag_preview);
@@ -111,8 +116,12 @@ impl App {
         std::collections::HashSet<u64>,
         std::collections::HashMap<u64, ElementTransform>,
     )> {
-        let selected_ids: std::collections::HashSet<u64> =
-            self.input.move_origin.iter().map(|&(id, _, _, _)| id).collect();
+        let selected_ids: std::collections::HashSet<u64> = self
+            .input
+            .move_origin
+            .iter()
+            .map(|&(id, _, _, _, _, _)| id)
+            .collect();
         if selected_ids.is_empty() {
             return None;
         }
@@ -128,18 +137,18 @@ impl App {
                     .input
                     .move_origin
                     .iter()
-                    .map(|&(id, pos, size, rotation)| {
-                        (
-                            id,
-                            ElementTransform::new(pos + delta, size, rotation),
-                        )
+                    .map(|&(id, pos, size, rotation, _, _)| {
+                        (id, ElementTransform::new(pos + delta, size, rotation))
                     })
                     .collect();
                 Some((selected_ids, preview_transforms))
             }
             DragMode::Rotating if self.input.move_origin.len() > 1 => {
                 let angle = self.input.rotate_delta;
-                let center = self.input.transform_bounds_origin.map(|bounds| bounds.center())?;
+                let center = self
+                    .input
+                    .transform_bounds_origin
+                    .map(|bounds| bounds.center())?;
                 if angle.abs() == 0.0 {
                     return None;
                 }
@@ -148,11 +157,15 @@ impl App {
                     .input
                     .move_origin
                     .iter()
-                    .map(|&(id, pos, size, rotation)| {
+                    .map(|&(id, pos, size, rotation, _, _)| {
                         let rotated_center = rotate_point(pos + size * 0.5, center, angle);
                         (
                             id,
-                            ElementTransform::new(rotated_center - size * 0.5, size, rotation + angle),
+                            ElementTransform::new(
+                                rotated_center - size * 0.5,
+                                size,
+                                rotation + angle,
+                            ),
                         )
                     })
                     .collect();
@@ -164,10 +177,11 @@ impl App {
                     .input
                     .move_origin
                     .iter()
-                    .filter_map(|&(id, orig_pos, orig_size, orig_rotation)| {
+                    .filter_map(|&(id, orig_pos, orig_size, orig_rotation, _, _)| {
                         let element = self.board.element(id)?;
                         let before = ElementTransform::new(orig_pos, orig_size, orig_rotation);
-                        let after = ElementTransform::new(element.pos, element.size, element.rotation);
+                        let after =
+                            ElementTransform::new(element.pos, element.size, element.rotation);
                         changed |= before != after;
                         Some((id, after))
                     })
@@ -215,8 +229,13 @@ impl App {
         rotate_drag_preview: Option<(f32, Vec2)>,
         image_draws: &[crate::rendering::renderer::PreparedImageDraw],
     ) {
-        self.renderer
-            .draw_image_draws(&mut *self.ctx, image_draws, board_mvp, move_drag_offset, rotate_drag_preview);
+        self.renderer.draw_image_draws(
+            &mut *self.ctx,
+            image_draws,
+            board_mvp,
+            move_drag_offset,
+            rotate_drag_preview,
+        );
 
         self.renderer.draw_scene_instances(
             &mut *self.ctx,
@@ -260,10 +279,14 @@ impl App {
             rotate_drag_preview,
         );
 
-        let moved_caret_pos = self.transformed_caret_position(caret_pos, move_drag_offset, rotate_drag_preview);
+        let moved_caret_pos =
+            self.transformed_caret_position(caret_pos, move_drag_offset, rotate_drag_preview);
         if let Some(world_caret) = moved_caret_pos {
             let screen_caret = self.camera.world_to_screen(world_caret, self.screen_size);
-            crate::platform::ime::set_ime_candidate_pos(screen_caret.x as i32, screen_caret.y as i32);
+            crate::platform::ime::set_ime_candidate_pos(
+                screen_caret.x as i32,
+                screen_caret.y as i32,
+            );
         }
     }
 
@@ -407,8 +430,12 @@ impl App {
     fn draw_preview_overlay(&mut self, board_mvp: glam::Mat4) {
         if let Some(ref preview) = self.input.preview {
             let preview_inst = overlay::preview_instances(preview, self.camera.zoom, 0.5);
-            self.renderer
-                .draw_instances(&mut *self.ctx, &preview_inst, board_mvp, self.screen_size);
+            self.renderer.draw_instances(
+                &mut *self.ctx,
+                &preview_inst,
+                board_mvp,
+                self.screen_size,
+            );
         }
 
         if let Some(connection_drag) = self.input.connection_drag {
@@ -419,8 +446,12 @@ impl App {
                 crate::board::DEFAULT_LINE_STROKE_WIDTH,
                 0.85,
             );
-            self.renderer
-                .draw_instances(&mut *self.ctx, &[preview_line], board_mvp, self.screen_size);
+            self.renderer.draw_instances(
+                &mut *self.ctx,
+                &[preview_line],
+                board_mvp,
+                self.screen_size,
+            );
         }
     }
 
@@ -432,9 +463,10 @@ impl App {
     ) {
         let mut selection_inst = Vec::new();
         for element in &self.board.elements {
-            if let Some(instance) = overlay::selection_instance(element, self.camera.zoom, 1.0) {
+            for instance in overlay::selection_instances(element, self.camera.zoom, 1.0) {
                 selection_inst.push(
-                    if let Some((angle, center)) = rotate_drag_preview.filter(|_| element.selected) {
+                    if let Some((angle, center)) = rotate_drag_preview.filter(|_| element.selected)
+                    {
                         rotate_instance(instance, center, angle)
                     } else if let Some(offset) = move_drag_offset.filter(|_| element.selected) {
                         offset_instance(instance, offset)
@@ -451,15 +483,23 @@ impl App {
                 .or(self.input.selection_bounds)
                 .or_else(|| self.board.selected_bounds())
             {
-                selection_inst.push(overlay::selection_bounds_instance(bounds, self.camera.zoom, 1.0));
+                selection_inst.push(overlay::selection_bounds_instance(
+                    bounds,
+                    self.camera.zoom,
+                    1.0,
+                ));
             }
         }
         if let Some(bounds) = self.input.marquee_bounds {
             selection_inst.push(overlay::marquee_instance(bounds, self.camera.zoom, 1.0));
         }
         if !selection_inst.is_empty() {
-            self.renderer
-                .draw_instances(&mut *self.ctx, &selection_inst, board_mvp, self.screen_size);
+            self.renderer.draw_instances(
+                &mut *self.ctx,
+                &selection_inst,
+                board_mvp,
+                self.screen_size,
+            );
         }
     }
 
@@ -481,10 +521,8 @@ impl App {
             for e in &self.board.elements {
                 if e.selected {
                     let mut instances = crate::input::handles_to_instances(e, self.camera.zoom);
-                    let mut helper_instances = crate::input::connection_helpers_to_instances(
-                        e,
-                        self.camera.zoom,
-                    );
+                    let mut helper_instances =
+                        crate::input::connection_helpers_to_instances(e, self.camera.zoom);
                     if let Some(offset) = move_drag_offset {
                         for instance in &mut instances {
                             *instance = offset_instance(*instance, offset);
@@ -541,7 +579,12 @@ impl App {
                 if handles.len() > 4 {
                     let pos = handles[4];
                     let screen_pos = self.camera.world_to_screen(pos, self.screen_size);
-                    ui_text_specs.push(crate::text::UiTextSpec::top_center("↻", screen_pos - glam::Vec2::new(0.0, 12.0), 24.0, [1.0, 1.0, 1.0, 1.0]));
+                    ui_text_specs.push(crate::text::UiTextSpec::top_center(
+                        "↻",
+                        screen_pos - glam::Vec2::new(0.0, 12.0),
+                        24.0,
+                        [1.0, 1.0, 1.0, 1.0],
+                    ));
                 }
             }
         } else {
@@ -557,10 +600,16 @@ impl App {
                                 let rel = pos - center;
                                 let c = angle.cos();
                                 let s = angle.sin();
-                                pos = center + glam::Vec2::new(rel.x * c - rel.y * s, rel.x * s + rel.y * c);
+                                pos = center
+                                    + glam::Vec2::new(rel.x * c - rel.y * s, rel.x * s + rel.y * c);
                             }
                             let screen_pos = self.camera.world_to_screen(pos, self.screen_size);
-                            ui_text_specs.push(crate::text::UiTextSpec::top_center("↻", screen_pos - glam::Vec2::new(0.0, 12.0), 24.0, [1.0, 1.0, 1.0, 1.0]));
+                            ui_text_specs.push(crate::text::UiTextSpec::top_center(
+                                "↻",
+                                screen_pos - glam::Vec2::new(0.0, 12.0),
+                                24.0,
+                                [1.0, 1.0, 1.0, 1.0],
+                            ));
                         }
                     }
                 }
@@ -611,8 +660,12 @@ impl App {
         let mut stats_bg = stats::build_stats_background_instances(&stats_layout);
         ui_bg_instances.append(&mut stats_bg);
 
-        self.renderer
-            .draw_instances(&mut *self.ctx, &ui_bg_instances, screen_mvp, self.screen_size);
+        self.renderer.draw_instances(
+            &mut *self.ctx,
+            &ui_bg_instances,
+            screen_mvp,
+            self.screen_size,
+        );
         self.renderer
             .draw_image_draws(&mut *self.ctx, &tb_icon_draws, screen_mvp, None, None);
 
@@ -624,7 +677,10 @@ impl App {
         );
         self.renderer
             .draw_text_instances(&mut *self.ctx, &ui_text_draw.mono_instances, screen_mvp);
-        self.renderer
-            .draw_color_text_instances(&mut *self.ctx, &ui_text_draw.color_instances, screen_mvp);
+        self.renderer.draw_color_text_instances(
+            &mut *self.ctx,
+            &ui_text_draw.color_instances,
+            screen_mvp,
+        );
     }
 }

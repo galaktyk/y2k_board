@@ -1,28 +1,31 @@
-use glam::Vec2;
 use crate::input::SelectionBounds;
+use glam::Vec2;
 
-pub mod geometry;
 pub mod element;
+pub mod geometry;
 pub mod operation;
 
 #[cfg(test)]
 mod tests;
 
 pub use element::{
-    BoxToolStyle, Element, ElementKind, ElementStyleSnapshot, ImageData, LineAnchor,
-    LineEndpoints, ShapeType, TextData, ToolStyleDefaults, DEFAULT_BORDER_WIDTH,
-    DEFAULT_ELLIPSE_COLOR, DEFAULT_LINE_COLOR, DEFAULT_LINE_STROKE_WIDTH, DEFAULT_RECT_COLOR,
-    DEFAULT_STROKE_COLOR, DEFAULT_TEXT_COLOR, default_border_width, default_line_stroke_width,
-    default_stroke_color, default_text_box_color,
+    default_border_width, default_line_stroke_width, default_stroke_color, default_text_box_color,
+    BoxToolStyle, Element, ElementKind, ElementStyleSnapshot, ImageData, LineAnchor, LineEndpoints,
+    ShapeType, TextData, ToolStyleDefaults, DEFAULT_BORDER_WIDTH, DEFAULT_ELLIPSE_COLOR,
+    DEFAULT_LINE_COLOR, DEFAULT_LINE_STROKE_WIDTH, DEFAULT_RECT_COLOR, DEFAULT_STROKE_COLOR,
+    DEFAULT_TEXT_COLOR,
 };
-pub use operation::{
-    BoardOperation, ElementPropertyChange, ElementPropertyPatch, ElementRotationChange,
-    ElementTransform, LineConnectionChange, apply_transform, log_operation,
-    move_element, rotate_element,
-};
-pub use geometry::{rotate_point, world_to_local_norm};
-use operation::HistoryEntry;
 use geometry::element_hit;
+pub use geometry::{
+    line_bend_handle_position, line_curve_handle_offset_from_handle,
+    line_world_normals_from_anchor, rotate_point, sample_line_polyline, world_to_local_norm,
+};
+use operation::HistoryEntry;
+pub use operation::{
+    apply_transform, log_operation, move_element, rotate_element, BoardOperation,
+    ElementPropertyChange, ElementPropertyPatch, ElementRotationChange, ElementTransform,
+    LineConnectionChange,
+};
 
 // ── Board ────────────────────────────────────────────────────────────────────
 
@@ -146,19 +149,34 @@ impl Board {
         }
         self.elements = elements;
         self.line_attachments = data.line_attachments;
-        
+
         let mut connected_lines = std::collections::HashMap::new();
         for (line_id, endpoints) in &self.line_attachments {
             if let Some(start) = &endpoints.start {
-                connected_lines.entry(start.target_id).or_insert_with(Vec::new).push(*line_id);
+                connected_lines
+                    .entry(start.target_id)
+                    .or_insert_with(Vec::new)
+                    .push(*line_id);
             }
             if let Some(end) = &endpoints.end {
-                connected_lines.entry(end.target_id).or_insert_with(Vec::new).push(*line_id);
+                connected_lines
+                    .entry(end.target_id)
+                    .or_insert_with(Vec::new)
+                    .push(*line_id);
             }
         }
         self.connected_lines = connected_lines;
         self.rebuild_index_by_id();
-        
+        let line_ids: Vec<u64> = self
+            .elements
+            .iter()
+            .filter(|element| element.shape == ShapeType::Line)
+            .map(|element| element.id)
+            .collect();
+        for line_id in line_ids {
+            self.refresh_line_curve_metadata(line_id);
+        }
+
         self.next_id = data.next_id.max(1);
         self.clear_transient_state(true);
     }
@@ -177,7 +195,7 @@ impl Board {
 
     #[allow(dead_code)]
     pub fn update_connected_lines(&mut self, target_id: u64) {
-        // [HOT] Updating connected lines 
+        // [HOT] Updating connected lines
         self.update_connected_lines_filtered(target_id, None);
     }
 
@@ -189,13 +207,18 @@ impl Board {
         // This walk can touch every line anchored to the target, so it is one of the
         // more expensive board-side transform paths. Keep drag preview on GPU offsets
         // where possible and reserve this for commit-time updates or targeted refreshes.
-        let (target_pos, target_size, target_rotation) = if let Some(target) = self.element(target_id) {
-            (target.pos, target.size, target.rotation)
-        } else {
-            return;
-        };
+        let (target_pos, target_size, target_rotation) =
+            if let Some(target) = self.element(target_id) {
+                (target.pos, target.size, target.rotation)
+            } else {
+                return;
+            };
 
-        let line_ids = self.connected_lines.get(&target_id).cloned().unwrap_or_default();
+        let line_ids = self
+            .connected_lines
+            .get(&target_id)
+            .cloned()
+            .unwrap_or_default();
 
         for line_id in line_ids {
             if visible_ids.is_some_and(|visible| !visible.contains(&line_id)) {
@@ -213,12 +236,20 @@ impl Board {
                         if start.target_id == target_id {
                             let local = (start.norm_pos - Vec2::splat(0.5)) * target_size;
                             start_pos = rotate_point(origin + local, origin, target_rotation);
+                            line.line_start_normal = Some(line_world_normals_from_anchor(
+                                start.norm_pos,
+                                target_rotation,
+                            ));
                         }
                     }
                     if let Some(end) = &endpoints.end {
                         if end.target_id == target_id {
                             let local = (end.norm_pos - Vec2::splat(0.5)) * target_size;
                             end_pos = rotate_point(origin + local, origin, target_rotation);
+                            line.line_end_normal = Some(line_world_normals_from_anchor(
+                                end.norm_pos,
+                                target_rotation,
+                            ));
                         }
                     }
 
@@ -240,8 +271,7 @@ impl Board {
         &mut self,
         target_ids: I,
         visible_ids: Option<&std::collections::HashSet<u64>>,
-    )
-    where
+    ) where
         I: IntoIterator<Item = u64>,
     {
         // Potentially CPU-heavy for large selections: this deduplicates the input set and then
@@ -255,10 +285,7 @@ impl Board {
         }
     }
 
-    fn anchored_position_from_transform(
-        transform: ElementTransform,
-        norm_pos: Vec2,
-    ) -> Vec2 {
+    fn anchored_position_from_transform(transform: ElementTransform, norm_pos: Vec2) -> Vec2 {
         let origin = transform.pos + transform.size * 0.5;
         let local = (norm_pos - Vec2::splat(0.5)) * transform.size;
         rotate_point(origin + local, origin, transform.rotation)
@@ -311,13 +338,18 @@ impl Board {
                 let mut end_pos = line.pos + line.size;
 
                 if let Some(start) = &endpoints.start {
-                    if let Some(transform) = self.preview_transform(start.target_id, preview_transforms) {
-                        start_pos = Self::anchored_position_from_transform(transform, start.norm_pos);
+                    if let Some(transform) =
+                        self.preview_transform(start.target_id, preview_transforms)
+                    {
+                        start_pos =
+                            Self::anchored_position_from_transform(transform, start.norm_pos);
                     }
                 }
 
                 if let Some(end) = &endpoints.end {
-                    if let Some(transform) = self.preview_transform(end.target_id, preview_transforms) {
+                    if let Some(transform) =
+                        self.preview_transform(end.target_id, preview_transforms)
+                    {
                         end_pos = Self::anchored_position_from_transform(transform, end.norm_pos);
                     }
                 }
@@ -351,10 +383,9 @@ impl Board {
             related.insert(id);
             if let Some(line_ids) = self.connected_lines.get(&id) {
                 related.extend(
-                    line_ids
-                        .iter()
-                        .copied()
-                        .filter(|line_id| visible_ids.is_none_or(|visible| visible.contains(line_id))),
+                    line_ids.iter().copied().filter(|line_id| {
+                        visible_ids.is_none_or(|visible| visible.contains(line_id))
+                    }),
                 );
             }
         }
@@ -418,8 +449,12 @@ impl Board {
                 let mut connected_line_targets = Vec::new();
                 for change in changes {
                     let (before, after) = match &change.patch {
-                        ElementPropertyPatch::Transform { before, after } => (Some(*before), *after),
-                        ElementPropertyPatch::Style { .. } | ElementPropertyPatch::Text { .. } => continue,
+                        ElementPropertyPatch::Transform { before, after } => {
+                            (Some(*before), *after)
+                        }
+                        ElementPropertyPatch::Style { .. }
+                        | ElementPropertyPatch::Text { .. }
+                        | ElementPropertyPatch::LineCurve { .. } => continue,
                     };
                     if let Some(index) = self.position_of_id_mut(change.id) {
                         let element = &mut self.elements[index];
@@ -435,7 +470,9 @@ impl Board {
                 for change in changes {
                     let after = match &change.patch {
                         ElementPropertyPatch::Style { after, .. } => after,
-                        ElementPropertyPatch::Transform { .. } | ElementPropertyPatch::Text { .. } => continue,
+                        ElementPropertyPatch::Transform { .. }
+                        | ElementPropertyPatch::Text { .. }
+                        | ElementPropertyPatch::LineCurve { .. } => continue,
                     };
                     if let Some(index) = self.position_of_id_mut(change.id) {
                         let element = &mut self.elements[index];
@@ -445,7 +482,9 @@ impl Board {
                 for change in changes {
                     let after = match &change.patch {
                         ElementPropertyPatch::Text { after, .. } => after,
-                        ElementPropertyPatch::Transform { .. } | ElementPropertyPatch::Style { .. } => continue,
+                        ElementPropertyPatch::Transform { .. }
+                        | ElementPropertyPatch::Style { .. }
+                        | ElementPropertyPatch::LineCurve { .. } => continue,
                     };
                     if let Some(index) = self.position_of_id_mut(change.id) {
                         let element = &mut self.elements[index];
@@ -453,10 +492,28 @@ impl Board {
                         element.bump_text_generation();
                     }
                 }
+                for change in changes {
+                    let (after_bend, after_midpoint_shift) = match &change.patch {
+                        ElementPropertyPatch::LineCurve {
+                            after_bend,
+                            after_midpoint_shift,
+                            ..
+                        } => (*after_bend, *after_midpoint_shift),
+                        ElementPropertyPatch::Transform { .. }
+                        | ElementPropertyPatch::Style { .. }
+                        | ElementPropertyPatch::Text { .. } => continue,
+                    };
+                    if let Some(index) = self.position_of_id_mut(change.id) {
+                        self.elements[index].line_bend = after_bend;
+                        self.elements[index].line_midpoint_shift = after_midpoint_shift;
+                    }
+                }
             }
             BoardOperation::SetLineConnections { changes } => {
                 let mut affected_targets = Vec::new();
+                let mut changed_lines = Vec::new();
                 for change in changes {
+                    changed_lines.push(change.id);
                     if let Some(before_start) = &change.before.start {
                         affected_targets.push(before_start.target_id);
                         if let Some(lines) = self.connected_lines.get_mut(&before_start.target_id) {
@@ -494,11 +551,17 @@ impl Board {
                     if change.after.start.is_none() && change.after.end.is_none() {
                         self.line_attachments.remove(&change.id);
                     } else {
-                        self.line_attachments.insert(change.id, change.after.clone());
+                        self.line_attachments
+                            .insert(change.id, change.after.clone());
                     }
                 }
 
                 self.update_connected_lines_for_targets(affected_targets);
+                changed_lines.sort_unstable();
+                changed_lines.dedup();
+                for line_id in changed_lines {
+                    self.refresh_line_curve_metadata(line_id);
+                }
             }
         }
     }
@@ -545,7 +608,12 @@ impl Board {
     }
 
     pub fn delete_selected(&mut self) {
-        let selected: Vec<Element> = self.elements.iter().filter(|e| e.selected).cloned().collect();
+        let selected: Vec<Element> = self
+            .elements
+            .iter()
+            .filter(|e| e.selected)
+            .cloned()
+            .collect();
         if selected.is_empty() {
             return;
         }
@@ -583,7 +651,9 @@ impl Board {
         }
 
         if !conn_changes.is_empty() {
-            self.apply_operation(BoardOperation::SetLineConnections { changes: conn_changes });
+            self.apply_operation(BoardOperation::SetLineConnections {
+                changes: conn_changes,
+            });
         }
 
         for element in selected {
@@ -614,7 +684,10 @@ impl Board {
     }
 
     pub fn selected_count(&self) -> usize {
-        self.elements.iter().filter(|element| element.selected).count()
+        self.elements
+            .iter()
+            .filter(|element| element.selected)
+            .count()
     }
 
     pub fn is_selected(&self, id: u64) -> bool {
@@ -726,7 +799,7 @@ impl Board {
 
     pub fn selected_transform_changes(
         &self,
-        originals: &[(u64, Vec2, Vec2, f32)],
+        originals: &[(u64, Vec2, Vec2, f32, f32, f32)],
     ) -> Vec<ElementPropertyChange> {
         self.elements
             .iter()
@@ -734,10 +807,11 @@ impl Board {
             .filter_map(|element| {
                 originals
                     .iter()
-                    .find(|&&(id, _, _, _)| id == element.id)
-                    .and_then(|&(_, old_pos, old_size, old_rotation)| {
+                    .find(|&&(id, _, _, _, _, _)| id == element.id)
+                    .and_then(|&(_, old_pos, old_size, old_rotation, _, _)| {
                         let before = ElementTransform::new(old_pos, old_size, old_rotation);
-                        let after = ElementTransform::new(element.pos, element.size, element.rotation);
+                        let after =
+                            ElementTransform::new(element.pos, element.size, element.rotation);
                         (before != after).then_some(ElementPropertyChange {
                             id: element.id,
                             patch: ElementPropertyPatch::Transform { before, after },
@@ -745,6 +819,55 @@ impl Board {
                     })
             })
             .collect()
+    }
+
+    pub fn selected_line_curve_changes(
+        &self,
+        originals: &[(u64, Vec2, Vec2, f32, f32, f32)],
+    ) -> Vec<ElementPropertyChange> {
+        self.elements
+            .iter()
+            .filter(|element| element.selected && element.shape == ShapeType::Line)
+            .filter_map(|element| {
+                originals
+                    .iter()
+                    .find(|&&(id, _, _, _, _, _)| id == element.id)
+                    .and_then(|&(id, _, _, _, old_bend, old_midpoint_shift)| {
+                        (old_bend != element.line_bend
+                            || old_midpoint_shift != element.line_midpoint_shift)
+                            .then_some(ElementPropertyChange {
+                                id,
+                                patch: ElementPropertyPatch::LineCurve {
+                                    before_bend: old_bend,
+                                    after_bend: element.line_bend,
+                                    before_midpoint_shift: old_midpoint_shift,
+                                    after_midpoint_shift: element.line_midpoint_shift,
+                                },
+                            })
+                    })
+            })
+            .collect()
+    }
+
+    fn refresh_line_curve_metadata(&mut self, line_id: u64) {
+        let endpoints = self
+            .line_attachments
+            .get(&line_id)
+            .cloned()
+            .unwrap_or_default();
+        let start_normal = endpoints.start.as_ref().and_then(|anchor| {
+            self.element(anchor.target_id)
+                .map(|target| line_world_normals_from_anchor(anchor.norm_pos, target.rotation))
+        });
+        let end_normal = endpoints.end.as_ref().and_then(|anchor| {
+            self.element(anchor.target_id)
+                .map(|target| line_world_normals_from_anchor(anchor.norm_pos, target.rotation))
+        });
+
+        if let Some(line) = self.element_mut(line_id) {
+            line.line_start_normal = start_normal;
+            line.line_end_normal = end_normal;
+        }
     }
 
     #[allow(dead_code)]
@@ -817,8 +940,6 @@ impl Board {
         self.elements.get_mut(index)
     }
 }
-
-
 
 #[cfg(test)]
 mod temp_test;

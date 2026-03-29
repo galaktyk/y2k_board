@@ -45,8 +45,7 @@ pub fn set_ime_candidate_pos(x: i32, y: i32) {
     unsafe {
         use winapi::shared::windef::POINT;
         use winapi::um::imm::{
-            CFS_POINT, COMPOSITIONFORM, ImmGetContext, ImmReleaseContext,
-            ImmSetCompositionWindow,
+            ImmGetContext, ImmReleaseContext, ImmSetCompositionWindow, CFS_POINT, COMPOSITIONFORM,
         };
         use winapi::um::winuser::GetForegroundWindow;
 

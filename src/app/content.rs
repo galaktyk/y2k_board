@@ -5,16 +5,16 @@ use glam::Vec2;
 use miniquad::window;
 
 use crate::board::{
-    default_border_width, default_line_stroke_width, default_stroke_color,
-    default_text_box_color, BoardOperation, Element, ElementKind, LineAnchor,
-    LineConnectionChange, LineEndpoints, ShapeType, TextData, DEFAULT_TEXT_COLOR,
+    default_border_width, default_line_stroke_width, default_stroke_color, default_text_box_color,
+    BoardOperation, Element, ElementKind, LineAnchor, LineConnectionChange, LineEndpoints,
+    ShapeType, TextData, DEFAULT_TEXT_COLOR,
 };
-use crate::clipboard::{self, BoardClipboardData};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::clipboard::ClipboardPaste;
+use crate::clipboard::{self, BoardClipboardData};
 use crate::images::{ImageImportError, ImportedImage};
-use crate::rendering::renderer::PreparedImageDraw;
 use crate::rendering::cache::element_in_expanded_view;
+use crate::rendering::renderer::PreparedImageDraw;
 
 use super::App;
 
@@ -87,13 +87,18 @@ impl App {
             stroke_width: default_line_stroke_width(),
             line_arrow_start: false,
             line_arrow_end: false,
+            line_bend: 0.0,
+            line_midpoint_shift: 0.0,
+            line_start_normal: None,
+            line_end_normal: None,
             selected: false,
             text: None,
             image: Some(imported.data),
             text_layout_generation: 0,
         };
 
-        self.board.apply_operation(BoardOperation::AddElement(element));
+        self.board
+            .apply_operation(BoardOperation::AddElement(element));
         if select {
             self.board.deselect_all();
             self.board.select_only(new_id);
@@ -131,9 +136,7 @@ impl App {
         anchor: Vec2,
         select: bool,
     ) -> Result<(), ImageImportError> {
-        let imported = self
-            .image_manager
-            .import_from_rgba(width, height, rgba)?;
+        let imported = self.image_manager.import_from_rgba(width, height, rgba)?;
         self.insert_imported_image(imported, anchor, select);
         Ok(())
     }
@@ -156,24 +159,29 @@ impl App {
         let anchor = self.paste_anchor_world();
         let new_id = self.board.next_id();
 
-        self.board.apply_operation(BoardOperation::AddElement(Element {
-            id: new_id,
-            shape: ShapeType::Rect,
-            kind: ElementKind::Generic,
-            pos: anchor - size * 0.5,
-            size,
-            rotation: 0.0,
-            color: default_text_box_color(),
-            stroke_color: default_stroke_color(),
-            border_width: default_border_width(),
-            stroke_width: default_line_stroke_width(),
-            line_arrow_start: false,
-            line_arrow_end: false,
-            selected: false,
-            text: Some(text_data),
-            image: None,
-            text_layout_generation: 0,
-        }));
+        self.board
+            .apply_operation(BoardOperation::AddElement(Element {
+                id: new_id,
+                shape: ShapeType::Rect,
+                kind: ElementKind::Generic,
+                pos: anchor - size * 0.5,
+                size,
+                rotation: 0.0,
+                color: default_text_box_color(),
+                stroke_color: default_stroke_color(),
+                border_width: default_border_width(),
+                stroke_width: default_line_stroke_width(),
+                line_arrow_start: false,
+                line_arrow_end: false,
+                line_bend: 0.0,
+                line_midpoint_shift: 0.0,
+                line_start_normal: None,
+                line_end_normal: None,
+                selected: false,
+                text: Some(text_data),
+                image: None,
+                text_layout_generation: 0,
+            }));
         self.mark_board_structure_dirty();
         true
     }
@@ -200,7 +208,10 @@ impl App {
             .iter()
             .filter(|e| selected_ids.contains(&e.id))
             .cloned()
-            .map(|mut e| { e.selected = false; e })
+            .map(|mut e| {
+                e.selected = false;
+                e
+            })
             .collect();
 
         // Compute bounding-box centroid.
@@ -219,16 +230,21 @@ impl App {
             if !selected_ids.contains(&line_id) {
                 continue;
             }
-            let filtered_start = endpoints.start.as_ref().and_then(|a| {
-                selected_ids.contains(&a.target_id).then(|| a.clone())
-            });
-            let filtered_end = endpoints.end.as_ref().and_then(|a| {
-                selected_ids.contains(&a.target_id).then(|| a.clone())
-            });
+            let filtered_start = endpoints
+                .start
+                .as_ref()
+                .and_then(|a| selected_ids.contains(&a.target_id).then(|| a.clone()));
+            let filtered_end = endpoints
+                .end
+                .as_ref()
+                .and_then(|a| selected_ids.contains(&a.target_id).then(|| a.clone()));
             if filtered_start.is_some() || filtered_end.is_some() {
                 line_connections.insert(
                     line_id.to_string(),
-                    LineEndpoints { start: filtered_start, end: filtered_end },
+                    LineEndpoints {
+                        start: filtered_start,
+                        end: filtered_end,
+                    },
                 );
             }
         }
@@ -253,7 +269,10 @@ impl App {
                             images.insert(path_str.clone(), encoded);
                         }
                         Err(err) => {
-                            eprintln!("clipboard copy: failed to read image {}: {err}", full_path.display());
+                            eprintln!(
+                                "clipboard copy: failed to read image {}: {err}",
+                                full_path.display()
+                            );
                         }
                     }
                 }
@@ -374,7 +393,10 @@ impl App {
                     let _ = std::fs::create_dir_all(parent);
                 }
                 if let Err(err) = std::fs::write(&dest, &bytes) {
-                    eprintln!("clipboard paste: failed to write image {}: {err}", dest.display());
+                    eprintln!(
+                        "clipboard paste: failed to write image {}: {err}",
+                        dest.display()
+                    );
                     continue;
                 }
                 println!("[image] paste write: {old_path}");
@@ -407,7 +429,8 @@ impl App {
                 }
             }
 
-            self.board.apply_operation(BoardOperation::AddElement(element));
+            self.board
+                .apply_operation(BoardOperation::AddElement(element));
         }
 
         // Build line connection changes with remapped IDs.
@@ -421,10 +444,12 @@ impl App {
                 None => continue,
             };
             let remap_anchor = |anchor: &LineAnchor| -> Option<LineAnchor> {
-                id_remap.get(&anchor.target_id).map(|&new_target| LineAnchor {
-                    target_id: new_target,
-                    norm_pos: anchor.norm_pos,
-                })
+                id_remap
+                    .get(&anchor.target_id)
+                    .map(|&new_target| LineAnchor {
+                        target_id: new_target,
+                        norm_pos: anchor.norm_pos,
+                    })
             };
             let new_endpoints = LineEndpoints {
                 start: endpoints.start.as_ref().and_then(remap_anchor),
@@ -440,7 +465,10 @@ impl App {
         }
 
         if !conn_changes.is_empty() {
-            self.board.apply_operation(BoardOperation::SetLineConnections { changes: conn_changes });
+            self.board
+                .apply_operation(BoardOperation::SetLineConnections {
+                    changes: conn_changes,
+                });
         }
 
         self.mark_board_structure_dirty();
@@ -478,9 +506,7 @@ impl App {
         }
     }
 
-    pub(super) fn build_image_draws(
-        &mut self,
-    ) -> Vec<PreparedImageDraw> {
+    pub(super) fn build_image_draws(&mut self) -> Vec<PreparedImageDraw> {
         let pending: Vec<(crate::board::ImageData, Vec2, Vec2, f32, bool)> = self
             .board
             .elements

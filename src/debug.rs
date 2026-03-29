@@ -11,8 +11,6 @@ use crate::camera::Camera;
 use crate::images::{ImageImportError, ImageManager};
 use crate::palette;
 
-
-
 const LOREM_IPSUM: &str = 
     // Thai
     "สวัสดีครับ ยินดีต้อนรับสู่โลกแห่งภาษา ฉันชื่อลอเรม และฉันอาศัยอยู่ในเมืองที่สวยงาม \
@@ -49,10 +47,8 @@ const LOREM_IPSUM: &str =
     الحضارة العربية أسهمت إسهاماً كبيراً في تطور العلوم والفلسفة والأدب عبر التاريخ. \
     من أشهر المعالم العربية برج خليفة في دبي والأهرامات في مصر والمدينة القديمة في مراكش.";
 
-
 const LOREM_EMOJI: &str = "😀😃😄😁😆😅😂🤣😊😇🙂🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯 🦁 🐮 🐷 🐽 🐸 🐵 🐔 🐧 🐦 🐤 🐣 🐥 🦆 🦅 🦉 🦇 🐺 🐗 🐴 🦄 🐝 🐛 🦋 🐌 🐞 🐜 🦗 🕷️ 🕸️ 🦂 🦟 🦠 🐢 🐍 🦎 🐙 🦑😎🥳";
 const LOREM_ZWJ: &str = "👩‍💻 👨‍🚀 👩‍⚕️ 👨‍🍳 👩‍🏫 👨‍🔬 👩‍🚒 👨‍🎨 👩‍✈️ 👨‍💼 👩‍🔧 👨‍🏭 👩‍🌾 👨‍⚖️ 👩‍🚀 👨‍💻 👩‍🎤 👨‍🚒 👩‍🍳 👨‍✈️ 👩‍❤️‍👨 👨‍❤️‍👨 👩‍❤️‍👩 👩‍❤️‍💋‍👨 👨‍❤️‍💋‍👨 👩‍❤️‍💋‍👩 👨‍👩‍👧 👨‍👩‍👧‍👦 👩‍👩‍👧‍👦 👨‍👨‍👦 🏳️‍🌈 🏳️‍⚧️ 🧙‍♂️ 🧙‍♀️ 🧛‍♂️ 🧛‍♀️ 🧝‍♂️ 🧝‍♀️ 🧟‍♂️ 🧟‍♀️";
-
 
 fn generate_lorem_text(size: Vec2, randomness: f32) -> String {
     let area = size.x * size.y;
@@ -68,7 +64,7 @@ fn generate_lorem_text(size: Vec2, randomness: f32) -> String {
     for i in 0..word_count {
         // Pseudorandom progression
         current_random = (current_random * 13.0 + 17.0).fract();
-        
+
         // 15% emoji, 15% ZWJ sequence, 70% base text
         let word = if current_random < 0.15 {
             let normalized = current_random / 0.15;
@@ -111,9 +107,15 @@ pub enum DebugImageSpawnError {
 impl fmt::Display for DebugImageSpawnError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DebugImageSpawnError::ExecutablePath(err) => write!(f, "failed to resolve executable path: {err}"),
+            DebugImageSpawnError::ExecutablePath(err) => {
+                write!(f, "failed to resolve executable path: {err}")
+            }
             DebugImageSpawnError::ReadDir { path, source } => {
-                write!(f, "failed to read debug image folder {}: {source}", path.display())
+                write!(
+                    f,
+                    "failed to read debug image folder {}: {source}",
+                    path.display()
+                )
             }
             DebugImageSpawnError::FolderMissing(path) => {
                 write!(f, "debug image folder not found: {}", path.display())
@@ -122,7 +124,11 @@ impl fmt::Display for DebugImageSpawnError {
                 write!(f, "no supported images found in {}", path.display())
             }
             DebugImageSpawnError::Import { path, source } => {
-                write!(f, "failed to import debug image {}: {source}", path.display())
+                write!(
+                    f,
+                    "failed to import debug image {}: {source}",
+                    path.display()
+                )
             }
         }
     }
@@ -153,7 +159,9 @@ fn viewport_image_size(display_size: [f32; 2], camera: &Camera, screen_size: Vec
 fn debug_images_dir() -> Result<PathBuf, DebugImageSpawnError> {
     let exe_path = std::env::current_exe().map_err(DebugImageSpawnError::ExecutablePath)?;
     let Some(exe_dir) = exe_path.parent() else {
-        return Err(DebugImageSpawnError::FolderMissing(PathBuf::from("debug_images")));
+        return Err(DebugImageSpawnError::FolderMissing(PathBuf::from(
+            "debug_images",
+        )));
     };
 
     Ok(exe_dir.join("debug_images"))
@@ -204,29 +212,30 @@ fn collect_debug_images(folder: &Path) -> Result<Vec<PathBuf>, DebugImageSpawnEr
 pub fn spawn_debug_shapes(board: &mut Board, camera: &Camera, screen_size: Vec2) {
     let (vis_min, vis_max) = camera.visible_rect(screen_size);
     let vis_size = vis_max - vis_min;
-    
-    let mut seed: u64 = (board.elements.len() as u64)
-        .wrapping_mul(0x9e3779b97f4a7c15)
-        ^ 0xdeadbeefcafe1234;
-        
+
+    let mut seed: u64 =
+        (board.elements.len() as u64).wrapping_mul(0x9e3779b97f4a7c15) ^ 0xdeadbeefcafe1234;
+
     let mut spawn = |shape: ShapeType, with_text: bool| {
-        let rx  = rng(&mut seed);
-        let ry  = rng(&mut seed);
-        let rw  = rng(&mut seed);
-        let rh  = rng(&mut seed);
-  let r_border_idx = rng(&mut seed);
+        let rx = rng(&mut seed);
+        let ry = rng(&mut seed);
+        let rw = rng(&mut seed);
+        let rh = rng(&mut seed);
+        let r_border_idx = rng(&mut seed);
         let r_text_idx = rng(&mut seed);
         let r_text = rng(&mut seed);
 
-        let pos   = vis_min + Vec2::new(rx * vis_size.x, ry * vis_size.y);
-        let size  = Vec2::new(100.0 + rw * 300.0, 100.0 + rh * 300.0);
-        
-        let border_color_idx = (r_border_idx * palette::PALETTE.len() as f32) as usize % palette::PALETTE.len();
-        let text_color_idx = (r_text_idx * palette::PALETTE.len() as f32) as usize % palette::PALETTE.len();
+        let pos = vis_min + Vec2::new(rx * vis_size.x, ry * vis_size.y);
+        let size = Vec2::new(100.0 + rw * 300.0, 100.0 + rh * 300.0);
+
+        let border_color_idx =
+            (r_border_idx * palette::PALETTE.len() as f32) as usize % palette::PALETTE.len();
+        let text_color_idx =
+            (r_text_idx * palette::PALETTE.len() as f32) as usize % palette::PALETTE.len();
         let border_color = palette::PALETTE[border_color_idx];
         let text_color = palette::PALETTE[text_color_idx];
-        
-        let id    = board.next_id();
+
+        let id = board.next_id();
 
         let text = if with_text {
             Some(TextData {
@@ -255,6 +264,10 @@ pub fn spawn_debug_shapes(board: &mut Board, camera: &Camera, screen_size: Vec2)
             stroke_width: 1,
             line_arrow_start: false,
             line_arrow_end: shape == ShapeType::Line,
+            line_bend: 0.0,
+            line_midpoint_shift: 0.0,
+            line_start_normal: None,
+            line_end_normal: None,
             selected: false,
             text,
             image: None,
@@ -262,10 +275,18 @@ pub fn spawn_debug_shapes(board: &mut Board, camera: &Camera, screen_size: Vec2)
         });
     };
 
-    for _ in 0..100 { spawn(ShapeType::Rect, false); }
-    for _ in 0..100 { spawn(ShapeType::Ellipse, false); }
-    for _ in 0..100 { spawn(ShapeType::Line, false); }
-    for _ in 0..100 { spawn(ShapeType::Rect, true); }
+    for _ in 0..100 {
+        spawn(ShapeType::Rect, false);
+    }
+    for _ in 0..100 {
+        spawn(ShapeType::Ellipse, false);
+    }
+    for _ in 0..100 {
+        spawn(ShapeType::Line, false);
+    }
+    for _ in 0..100 {
+        spawn(ShapeType::Rect, true);
+    }
 
     println!(
         "Alt+Ctrl+B: spawned 100 rect, 100 ellipse, 100 lines, 100 text | total elements: {}",
@@ -284,20 +305,19 @@ pub fn spawn_debug_images(
     let (vis_min, vis_max) = camera.visible_rect(screen_size);
     let vis_size = vis_max - vis_min;
 
-    let mut seed: u64 = (board.elements.len() as u64)
-        .wrapping_mul(0x517cc1b727220a95)
-        ^ 0xa5a5f0f0deadbeef;
+    let mut seed: u64 =
+        (board.elements.len() as u64).wrapping_mul(0x517cc1b727220a95) ^ 0xa5a5f0f0deadbeef;
     let mut spawned = 0usize;
 
     for _ in 0..20 {
         let pick = (rng(&mut seed) * image_paths.len() as f32) as usize;
         let source_path = &image_paths[pick.min(image_paths.len() - 1)];
-        let imported = image_manager.import_from_source(source_path).map_err(|source| {
-            DebugImageSpawnError::Import {
+        let imported = image_manager
+            .import_from_source(source_path)
+            .map_err(|source| DebugImageSpawnError::Import {
                 path: source_path.clone(),
                 source,
-            }
-        })?;
+            })?;
 
         let size = viewport_image_size(imported.display_size, camera, screen_size);
         let max_x = (vis_size.x - size.x).max(0.0);
@@ -318,6 +338,10 @@ pub fn spawn_debug_images(
             stroke_width: default_line_stroke_width(),
             line_arrow_start: false,
             line_arrow_end: false,
+            line_bend: 0.0,
+            line_midpoint_shift: 0.0,
+            line_start_normal: None,
+            line_end_normal: None,
             selected: false,
             text: None,
             image: Some(imported.data),

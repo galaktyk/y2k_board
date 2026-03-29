@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 use image::imageops::FilterType;
 use image::{DynamicImage, GenericImageView};
 use miniquad::{
-    Bindings, BufferLayout, BufferSource, BufferType, BufferUsage, FilterMode,
-    MipmapFilterMode, PassAction, Pipeline, PipelineParams, RenderPass, RenderingBackend,
-    ShaderMeta, ShaderSource, TextureAccess, TextureFormat, TextureId, TextureParams,
-    TextureSource, TextureWrap, UniformBlockLayout, VertexAttribute, VertexFormat,
+    Bindings, BufferLayout, BufferSource, BufferType, BufferUsage, FilterMode, MipmapFilterMode,
+    PassAction, Pipeline, PipelineParams, RenderPass, RenderingBackend, ShaderMeta, ShaderSource,
+    TextureAccess, TextureFormat, TextureId, TextureParams, TextureSource, TextureWrap,
+    UniformBlockLayout, VertexAttribute, VertexFormat,
 };
 
 use crate::board::ImageData;
@@ -29,9 +29,6 @@ const THUMB_SLOT_COUNT: usize = THUMB_SLOTS_PER_ROW * THUMB_SLOTS_PER_ROW;
 
 const BASE_WEBP_QUALITY: f32 = 40.0;
 const HIRES_WEBP_QUALITY: f32 = 40.0;
-
-
-
 
 #[derive(Debug)]
 pub enum ImageImportError {
@@ -179,7 +176,8 @@ impl ImageManager {
         }
 
         self.asset_root = asset_root;
-        self.streaming_adapter.set_asset_root(self.asset_root.clone());
+        self.streaming_adapter
+            .set_asset_root(self.asset_root.clone());
         self.clear_runtime_caches(ctx);
     }
 
@@ -193,7 +191,10 @@ impl ImageManager {
         self.atlas_slot_owner.shrink_to_fit();
     }
 
-    pub fn import_from_source(&mut self, source_path: &Path) -> Result<ImportedImage, ImageImportError> {
+    pub fn import_from_source(
+        &mut self,
+        source_path: &Path,
+    ) -> Result<ImportedImage, ImageImportError> {
         #[cfg(target_arch = "wasm32")]
         {
             let _ = source_path;
@@ -222,8 +223,9 @@ impl ImageManager {
         rgba: Vec<u8>,
     ) -> Result<ImportedImage, ImageImportError> {
         let hash = fnv1a_hash(&rgba);
-        let image = image::RgbaImage::from_raw(width, height, rgba)
-            .ok_or(ImageImportError::InvalidData("clipboard image data had an invalid RGBA size"))?;
+        let image = image::RgbaImage::from_raw(width, height, rgba).ok_or(
+            ImageImportError::InvalidData("clipboard image data had an invalid RGBA size"),
+        )?;
         let decoded = DynamicImage::ImageRgba8(image);
         self.import_from_image(&hash, &decoded)
     }
@@ -252,8 +254,11 @@ impl ImageManager {
             let hires_asset_path = format!("images/image_{hash}_hires.webp");
             if !self.streaming_adapter.asset_exists(&hires_asset_path) {
                 println!("[image] encode new: {hires_asset_path}");
-                self.streaming_adapter
-                    .persist_webp(&hires_asset_path, &hires_image, HIRES_WEBP_QUALITY)?;
+                self.streaming_adapter.persist_webp(
+                    &hires_asset_path,
+                    &hires_image,
+                    HIRES_WEBP_QUALITY,
+                )?;
             } else {
                 println!("[image] hash hit: {hires_asset_path}");
             }
@@ -299,7 +304,8 @@ impl ImageManager {
                         rotation,
                         entry.uv_min,
                         entry.uv_max,
-                        [1.0, 1.0, 1.0, 1.0], selected,
+                        [1.0, 1.0, 1.0, 1.0],
+                        selected,
                     ),
                 };
             }
@@ -313,7 +319,8 @@ impl ImageManager {
                     rotation,
                     [0.0, 0.0],
                     [1.0, 1.0],
-                    [1.0, 1.0, 1.0, 1.0], selected,
+                    [1.0, 1.0, 1.0, 1.0],
+                    selected,
                 ),
             };
         }
@@ -321,13 +328,23 @@ impl ImageManager {
         let prefer_hires = image
             .hires_asset_path
             .as_ref()
-            .filter(|_| screen_extent[0] > viewport_size[0] * HIRES_SCREEN_FRACTION || screen_extent[1] > viewport_size[1] * HIRES_SCREEN_FRACTION)
+            .filter(|_| {
+                screen_extent[0] > viewport_size[0] * HIRES_SCREEN_FRACTION
+                    || screen_extent[1] > viewport_size[1] * HIRES_SCREEN_FRACTION
+            })
             .map(String::as_str);
 
         let texture = prefer_hires
             .and_then(|path| {
                 if !self.gpu_cache.contains_key(path) {
-                    println!("[image] HIRES trigger {} screen=({:.0},{:.0}) viewport=({:.0},{:.0})", path, screen_extent[0], screen_extent[1], viewport_size[0], viewport_size[1]);
+                    println!(
+                        "[image] HIRES trigger {} screen=({:.0},{:.0}) viewport=({:.0},{:.0})",
+                        path,
+                        screen_extent[0],
+                        screen_extent[1],
+                        viewport_size[0],
+                        viewport_size[1]
+                    );
                 }
                 self.load_gpu_texture(ctx, path, true)
             })
@@ -343,7 +360,8 @@ impl ImageManager {
                 rotation,
                 [0.0, 0.0],
                 [1.0, 1.0],
-                [1.0, 1.0, 1.0, 1.0], selected,
+                [1.0, 1.0, 1.0, 1.0],
+                selected,
             ),
         }
     }
@@ -406,7 +424,12 @@ impl ImageManager {
         clear_atlas_texture(ctx, self.atlas_pass);
     }
 
-    fn load_gpu_texture(&mut self, ctx: &mut dyn RenderingBackend, relative_path: &str, is_hires: bool) -> Option<TextureId> {
+    fn load_gpu_texture(
+        &mut self,
+        ctx: &mut dyn RenderingBackend,
+        relative_path: &str,
+        is_hires: bool,
+    ) -> Option<TextureId> {
         if let Some(entry) = self.gpu_cache.get(relative_path).copied() {
             touch_lru(&mut self.gpu_lru, relative_path);
             return Some(entry.texture);
@@ -442,9 +465,15 @@ impl ImageManager {
             ctx.texture_set_filter(texture, FilterMode::Linear, MipmapFilterMode::None);
         }
         if is_hires {
-            println!("[image] HIRES resident {} {}x{} no-mipmap", relative_path, decoded.width, decoded.height);
+            println!(
+                "[image] HIRES resident {} {}x{} no-mipmap",
+                relative_path, decoded.width, decoded.height
+            );
         } else if !use_mipmaps {
-            println!("[image] BASE resident {} {}x{} no-mipmap", relative_path, decoded.width, decoded.height);
+            println!(
+                "[image] BASE resident {} {}x{} no-mipmap",
+                relative_path, decoded.width, decoded.height
+            );
         }
         self.gpu_cache
             .insert(relative_path.to_string(), GpuEntry { texture, bytes });
@@ -479,7 +508,8 @@ impl ImageManager {
         }
 
         self.ram_used_bytes += bytes;
-        self.ram_cache.insert(key.clone(), RamEntry { image, bytes });
+        self.ram_cache
+            .insert(key.clone(), RamEntry { image, bytes });
         touch_lru(&mut self.ram_lru, &key);
     }
 
@@ -493,7 +523,11 @@ impl ImageManager {
         }
     }
 
-    fn ensure_thumb_entry(&mut self, ctx: &mut dyn RenderingBackend, relative_path: &str) -> Option<AtlasEntry> {
+    fn ensure_thumb_entry(
+        &mut self,
+        ctx: &mut dyn RenderingBackend,
+        relative_path: &str,
+    ) -> Option<AtlasEntry> {
         if let Some(entry) = self.atlas_entries.get(relative_path).copied() {
             return Some(entry);
         }
@@ -510,7 +544,8 @@ impl ImageManager {
 
         let slot = self.atlas_next_slot;
         self.atlas_next_slot = (self.atlas_next_slot + 1) % THUMB_SLOT_COUNT;
-        if let Some(previous_owner) = self.atlas_slot_owner[slot].replace(relative_path.to_string()) {
+        if let Some(previous_owner) = self.atlas_slot_owner[slot].replace(relative_path.to_string())
+        {
             self.atlas_entries.remove(&previous_owner);
         }
 
@@ -570,7 +605,9 @@ fn fit_thumbnail_rect(width: u32, height: u32) -> Option<([u32; 2], [u32; 2])> {
 
     let scale = (THUMB_SIZE as f32 / width as f32).min(THUMB_SIZE as f32 / height as f32);
     let draw_width = (width as f32 * scale).round().clamp(1.0, THUMB_SIZE as f32) as u32;
-    let draw_height = (height as f32 * scale).round().clamp(1.0, THUMB_SIZE as f32) as u32;
+    let draw_height = (height as f32 * scale)
+        .round()
+        .clamp(1.0, THUMB_SIZE as f32) as u32;
     let offset_x = (THUMB_SIZE - draw_width) / 2;
     let offset_y = (THUMB_SIZE - draw_height) / 2;
     Some(([offset_x, offset_y], [draw_width, draw_height]))
@@ -598,10 +635,10 @@ fn fnv1a_hash(data: &[u8]) -> String {
 
 fn create_missing_texture(ctx: &mut dyn RenderingBackend) -> TextureId {
     let pixels: [u8; 64] = [
-        255, 0, 255, 255, 40, 40, 40, 255, 255, 0, 255, 255, 40, 40, 40, 255,
-        40, 40, 40, 255, 255, 0, 255, 255, 40, 40, 40, 255, 255, 0, 255, 255,
-        255, 0, 255, 255, 40, 40, 40, 255, 255, 0, 255, 255, 40, 40, 40, 255,
-        40, 40, 40, 255, 255, 0, 255, 255, 40, 40, 40, 255, 255, 0, 255, 255,
+        255, 0, 255, 255, 40, 40, 40, 255, 255, 0, 255, 255, 40, 40, 40, 255, 40, 40, 40, 255, 255,
+        0, 255, 255, 40, 40, 40, 255, 255, 0, 255, 255, 255, 0, 255, 255, 40, 40, 40, 255, 255, 0,
+        255, 255, 40, 40, 40, 255, 40, 40, 40, 255, 255, 0, 255, 255, 40, 40, 40, 255, 255, 0, 255,
+        255,
     ];
 
     ctx.new_texture(
@@ -622,7 +659,9 @@ fn create_missing_texture(ctx: &mut dyn RenderingBackend) -> TextureId {
 }
 
 fn create_thumb_placeholder_texture(ctx: &mut dyn RenderingBackend) -> TextureId {
-    let pixels: [u8; 16] = [92, 98, 108, 255, 92, 98, 108, 255, 92, 98, 108, 255, 92, 98, 108, 255];
+    let pixels: [u8; 16] = [
+        92, 98, 108, 255, 92, 98, 108, 255, 92, 98, 108, 255, 92, 98, 108, 255,
+    ];
 
     ctx.new_texture(
         TextureAccess::Static,
@@ -658,7 +697,10 @@ fn create_thumb_atlas(ctx: &mut dyn RenderingBackend) -> TextureId {
 }
 
 fn clear_atlas_texture(ctx: &mut dyn RenderingBackend, atlas_pass: RenderPass) {
-    ctx.begin_pass(Some(atlas_pass), PassAction::clear_color(0.0, 0.0, 0.0, 0.0));
+    ctx.begin_pass(
+        Some(atlas_pass),
+        PassAction::clear_color(0.0, 0.0, 0.0, 0.0),
+    );
     ctx.end_render_pass();
 }
 
@@ -747,8 +789,18 @@ fn blit_texture_into_atlas(
     ctx.clear(Some((0.0, 0.0, 0.0, 0.0)), None, None);
     ctx.apply_pipeline(atlas_blit_pipeline);
     ctx.apply_bindings(atlas_blit_bindings);
-    ctx.apply_viewport(content_x, content_y, content_size[0] as i32, content_size[1] as i32);
-    ctx.apply_scissor_rect(content_x, content_y, content_size[0] as i32, content_size[1] as i32);
+    ctx.apply_viewport(
+        content_x,
+        content_y,
+        content_size[0] as i32,
+        content_size[1] as i32,
+    );
+    ctx.apply_scissor_rect(
+        content_x,
+        content_y,
+        content_size[0] as i32,
+        content_size[1] as i32,
+    );
     ctx.draw(0, 6, 1);
     ctx.end_render_pass();
 }

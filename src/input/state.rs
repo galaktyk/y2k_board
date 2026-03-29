@@ -107,7 +107,7 @@ pub struct InputState {
     pub pending_drag_start_screen: Vec2,
     pub pending_drag_start_world: Vec2,
     pub move_start_world: Vec2,
-    pub move_origin: Vec<(u64, Vec2, Vec2, f32)>,
+    pub move_origin: Vec<(u64, Vec2, Vec2, f32, f32, f32)>,
     pub preview: Option<Element>,
     pub move_delta: Vec2,
     pub rotate_delta: f32,
@@ -140,6 +140,7 @@ pub enum HandleDir {
     Left,
     LineStart,
     LineEnd,
+    LineCurve,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -204,12 +205,11 @@ impl InputState {
         self.pan_velocity.length_squared() > 0.0
     }
 
-
     /** IMPORTANT: Enqueue a text element for resize recomputation.
      * This should fix the lag when resizing multiple text elements
      * might took some time to complete all in the queue, but worth it.
      * No one gonna notice this unless they are resizing like 100+ text elements at once.😈
-    */
+     */
     pub fn enqueue_resize_text_recompute(&mut self, id: u64) -> bool {
         self.pending_resize_text_recompute_seq =
             self.pending_resize_text_recompute_seq.wrapping_add(1);

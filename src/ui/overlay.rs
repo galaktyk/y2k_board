@@ -1,6 +1,6 @@
 use glam::Vec2;
 
-use crate::board::{Element, ShapeType};
+use crate::board::{sample_line_polyline, Element, ShapeType};
 use crate::input::SelectionBounds;
 use crate::palette;
 use crate::rendering::renderer::InstanceData;
@@ -26,11 +26,34 @@ pub fn element_instance(element: &Element, alpha: f32) -> InstanceData {
 }
 
 pub fn selection_instance(element: &Element, zoom: f32, alpha: f32) -> Option<InstanceData> {
-    if !element.selected {
+    if !element.selected || element.shape == ShapeType::Line && element.is_curved_line() {
         return None;
     }
 
     Some(selection_outline_instance(element, zoom, alpha))
+}
+
+pub fn selection_instances(element: &Element, zoom: f32, alpha: f32) -> Vec<InstanceData> {
+    if !element.selected {
+        return Vec::new();
+    }
+
+    if element.shape == ShapeType::Line && element.is_curved_line() {
+        return line_instances(
+            element,
+            CREATION_OUTLINE_COLOR,
+            FIXED_SCREEN_LINE_OUTLINE_SHAPE_TYPE,
+            alpha,
+            1,
+            false,
+            false,
+            false,
+        );
+    }
+
+    selection_instance(element, zoom, alpha)
+        .into_iter()
+        .collect()
 }
 
 pub fn selection_bounds_instance(bounds: SelectionBounds, zoom: f32, alpha: f32) -> InstanceData {
@@ -78,28 +101,37 @@ pub fn element_to_instances(element: &Element, alpha: f32) -> Vec<InstanceData> 
         ShapeType::Rect => {
             push_sticky_note_shadow_instance(&mut out, element, alpha);
             push_fill_instance(&mut out, element, 0.0, element.color, alpha);
-            push_border_instance(&mut out, element, 3.0, element.effective_stroke_color(), alpha);
+            push_border_instance(
+                &mut out,
+                element,
+                3.0,
+                element.effective_stroke_color(),
+                alpha,
+            );
         }
         ShapeType::Ellipse => {
             push_fill_instance(&mut out, element, 1.0, element.color, alpha);
-            push_border_instance(&mut out, element, 4.0, element.effective_stroke_color(), alpha);
+            push_border_instance(
+                &mut out,
+                element,
+                4.0,
+                element.effective_stroke_color(),
+                alpha,
+            );
         }
         ShapeType::Line => {
             let color = element.effective_stroke_color();
             if color[3] > 0.0 {
-                out.push(
-                    InstanceData::new(
-                        element.pos.to_array(),
-                        element.size.to_array(),
-                        element.rotation,
-                        color,
-                        2.0,
-                        alpha,
-                        element.selected,
-                    )
-                    .with_stroke_width(element.stroke_width)
-                    .with_line_arrowheads(element.line_arrow_start, element.line_arrow_end),
-                );
+                out.extend(line_instances(
+                    element,
+                    color,
+                    2.0,
+                    alpha,
+                    element.stroke_width,
+                    element.selected,
+                    element.line_arrow_start,
+                    element.line_arrow_end,
+                ));
             }
         }
 
@@ -119,11 +151,7 @@ pub fn element_to_instances(element: &Element, alpha: f32) -> Vec<InstanceData> 
     out
 }
 
-fn push_sticky_note_shadow_instance(
-    out: &mut Vec<InstanceData>,
-    element: &Element,
-    alpha: f32,
-) {
+fn push_sticky_note_shadow_instance(out: &mut Vec<InstanceData>, element: &Element, alpha: f32) {
     if !element.is_sticky_note() || element.color[3] <= 0.0 {
         return;
     }
@@ -192,11 +220,7 @@ fn push_border_instance(
     );
 }
 
-fn selection_outline_instance(
-    element: &Element,
-    zoom: f32,
-    alpha: f32,
-) -> InstanceData {
+fn selection_outline_instance(element: &Element, zoom: f32, alpha: f32) -> InstanceData {
     let expand = 1.0 / zoom.max(0.0001);
     let shape_type = match element.shape {
         ShapeType::Rect | ShapeType::Image => FIXED_SCREEN_OUTLINE_SHAPE_TYPE,
@@ -213,6 +237,46 @@ fn selection_outline_instance(
         alpha,
         false,
     )
+}
+
+fn line_instances(
+    element: &Element,
+    color: [f32; 4],
+    shape_type: f32,
+    alpha: f32,
+    stroke_width: u8,
+    selected: bool,
+    arrow_start: bool,
+    arrow_end: bool,
+) -> Vec<InstanceData> {
+    let points = sample_line_polyline(element);
+    if points.len() < 2 {
+        return Vec::new();
+    }
+
+    let last_segment = points.len() - 2;
+    let mut out = Vec::with_capacity(points.len() - 1);
+    for (index, segment) in points.windows(2).enumerate() {
+        let mut instance = InstanceData::new(
+            segment[0].to_array(),
+            (segment[1] - segment[0]).to_array(),
+            0.0,
+            color,
+            shape_type,
+            alpha,
+            selected,
+        )
+        .with_stroke_width(stroke_width.max(1));
+        if shape_type > 1.5 && shape_type < 2.5 {
+            instance = instance.with_line_arrowheads(
+                arrow_start && index == 0,
+                arrow_end && index == last_segment,
+            );
+        }
+        out.push(instance);
+    }
+
+    out
 }
 
 fn bounds_outline_instance(

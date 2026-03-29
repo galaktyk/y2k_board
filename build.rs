@@ -18,7 +18,8 @@ fn copy_if_different(source: &Path, dest: &Path) {
 }
 
 fn wasm_output_dir() -> PathBuf {
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("manifest dir should be set"));
+    let manifest_dir =
+        PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("manifest dir should be set"));
     let target_root = env::var("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| manifest_dir.join("target"));
@@ -28,7 +29,8 @@ fn wasm_output_dir() -> PathBuf {
 }
 
 fn sync_wasm_web_assets() {
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("manifest dir should be set"));
+    let manifest_dir =
+        PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("manifest dir should be set"));
     let web_dir = manifest_dir.join("web");
     let cursor_dir = manifest_dir.join("assets").join("cursor");
     let output_dir = wasm_output_dir();
@@ -59,6 +61,8 @@ fn main() {
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         let mut resources = winres::WindowsResource::new();
         resources.set_icon("assets/icon.ico");
-        resources.compile().expect("windows icon resource should compile");
+        resources
+            .compile()
+            .expect("windows icon resource should compile");
     }
 }

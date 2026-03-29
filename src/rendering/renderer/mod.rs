@@ -7,8 +7,8 @@ mod uniforms;
 use miniquad::*;
 
 pub use types::{
-    ImageInstanceData, InstanceData, PreparedImageDraw, TextInstanceData,
-    MAX_IMAGE_INSTANCES, MAX_SHAPE_INSTANCES, MAX_TEXT_INSTANCES,
+    ImageInstanceData, InstanceData, PreparedImageDraw, TextInstanceData, MAX_IMAGE_INSTANCES,
+    MAX_SHAPE_INSTANCES, MAX_TEXT_INSTANCES,
 };
 
 pub struct Renderer {

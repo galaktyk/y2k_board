@@ -5,9 +5,9 @@ mod clipboard;
 mod debug;
 mod images;
 mod input;
+mod palette;
 mod platform;
 mod rendering;
-mod palette;
 mod services;
 mod snapshot;
 mod spatial;
@@ -56,4 +56,3 @@ fn main() {
     };
     miniquad::start(conf, || Box::new(app::App::new()));
 }
-

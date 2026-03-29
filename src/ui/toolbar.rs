@@ -79,7 +79,7 @@ enum BtnKind {
 
 struct Button {
     kind: BtnKind,
-    x: f32,  // left edge in screen pixels
+    x: f32, // left edge in screen pixels
 }
 
 pub struct ToolbarIcons {
@@ -143,7 +143,10 @@ impl Toolbar {
             kind: kinds[i],
             x: BTN_PAD + i as f32 * (BTN_W + BTN_PAD),
         });
-        Self { active_tool: Tool::Select, buttons }
+        Self {
+            active_tool: Tool::Select,
+            buttons,
+        }
     }
 
     pub fn layout(&self, screen_size: Vec2) -> ToolbarLayout {
@@ -177,17 +180,17 @@ impl Toolbar {
         for btn in &self.buttons {
             if local_x >= btn.x && local_x < btn.x + BTN_W {
                 return Some(match btn.kind {
-                    BtnKind::Select  => ToolbarAction::SetTool(Tool::Select),
-                    BtnKind::Rect    => ToolbarAction::SetTool(Tool::Rect),
+                    BtnKind::Select => ToolbarAction::SetTool(Tool::Select),
+                    BtnKind::Rect => ToolbarAction::SetTool(Tool::Rect),
                     BtnKind::Ellipse => ToolbarAction::SetTool(Tool::Ellipse),
-                    BtnKind::Line    => ToolbarAction::SetTool(Tool::Line),
-                    BtnKind::Sticky  => ToolbarAction::SetTool(Tool::Sticky),
-                    BtnKind::Text    => ToolbarAction::SetTool(Tool::Text),
-                    BtnKind::Image   => ToolbarAction::ImportImage,
-                    BtnKind::Load    => ToolbarAction::Load,
-                    BtnKind::Save    => ToolbarAction::Save,
-                    BtnKind::Undo    => ToolbarAction::Undo,
-                    BtnKind::Redo    => ToolbarAction::Redo,
+                    BtnKind::Line => ToolbarAction::SetTool(Tool::Line),
+                    BtnKind::Sticky => ToolbarAction::SetTool(Tool::Sticky),
+                    BtnKind::Text => ToolbarAction::SetTool(Tool::Text),
+                    BtnKind::Image => ToolbarAction::ImportImage,
+                    BtnKind::Load => ToolbarAction::Load,
+                    BtnKind::Save => ToolbarAction::Save,
+                    BtnKind::Undo => ToolbarAction::Undo,
+                    BtnKind::Redo => ToolbarAction::Redo,
                 });
             }
         }
@@ -218,7 +221,8 @@ impl Toolbar {
             0.0,
             TOOLBAR_BG_COLOR,
             0.0,
-            1.0, false,
+            1.0,
+            false,
         ));
         out.push(InstanceData::new(
             layout.origin.to_array(),
@@ -226,7 +230,8 @@ impl Toolbar {
             0.0,
             TOOLBAR_BORDER_HIGHLIGHT,
             0.0,
-            1.0, false,
+            1.0,
+            false,
         ));
         out.push(InstanceData::new(
             layout.origin.to_array(),
@@ -234,7 +239,8 @@ impl Toolbar {
             0.0,
             TOOLBAR_BORDER_HIGHLIGHT,
             0.0,
-            1.0, false,
+            1.0,
+            false,
         ));
         out.push(InstanceData::new(
             [layout.origin.x, layout.origin.y + layout.size.y - 1.0],
@@ -242,7 +248,8 @@ impl Toolbar {
             0.0,
             TOOLBAR_BORDER_SHADOW,
             0.0,
-            1.0, false,
+            1.0,
+            false,
         ));
         out.push(InstanceData::new(
             [layout.origin.x + layout.size.x - 1.0, layout.origin.y],
@@ -250,18 +257,19 @@ impl Toolbar {
             0.0,
             TOOLBAR_BORDER_SHADOW,
             0.0,
-            1.0, false,
+            1.0,
+            false,
         ));
 
         for btn in &self.buttons {
             let is_active = matches!(
                 (&btn.kind, self.active_tool),
                 (BtnKind::Select, Tool::Select)
-                | (BtnKind::Rect, Tool::Rect)
-                | (BtnKind::Ellipse, Tool::Ellipse)
-                | (BtnKind::Line, Tool::Line)
-                | (BtnKind::Sticky, Tool::Sticky)
-                | (BtnKind::Text, Tool::Text)
+                    | (BtnKind::Rect, Tool::Rect)
+                    | (BtnKind::Ellipse, Tool::Ellipse)
+                    | (BtnKind::Line, Tool::Line)
+                    | (BtnKind::Sticky, Tool::Sticky)
+                    | (BtnKind::Text, Tool::Text)
             );
 
             let dimmed = matches!(
@@ -294,10 +302,10 @@ impl Toolbar {
                     0.0,
                     button_color,
                     0.0,
-                    1.0, false,
+                    1.0,
+                    false,
                 ));
             }
-
         }
         out
     }
@@ -343,8 +351,13 @@ impl Toolbar {
             let cy = layout.origin.y + BTN_H * 0.5;
 
             out.push(
-                UiTextSpec::top_center(label, Vec2::new(cx, cy - 6.0), TOOLBAR_LABEL_FONT_SIZE, color)
-                    .with_line_height(TOOLBAR_LABEL_FONT_SIZE),
+                UiTextSpec::top_center(
+                    label,
+                    Vec2::new(cx, cy - 6.0),
+                    TOOLBAR_LABEL_FONT_SIZE,
+                    color,
+                )
+                .with_line_height(TOOLBAR_LABEL_FONT_SIZE),
             );
         }
 
@@ -395,7 +408,8 @@ impl Toolbar {
                     0.0,
                     uv_min,
                     uv_max,
-                    tint, false,
+                    tint,
+                    false,
                 ),
             });
         }
@@ -440,7 +454,11 @@ fn load_toolbar_atlas(
     debug_assert_eq!(icon_width, icon_height, "toolbar icons should be square");
     for image in &decoded[1..] {
         let dims = image.dimensions();
-        assert_eq!(dims, (icon_width, icon_height), "toolbar icons should share dimensions");
+        assert_eq!(
+            dims,
+            (icon_width, icon_height),
+            "toolbar icons should share dimensions"
+        );
     }
 
     let atlas_width = icon_width * decoded.len() as u32;

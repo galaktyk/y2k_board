@@ -1,18 +1,26 @@
 
-
-current app using text layout cache?
-i see ram skyrocket when create 1000 text box, i think the string itself is not that big but RAM is huge
-what is taking so much RAM? maybe the layout cache?
-
-
-
-layout float16? uint? since textbox is not gonna be that big
-
----
 fix touchpad
 
+---
 
 
+
+
+---
+implement  curve line feature
+The connector curve technique in short:
+
+**shape (box, ellipse, etc.) face normals → tangent constraints → cubic Bézier**
+
+1. **Face normal** — each box edge has a direction vector (right = `(1,0)`, top = `(0,-1)`, etc.)
+2. **Auto control points** — `C1 = exitPoint + (normal × offset)`, `C2 = entryPoint + (inwardNormal × offset)` — computed invisibly
+3. **Perpendicular departure** — because C1 is placed along the normal, the curve always leaves the box at 90° to the face
+4. **Single handle abstraction** — instead of exposing C1 and C2 raw, one midpoint handle shifts both symmetrically
+5. **Result** — a cubic Bézier `P0 → C1 → C2 → P3` that looks intentional from any layout
+
+The key insight is that **the normal determines the tangent**, and the tangent is what makes the curve feel like it "belongs" to the box rather than just floating between two points.
+
+if have qeustion ask me, (this app really serious about optimization, so I want to make sure the implementation is correct and efficient)
 
 
 ---

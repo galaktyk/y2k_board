@@ -1,6 +1,6 @@
 use glam::Vec2;
 
-use crate::board::{Element, ShapeType};
+use crate::board::{line_bend_handle_position, Element, ShapeType};
 use crate::input::state::{HandleDir, SelectionBounds};
 use crate::palette;
 use crate::rendering::renderer::InstanceData;
@@ -66,9 +66,7 @@ pub fn get_connection_helpers(e: &Element, zoom: f32) -> Option<[ConnectionHelpe
     let center = e.pos + e.size * 0.5;
     let c = e.rotation.cos();
     let s = e.rotation.sin();
-    let rot = |rx: f32, ry: f32| -> Vec2 {
-        center + Vec2::new(rx * c - ry * s, rx * s + ry * c)
-    };
+    let rot = |rx: f32, ry: f32| -> Vec2 { center + Vec2::new(rx * c - ry * s, rx * s + ry * c) };
 
     let hw = e.size.x * 0.5;
     let hh = e.size.y * 0.5;
@@ -96,42 +94,35 @@ pub fn get_connection_helpers(e: &Element, zoom: f32) -> Option<[ConnectionHelpe
 
 pub fn get_element_handles(e: &Element, zoom: f32) -> Option<Vec<Vec2>> {
     if e.shape == ShapeType::Line {
-        return Some(vec![e.pos, e.pos + e.size]);
+        return Some(vec![e.pos, e.pos + e.size, line_bend_handle_position(e)]);
     }
     let center = e.pos + e.size * 0.5;
     let c = e.rotation.cos();
     let s = e.rotation.sin();
-    let rot = |rx: f32, ry: f32| -> Vec2 {
-        center + Vec2::new(rx * c - ry * s, rx * s + ry * c)
-    };
+    let rot = |rx: f32, ry: f32| -> Vec2 { center + Vec2::new(rx * c - ry * s, rx * s + ry * c) };
 
     let hw = e.size.x * 0.5;
     let hh = e.size.y * 0.5;
-    let offset = ROTATION_HANDLE_OFFSET_PX * world_units_per_screen_px(zoom) ;
+    let offset = ROTATION_HANDLE_OFFSET_PX * world_units_per_screen_px(zoom);
     let rx = -hw - offset;
     let ry = hh + offset;
 
-    Some(vec![rot(-hw, -hh), rot(hw, -hh), rot(hw, hh), rot(-hw, hh), rot(rx, ry)])
+    Some(vec![
+        rot(-hw, -hh),
+        rot(hw, -hh),
+        rot(hw, hh),
+        rot(-hw, hh),
+        rot(rx, ry),
+    ])
 }
 
 pub fn get_selection_bounds_handles(bounds: SelectionBounds, zoom: f32) -> Vec<Vec2> {
     let [tl, tr, br, bl] = bounds.corners();
-    let offset = ROTATION_HANDLE_OFFSET_PX * world_units_per_screen_px(zoom) ;
-    let rotate_handle = bounds.rotate_point(
-        bounds.pos
-            + Vec2::new(
-                -offset,
-                bounds.size.y + offset,
-            ),
-    );
+    let offset = ROTATION_HANDLE_OFFSET_PX * world_units_per_screen_px(zoom);
+    let rotate_handle =
+        bounds.rotate_point(bounds.pos + Vec2::new(-offset, bounds.size.y + offset));
 
-    vec![
-        tl,
-        tr,
-        br,
-        bl,
-        rotate_handle,
-    ]
+    vec![tl, tr, br, bl, rotate_handle]
 }
 
 pub fn handles_to_instances(e: &Element, zoom: f32) -> Vec<InstanceData> {
@@ -144,8 +135,13 @@ pub fn handles_to_instances(e: &Element, zoom: f32) -> Vec<InstanceData> {
     let world_per_px = world_units_per_screen_px(zoom);
     let handle_size = HANDLE_SIZE_PX * world_per_px;
     if e.shape == ShapeType::Line {
-        for pt in handles {
-            push_circle_handle_instances(&mut out, pt, handle_size, [1.0, 1.0, 1.0, 1.0]);
+        for (index, pt) in handles.into_iter().enumerate() {
+            let fill = if index == 2 {
+                palette::TEAL
+            } else {
+                [1.0, 1.0, 1.0, 1.0]
+            };
+            push_circle_handle_instances(&mut out, pt, handle_size, fill);
         }
         return out;
     }
@@ -157,7 +153,10 @@ pub fn handles_to_instances(e: &Element, zoom: f32) -> Vec<InstanceData> {
     out
 }
 
-pub fn selection_bounds_handles_to_instances(bounds: SelectionBounds, zoom: f32) -> Vec<InstanceData> {
+pub fn selection_bounds_handles_to_instances(
+    bounds: SelectionBounds,
+    zoom: f32,
+) -> Vec<InstanceData> {
     let mut out = Vec::new();
     let world_per_px = world_units_per_screen_px(zoom);
     let handles = get_selection_bounds_handles(bounds, zoom);

@@ -1,7 +1,6 @@
 use glam::Vec2;
 
-
-use crate::rendering::renderer::{InstanceData};
+use crate::rendering::renderer::InstanceData;
 
 pub fn offset_instance(mut instance: InstanceData, delta: Vec2) -> InstanceData {
     instance.pos[0] += delta.x;
@@ -13,10 +12,11 @@ pub fn rotate_point(point: Vec2, center: Vec2, angle: f32) -> Vec2 {
     let offset = point - center;
     let cos_a = angle.cos();
     let sin_a = angle.sin();
-    center + Vec2::new(
-        offset.x * cos_a - offset.y * sin_a,
-        offset.x * sin_a + offset.y * cos_a,
-    )
+    center
+        + Vec2::new(
+            offset.x * cos_a - offset.y * sin_a,
+            offset.x * sin_a + offset.y * cos_a,
+        )
 }
 
 pub fn rotate_instance(mut instance: InstanceData, center: Vec2, angle: f32) -> InstanceData {

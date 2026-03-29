@@ -207,8 +207,7 @@ pub struct TextEditSnapshot {
 
 impl TextEditSnapshot {
     pub fn matches_content(&self, session: &TextEditSession) -> bool {
-        self.element_id == session.element_id
-            && self.content_revision == session.content_revision()
+        self.element_id == session.element_id && self.content_revision == session.content_revision()
     }
 }
 

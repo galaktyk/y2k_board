@@ -165,7 +165,11 @@ impl WebSnapshotAdapter {
 
 #[cfg(target_arch = "wasm32")]
 impl SnapshotPersistenceAdapter for WebSnapshotAdapter {
-    fn save_to_path(&self, _snapshot: &SnapshotData, _path: &Path) -> Result<PathBuf, SnapshotError> {
+    fn save_to_path(
+        &self,
+        _snapshot: &SnapshotData,
+        _path: &Path,
+    ) -> Result<PathBuf, SnapshotError> {
         Err(SnapshotError::UnsupportedPlatform)
     }
 
