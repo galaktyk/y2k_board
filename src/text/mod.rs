@@ -176,6 +176,12 @@ pub enum AtlasKind {
     Color,
 }
 
+const BOARD_TEXT_ATLAS_FONT_SIZE: f32 = 24.0;
+
+fn board_text_scale(text: &TextData) -> f32 {
+    (text.font_size.max(8.0) / BOARD_TEXT_ATLAS_FONT_SIZE).max(0.01)
+}
+
 fn inverse_rotate_point(element: &Element, point: Vec2) -> Vec2 {
     let center = element.pos + element.size * 0.5;
     let delta = point - center;
@@ -257,10 +263,11 @@ impl TextSystem {
     pub fn measure_text_box(&mut self, content: &str, text: &TextData, max_width: f32) -> Vec2 {
         let padding = Vec2::splat(12.0);
         let usable_width = (max_width - padding.x * 2.0).max(1.0);
-        let metrics = text_metrics(text.font_size, None);
+        let scale = board_text_scale(text);
+        let metrics = text_metrics(BOARD_TEXT_ATLAS_FONT_SIZE, None);
         let attrs = default_text_attrs(content, text.color);
         let mut buffer = Buffer::new(&mut self.font_system, metrics);
-        buffer.set_size(&mut self.font_system, Some(usable_width), None);
+        buffer.set_size(&mut self.font_system, Some((usable_width / scale).max(1.0)), None);
         buffer.set_wrap(&mut self.font_system, Wrap::WordOrGlyph);
         buffer.set_text(
             &mut self.font_system,
@@ -276,12 +283,12 @@ impl TextSystem {
         let mut had_runs = false;
         for run in buffer.layout_runs() {
             had_runs = true;
-            widest_line = widest_line.max(run.line_w);
-            total_height = total_height.max(run.line_top + run.line_height);
+            widest_line = widest_line.max(run.line_w * scale);
+            total_height = total_height.max((run.line_top + run.line_height) * scale);
         }
 
         if !had_runs {
-            total_height = metrics.line_height.max(text.font_size + 4.0);
+            total_height = (metrics.line_height * scale).max(text.font_size + 4.0);
         }
 
         Vec2::new(
@@ -602,13 +609,18 @@ impl TextSystem {
                     };
                     let default_text = TextData::default();
                     let text = element.text.as_ref().unwrap_or(&default_text);
+                    let scale = board_text_scale(text);
                     let width = (world_max.x - world_min.x).max(1.0);
                     let height = (world_max.y - world_min.y).max(1.0);
-                    let metrics = text_metrics(text.font_size, None);
+                    let metrics = text_metrics(BOARD_TEXT_ATLAS_FONT_SIZE, None);
                     let attrs = default_text_attrs(content, text.color);
                     let default_color = text.color;
                     let mut buffer = Buffer::new(&mut self.font_system, metrics);
-                    buffer.set_size(&mut self.font_system, Some(width), Some(height));
+                    buffer.set_size(
+                        &mut self.font_system,
+                        Some((width / scale).max(1.0)),
+                        Some((height / scale).max(1.0)),
+                    );
                     buffer.set_wrap(&mut self.font_system, Wrap::WordOrGlyph);
                     buffer.set_text(
                         &mut self.font_system,
@@ -641,8 +653,8 @@ impl TextSystem {
 
                             let pos = world_min
                                 + Vec2::new(
-                                    (physical.x + resolved.entry.left) as f32,
-                                    (physical.y - resolved.entry.top) as f32,
+                                    (physical.x + resolved.entry.left) as f32 * scale,
+                                    (physical.y - resolved.entry.top) as f32 * scale,
                                 );
 
                             let atlas_size = match resolved.kind {
@@ -652,7 +664,10 @@ impl TextSystem {
 
                             let instance = TextInstanceData::new(
                                 pos.to_array(),
-                                [resolved.entry.width as f32, resolved.entry.height as f32],
+                                [
+                                    resolved.entry.width as f32 * scale,
+                                    resolved.entry.height as f32 * scale,
+                                ],
                                 origin,
                                 element.rotation,
                                 resolved.entry.uv_min(atlas_size as f32),
@@ -687,6 +702,10 @@ impl TextSystem {
                     continue;
                 };
 
+                let default_text = TextData::default();
+                let text = element.text.as_ref().unwrap_or(&default_text);
+                let scale = board_text_scale(text);
+
                 let instance_color = match resolved.kind {
                     AtlasKind::Mono => glyph_color,
                     AtlasKind::Color => [1.0, 1.0, 1.0, glyph_color[3]],
@@ -694,8 +713,8 @@ impl TextSystem {
 
                 let pos = world_min
                     + Vec2::new(
-                        (phys_x + resolved.entry.left) as f32,
-                        (phys_y - resolved.entry.top) as f32,
+                        (phys_x + resolved.entry.left) as f32 * scale,
+                        (phys_y - resolved.entry.top) as f32 * scale,
                     );
 
                 let atlas_size = match resolved.kind {
@@ -705,7 +724,10 @@ impl TextSystem {
 
                 let instance = TextInstanceData::new(
                     pos.to_array(),
-                    [resolved.entry.width as f32, resolved.entry.height as f32],
+                    [
+                        resolved.entry.width as f32 * scale,
+                        resolved.entry.height as f32 * scale,
+                    ],
                     origin,
                     element.rotation,
                     resolved.entry.uv_min(atlas_size as f32),
@@ -754,7 +776,10 @@ impl TextSystem {
             return None;
         }
         let (_, cached) = self.layout_cache.as_ref()?;
-        let local = inverse_rotate_point(element, world_pos) - cached.world_min;
+        let default_text = TextData::default();
+        let text = element.text.as_ref().unwrap_or(&default_text);
+        let scale = board_text_scale(text);
+        let local = (inverse_rotate_point(element, world_pos) - cached.world_min) / scale;
         let cursor = cached.buffer.hit(local.x, local.y)?;
         Some(match line_offsets {
             Some(offsets) => offsets.cursor_to_byte(content, cursor),
@@ -811,6 +836,9 @@ impl TextSystem {
         let mut caret_pos = None;
 
         let (_, cached) = self.layout_cache.as_ref().unwrap();
+        let default_text = TextData::default();
+        let text = element.text.as_ref().unwrap_or(&default_text);
+        let scale = board_text_scale(text);
 
         if let Some((start_byte, end_byte)) = selection_range(cursor_byte, selection_anchor_byte) {
             let start = line_offsets.byte_to_cursor(content, start_byte);
@@ -821,8 +849,8 @@ impl TextSystem {
                         continue;
                     }
                     instances.push(TextInstanceData::new(
-                        (cached.world_min + Vec2::new(x, run.line_top)).to_array(),
-                        [width, run.line_height],
+                        (cached.world_min + Vec2::new(x, run.line_top) * scale).to_array(),
+                        [width * scale, run.line_height * scale],
                         origin,
                         element.rotation,
                         uv_min,
@@ -836,10 +864,10 @@ impl TextSystem {
 
         let cursor = line_offsets.byte_to_cursor(content, cursor_byte);
         if let Some((x, line_top, line_height)) = caret_geometry(&cached.buffer, cursor) {
-            let world_pos = cached.world_min + Vec2::new((x - 1.0).max(0.0), line_top);
+            let world_pos = cached.world_min + Vec2::new((x - 1.0).max(0.0), line_top) * scale;
             instances.push(TextInstanceData::new(
                 world_pos.to_array(),
-                [2.0, line_height.max(1.0)],
+                [(2.0 * scale).max(1.0), (line_height * scale).max(1.0)],
                 origin,
                 element.rotation,
                 uv_min,
@@ -871,13 +899,18 @@ impl TextSystem {
         };
         let default_text = TextData::default();
         let text = element.text.as_ref().unwrap_or(&default_text);
+        let scale = board_text_scale(text);
         let width = (world_max.x - world_min.x).max(1.0);
         let height = (world_max.y - world_min.y).max(1.0);
 
-        let metrics = text_metrics(text.font_size, None);
+        let metrics = text_metrics(BOARD_TEXT_ATLAS_FONT_SIZE, None);
         let attrs = default_text_attrs(content, text.color);
         let mut buffer = Buffer::new(&mut self.font_system, metrics);
-        buffer.set_size(&mut self.font_system, Some(width), Some(height));
+        buffer.set_size(
+            &mut self.font_system,
+            Some((width / scale).max(1.0)),
+            Some((height / scale).max(1.0)),
+        );
         buffer.set_wrap(&mut self.font_system, Wrap::WordOrGlyph);
 
         buffer.set_text(
