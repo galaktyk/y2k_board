@@ -68,6 +68,7 @@ pub struct BoxToolStyle {
     pub stroke_color: [f32; 4],
     pub border_width: u8,
     pub text_color: [f32; 4],
+    pub text_size: f32,
 }
 
 impl BoxToolStyle {
@@ -77,6 +78,7 @@ impl BoxToolStyle {
             stroke_color: DEFAULT_BOX_STROKE_COLOR,
             border_width: DEFAULT_BORDER_WIDTH,
             text_color: DEFAULT_TEXT_COLOR,
+            text_size: TextData::default().font_size,
         }
     }
 
@@ -86,6 +88,7 @@ impl BoxToolStyle {
             stroke_color: DEFAULT_BOX_STROKE_COLOR,
             border_width: DEFAULT_BORDER_WIDTH,
             text_color: DEFAULT_TEXT_COLOR,
+            text_size: TextData::default().font_size,
         }
     }
 
@@ -95,6 +98,7 @@ impl BoxToolStyle {
             stroke_color: palette::TRANSPARENT,
             border_width: 0,
             text_color: DEFAULT_TEXT_COLOR,
+            text_size: TextData::default().font_size,
         }
     }
 
@@ -104,6 +108,7 @@ impl BoxToolStyle {
             stroke_color: palette::TRANSPARENT,
             border_width: 0,
             text_color: palette::BLACK,
+            text_size: TextData::default().font_size,
         }
     }
 }
@@ -267,6 +272,15 @@ impl Element {
                 .as_ref()
                 .map(|text| text.color)
                 .unwrap_or(DEFAULT_TEXT_COLOR)
+        })
+    }
+
+    pub fn current_text_size(&self) -> Option<f32> {
+        self.can_host_text().then(|| {
+            self.text
+                .as_ref()
+                .map(|text| text.font_size)
+                .unwrap_or(TextData::default().font_size)
         })
     }
 

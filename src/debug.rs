@@ -240,7 +240,7 @@ pub fn spawn_debug_shapes(board: &mut Board, camera: &Camera, screen_size: Vec2)
         let text = if with_text {
             Some(TextData {
                 content: generate_lorem_text(size, r_text),
-                font_size: 24.0,
+                font_size: TextData::default().font_size,
                 color: text_color,
             })
         } else {

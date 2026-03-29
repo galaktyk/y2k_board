@@ -149,7 +149,7 @@ impl App {
 
         let text_data = TextData {
             content,
-            font_size: 24.0,
+            font_size: self.tool_style_defaults.text.text_size,
             color: DEFAULT_TEXT_COLOR,
         };
         let max_width = (self.screen_size.x / self.camera.zoom.max(0.0001) * 0.5).max(180.0);

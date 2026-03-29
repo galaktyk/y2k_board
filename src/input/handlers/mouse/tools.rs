@@ -26,7 +26,7 @@ pub fn sticky_note_element(tool_style_defaults: &ToolStyleDefaults, pos: Vec2) -
         selected: false,
         text: Some(crate::board::TextData {
             content: String::new(),
-            font_size: 24.0,
+            font_size: tool_style_defaults.sticky.text_size,
             color: tool_style_defaults.sticky.text_color,
         }),
         image: None,

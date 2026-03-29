@@ -499,7 +499,7 @@ pub fn on_mouse_up(
                 if false {
                     element.text = Some(crate::board::TextData {
                         content: String::new(),
-                        font_size: 24.0,
+                        font_size: preview_text_size(&active_tool, tool_style_defaults),
                         color: crate::board::DEFAULT_TEXT_COLOR,
                     });
                 }
@@ -915,7 +915,7 @@ pub fn on_mouse_move(
             text: if matches!(shape, ShapeType::Rect | ShapeType::Ellipse) {
                 Some(crate::board::TextData {
                     content: String::new(),
-                    font_size: 24.0,
+                    font_size: preview_text_size(&active_tool, tool_style_defaults),
                     color: preview_text_color(&active_tool, tool_style_defaults),
                 })
             } else {
@@ -987,6 +987,16 @@ fn preview_text_color(tool: &Tool, defaults: &ToolStyleDefaults) -> [f32; 4] {
         Tool::Sticky => defaults.sticky.text_color,
         Tool::Text => defaults.text.text_color,
         _ => crate::board::DEFAULT_TEXT_COLOR,
+    }
+}
+
+fn preview_text_size(tool: &Tool, defaults: &ToolStyleDefaults) -> f32 {
+    match tool {
+        Tool::Rect => defaults.rect.text_size,
+        Tool::Ellipse => defaults.ellipse.text_size,
+        Tool::Sticky => defaults.sticky.text_size,
+        Tool::Text => defaults.text.text_size,
+        _ => crate::board::TextData::default().font_size,
     }
 }
 

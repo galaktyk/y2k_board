@@ -25,6 +25,8 @@ const SLIDER_KNOB_SIZE: f32 = 12.0;
 const PANEL_TEXT_SIZE: f32 = 12.0;
 const TOGGLE_HEIGHT: f32 = 18.0;
 const TOGGLE_GAP: f32 = 6.0;
+const TEXT_SIZE_MIN: f32 = 8.0;
+const TEXT_SIZE_MAX: f32 = 72.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ColorTarget {
@@ -86,6 +88,7 @@ pub struct PropertyPanelView {
     pub tabs: [Option<ColorTarget>; 3],
     pub active_target: ColorTarget,
     pub active_color: [f32; 4],
+    pub text_size: Option<f32>,
     pub border_width: Option<u8>,
     pub stroke_width: Option<u8>,
     pub line_arrow_start: Option<bool>,
@@ -96,6 +99,7 @@ pub struct PropertyPanelView {
 pub enum PropertyPanelHit {
     Tab(ColorTarget),
     Swatch(usize),
+    TextSize(f32),
     Width(WidthTarget, u8),
     Arrow(LineArrowTarget),
 }
@@ -124,6 +128,7 @@ struct PropertyPanelLayout {
     title_rect: Rect,
     tab_rects: Vec<(ColorTarget, Rect)>,
     swatch_rects: Vec<Rect>,
+    text_size_track: Option<Rect>,
     width_tracks: Vec<(WidthTarget, Rect)>,
     arrow_rects: Vec<(LineArrowTarget, Rect)>,
 }
@@ -158,6 +163,12 @@ pub fn hit_test(
     for (index, rect) in layout.swatch_rects.iter().enumerate() {
         if rect.contains(point) {
             return Some(PropertyPanelHit::Swatch(index));
+        }
+    }
+
+    if let Some(track) = layout.text_size_track {
+        if track.contains(point) {
+            return Some(PropertyPanelHit::TextSize(text_size_from_track(track, x)));
         }
     }
 
@@ -333,6 +344,51 @@ pub fn build_instances(
         ));
     }
 
+    if let Some(track) = layout.text_size_track {
+        let Some(text_size) = view.text_size else {
+            return out;
+        };
+        let is_hovered = hovered.is_some_and(|hit| matches!(hit, PropertyPanelHit::TextSize(_)));
+        out.push(InstanceData::new(
+            [track.x, track.y],
+            [track.w, track.h],
+            0.0,
+            PANEL_ACTIVE_COLOR,
+            0.0,
+            1.0,
+            false,
+        ));
+
+        let fill = ((text_size.clamp(TEXT_SIZE_MIN, TEXT_SIZE_MAX) - TEXT_SIZE_MIN)
+            / (TEXT_SIZE_MAX - TEXT_SIZE_MIN).max(0.0001))
+            .clamp(0.0, 1.0);
+        out.push(InstanceData::new(
+            [track.x, track.y],
+            [track.w * fill, track.h],
+            0.0,
+            PANEL_SLIDER_FILL_COLOR,
+            0.0,
+            1.0,
+            false,
+        ));
+
+        let knob_x = track.x + track.w * fill - SLIDER_KNOB_SIZE * 0.5;
+        let knob_color = if is_hovered {
+            PANEL_HOVER_COLOR
+        } else {
+            PANEL_BORDER_HIGHLIGHT
+        };
+        out.push(InstanceData::new(
+            [knob_x, track.y - (SLIDER_KNOB_SIZE - track.h) * 0.5],
+            [SLIDER_KNOB_SIZE, SLIDER_KNOB_SIZE],
+            0.0,
+            knob_color,
+            0.0,
+            1.0,
+            false,
+        ));
+    }
+
     for (target, track) in &layout.width_tracks {
         let Some(width) = width_for(view, *target) else {
             continue;
@@ -482,8 +538,21 @@ pub fn build_text_specs(screen_size: Vec2, view: &PropertyPanelView) -> Vec<UiTe
         );
     }
 
+    if let Some(track) = layout.text_size_track {
+        if let Some(text_size) = view.text_size {
+            out.push(
+                UiTextSpec::top_left(
+                    format!("TEXT {}PX", text_size.round() as i32),
+                    Vec2::new(track.x, track.y - 14.0),
+                    PANEL_TEXT_SIZE,
+                    PANEL_TEXT_COLOR,
+                )
+                .with_line_height(PANEL_TEXT_SIZE),
+            );
+        }
+    }
+
     for (target, rect) in &layout.arrow_rects {
-        let enabled = arrow_enabled(view, *target).unwrap_or(false);
         out.push(
             UiTextSpec::top_center(
                 target.label().to_string(),
@@ -546,6 +615,18 @@ fn layout(screen_size: Vec2, view: &PropertyPanelView) -> PropertyPanelLayout {
     }
     y += rows as f32 * (SWATCH_SIZE + SWATCH_GAP) - SWATCH_GAP;
 
+    let mut text_size_track = None;
+    if view.text_size.is_some() {
+        y += 22.0;
+        text_size_track = Some(Rect {
+            x: PANEL_PADDING,
+            y,
+            w: PANEL_WIDTH - PANEL_PADDING * 2.0,
+            h: SLIDER_TRACK_HEIGHT,
+        });
+        y += SLIDER_HEIGHT;
+    }
+
     let mut width_tracks = Vec::new();
     for target in [WidthTarget::Border, WidthTarget::Stroke] {
         if width_for(view, target).is_none() {
@@ -602,6 +683,11 @@ fn layout(screen_size: Vec2, view: &PropertyPanelView) -> PropertyPanelLayout {
         rect.y += origin.y;
     }
 
+    if let Some(rect) = &mut text_size_track {
+        rect.x += origin.x;
+        rect.y += origin.y;
+    }
+
     for (_, rect) in &mut width_tracks {
         rect.x += origin.x;
         rect.y += origin.y;
@@ -623,6 +709,7 @@ fn layout(screen_size: Vec2, view: &PropertyPanelView) -> PropertyPanelLayout {
         },
         tab_rects,
         swatch_rects,
+        text_size_track,
         width_tracks,
         arrow_rects,
     }
@@ -650,6 +737,13 @@ fn width_from_track(track: Rect, x: f32, target: WidthTarget) -> u8 {
         .clamp(min_width, 16.0) as u8
 }
 
+fn text_size_from_track(track: Rect, x: f32) -> f32 {
+    let t = ((x - track.x) / track.w).clamp(0.0, 1.0);
+    (TEXT_SIZE_MIN + (TEXT_SIZE_MAX - TEXT_SIZE_MIN) * t)
+        .round()
+        .clamp(TEXT_SIZE_MIN, TEXT_SIZE_MAX)
+}
+
 pub fn width_at_x(
     screen_size: Vec2,
     view: &PropertyPanelView,
@@ -662,4 +756,10 @@ pub fn width_at_x(
         .find_map(|(track_target, track)| {
             (track_target == target).then(|| width_from_track(track, x, target))
         })
+}
+
+pub fn text_size_at_x(screen_size: Vec2, view: &PropertyPanelView, x: f32) -> Option<f32> {
+    layout(screen_size, view)
+        .text_size_track
+        .map(|track| text_size_from_track(track, x))
 }

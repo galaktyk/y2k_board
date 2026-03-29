@@ -1,5 +1,16 @@
-use crate::board::{Element, ElementStyleSnapshot, ShapeType};
+use crate::board::{Element, ElementStyleSnapshot, ShapeType, TextData};
 use crate::ui::property_panel::{ColorTarget, LineArrowTarget, WidthTarget};
+
+pub fn text_size_for_box_defaults(style: crate::board::BoxToolStyle) -> f32 {
+    style.text_size
+}
+
+pub fn text_size_for_selection(selected: &[&Element]) -> f32 {
+    selected
+        .first()
+        .and_then(|element| element.current_text_size())
+        .unwrap_or(TextData::default().font_size)
+}
 
 pub fn tabs(show_text: bool, show_fill: bool, show_stroke: bool) -> [Option<ColorTarget>; 3] {
     [
@@ -58,6 +69,17 @@ pub fn apply_box_color(
         ColorTarget::Fill => style.fill_color = color,
         ColorTarget::Stroke => style.stroke_color = color,
     }
+}
+
+pub fn updated_text_with_size(element: &Element, font_size: f32) -> Option<(Option<TextData>, Option<TextData>)> {
+    if !element.can_host_text() {
+        return None;
+    }
+
+    let before = element.text.clone();
+    let mut next = before.clone().unwrap_or_default();
+    next.font_size = font_size;
+    Some((before, Some(next)))
 }
 
 pub fn updated_style_with_color(

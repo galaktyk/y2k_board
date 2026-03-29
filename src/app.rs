@@ -7,7 +7,7 @@ mod text_editing;
 
 use crate::board::{
     Board, Element, ElementPropertyChange, ElementPropertyPatch, ElementStyleSnapshot, ShapeType,
-    ToolStyleDefaults,
+    TextData, ToolStyleDefaults,
 };
 use crate::camera::Camera;
 use crate::images::ImageManager;
@@ -91,6 +91,15 @@ impl WidthDragState {
     }
 }
 
+enum TextSizeDragState {
+    Tool {
+        tool: ui::tool::Tool,
+    },
+    Selection {
+        before: Vec<(u64, Option<TextData>)>,
+    },
+}
+
 pub struct App {
     ctx: Box<dyn RenderingBackend>,
     renderer: Renderer,
@@ -117,6 +126,7 @@ pub struct App {
     tool_style_defaults: ToolStyleDefaults,
     property_panel_target: ColorTarget,
     property_width_drag: Option<WidthDragState>,
+    property_text_size_drag: Option<TextSizeDragState>,
     current_cursor: Option<CursorIcon>,
     text_edit: Option<TextEditSession>,
     // ── text cache ────────────────────────────────────────────────────────
@@ -168,6 +178,7 @@ impl App {
             tool_style_defaults: ToolStyleDefaults::default(),
             property_panel_target: ColorTarget::Fill,
             property_width_drag: None,
+            property_text_size_drag: None,
             current_cursor: None,
             text_edit: None,
             cached_text_draw: None,
@@ -240,6 +251,7 @@ impl App {
         self.tool_style_defaults = ToolStyleDefaults::default();
         self.property_panel_target = ColorTarget::Fill;
         self.property_width_drag = None;
+        self.property_text_size_drag = None;
         self.current_cursor = None;
         self.spatial = SpatialGrid::new();
         self.board_render_cache = BoardRenderCache::default();
@@ -376,7 +388,7 @@ impl App {
     }
 
     fn desired_cursor_icon(&mut self) -> CursorIcon {
-        if self.property_width_drag.is_some() {
+        if self.property_width_drag.is_some() || self.property_text_size_drag.is_some() {
             return CursorIcon::Default;
         }
 
@@ -611,6 +623,7 @@ impl App {
                 tabs,
                 active_target,
                 active_color,
+                text_size: can_text.then(|| style::text_size_for_selection(&selected)),
                 border_width,
                 stroke_width,
                 line_arrow_start,
@@ -624,6 +637,7 @@ impl App {
             title,
             tabs,
             active_color,
+            text_size,
             border_width,
             stroke_width,
             line_arrow_start,
@@ -636,6 +650,7 @@ impl App {
                     "RECT",
                     tabs,
                     style::color_for_box_defaults(self.tool_style_defaults.rect, active),
+                    Some(style::text_size_for_box_defaults(self.tool_style_defaults.rect)),
                     Some(self.tool_style_defaults.rect.border_width.min(16)),
                     None,
                     None,
@@ -649,6 +664,7 @@ impl App {
                     "ELPS",
                     tabs,
                     style::color_for_box_defaults(self.tool_style_defaults.ellipse, active),
+                    Some(style::text_size_for_box_defaults(self.tool_style_defaults.ellipse)),
                     Some(self.tool_style_defaults.ellipse.border_width.min(16)),
                     None,
                     None,
@@ -662,6 +678,7 @@ impl App {
                     "NOTE",
                     tabs,
                     style::color_for_box_defaults(self.tool_style_defaults.sticky, active),
+                    Some(style::text_size_for_box_defaults(self.tool_style_defaults.sticky)),
                     Some(self.tool_style_defaults.sticky.border_width.min(16)),
                     None,
                     None,
@@ -675,6 +692,7 @@ impl App {
                     "TEXT",
                     tabs,
                     style::color_for_box_defaults(self.tool_style_defaults.text, active),
+                    Some(style::text_size_for_box_defaults(self.tool_style_defaults.text)),
                     Some(self.tool_style_defaults.text.border_width.min(16)),
                     None,
                     None,
@@ -687,6 +705,7 @@ impl App {
                     "LINE",
                     tabs,
                     self.tool_style_defaults.line.color,
+                    None,
                     None,
                     Some(self.tool_style_defaults.line.stroke_width.clamp(1, 16)),
                     Some(self.tool_style_defaults.line.arrow_start),
@@ -703,6 +722,7 @@ impl App {
                 tabs,
                 active_target: self.resolve_panel_target(tabs)?,
                 active_color,
+                text_size,
                 border_width,
                 stroke_width,
                 line_arrow_start,
@@ -729,6 +749,9 @@ impl App {
                     .map(|panel| panel.view.active_target)
                     .unwrap_or(self.property_panel_target);
                 self.apply_property_panel_color(target, crate::palette::PALETTE[index]);
+            }
+            property_panel::PropertyPanelHit::TextSize(font_size) => {
+                self.begin_property_text_size_drag(font_size);
             }
             property_panel::PropertyPanelHit::Width(target, width) => {
                 self.begin_property_width_drag(target, width);
@@ -844,6 +867,23 @@ impl App {
         self.preview_property_width(target, width);
     }
 
+    fn begin_property_text_size_drag(&mut self, font_size: f32) {
+        let Some(panel) = self.resolve_property_panel() else {
+            return;
+        };
+
+        self.property_text_size_drag = Some(match panel.source.clone() {
+            PropertyPanelSource::Tool(tool) => TextSizeDragState::Tool { tool },
+            PropertyPanelSource::Selection(ids) => TextSizeDragState::Selection {
+                before: ids
+                    .iter()
+                    .filter_map(|id| self.board.element(*id).map(|element| (*id, element.text.clone())))
+                    .collect(),
+            },
+        });
+        self.preview_property_text_size(font_size);
+    }
+
     fn preview_property_width(&mut self, target: WidthTarget, width: u8) {
         let width = width.clamp(target.min_width(), 16);
         let Some(state) = self.property_width_drag.as_ref() else {
@@ -864,6 +904,40 @@ impl App {
                             element.apply_style_snapshot(after);
                         }
                     }
+                }
+                self.mark_elements_dirty(ids);
+            }
+        }
+    }
+
+    fn preview_property_text_size(&mut self, font_size: f32) {
+        let font_size = font_size.clamp(8.0, 72.0);
+        let Some(state) = self.property_text_size_drag.as_ref() else {
+            return;
+        };
+
+        match state {
+            TextSizeDragState::Tool { tool } => {
+                self.apply_tool_panel_text_size(*tool, font_size);
+                self.request_redraw();
+            }
+            TextSizeDragState::Selection { before } => {
+                let ids: Vec<u64> = before.iter().map(|(id, _)| *id).collect();
+                let active_text_id = self.input.active_text_id;
+                let mut touched_active_edit = false;
+                for (id, _) in before {
+                    if let Some(element) = self.board.element_mut(*id) {
+                        if let Some((_, after)) = style::updated_text_with_size(element, font_size) {
+                            if element.text != after {
+                                element.text = after;
+                                element.bump_text_generation();
+                                touched_active_edit |= active_text_id == Some(*id);
+                            }
+                        }
+                    }
+                }
+                if touched_active_edit {
+                    self.text_system.bump_edit_generation();
                 }
                 self.mark_elements_dirty(ids);
             }
@@ -898,6 +972,45 @@ impl App {
                             changes,
                             sync_connected_lines: true,
                         });
+                    self.mark_elements_dirty(ids);
+                } else {
+                    self.request_redraw();
+                }
+            }
+        }
+    }
+
+    fn finish_property_text_size_drag(&mut self) {
+        let Some(state) = self.property_text_size_drag.take() else {
+            return;
+        };
+
+        match state {
+            TextSizeDragState::Tool { .. } => {
+                self.request_redraw();
+            }
+            TextSizeDragState::Selection { before } => {
+                let ids: Vec<u64> = before.iter().map(|(id, _)| *id).collect();
+                let changes: Vec<ElementPropertyChange> = before
+                    .into_iter()
+                    .filter_map(|(id, before)| {
+                        let after = self.board.element(id)?.text.clone();
+                        (before != after).then_some(ElementPropertyChange {
+                            id,
+                            patch: ElementPropertyPatch::Text { before, after },
+                        })
+                    })
+                    .collect();
+
+                if !changes.is_empty() {
+                    self.board
+                        .apply_operation(crate::board::BoardOperation::SetProperty {
+                            changes,
+                            sync_connected_lines: true,
+                        });
+                    if ids.iter().any(|id| self.input.active_text_id == Some(*id)) {
+                        self.text_system.bump_edit_generation();
+                    }
                     self.mark_elements_dirty(ids);
                 } else {
                     self.request_redraw();
@@ -956,6 +1069,17 @@ impl App {
         }
     }
 
+    fn apply_tool_panel_text_size(&mut self, tool: ui::tool::Tool, font_size: f32) {
+        let font_size = font_size.clamp(8.0, 72.0);
+        match tool {
+            ui::tool::Tool::Rect => self.tool_style_defaults.rect.text_size = font_size,
+            ui::tool::Tool::Ellipse => self.tool_style_defaults.ellipse.text_size = font_size,
+            ui::tool::Tool::Sticky => self.tool_style_defaults.sticky.text_size = font_size,
+            ui::tool::Tool::Text => self.tool_style_defaults.text.text_size = font_size,
+            ui::tool::Tool::Line | ui::tool::Tool::Select => {}
+        }
+    }
+
     fn apply_tool_panel_arrow(
         &mut self,
         tool: ui::tool::Tool,
@@ -992,6 +1116,7 @@ impl App {
         self.input.active_text_id = None;
         self.input.text_selecting = false;
         self.property_width_drag = None;
+        self.property_text_size_drag = None;
         self.set_active_tool(ui::tool::Tool::Select);
     }
 
@@ -1231,6 +1356,13 @@ impl EventHandler for App {
             return;
         }
 
+        if button == MouseButton::Left && self.property_text_size_drag.is_some() {
+            self.input.mouse_pos = Vec2::new(x, y);
+            self.finish_property_text_size_drag();
+            self.refresh_mouse_cursor();
+            return;
+        }
+
         let drag_mode_before_up = self.input.drag_mode;
         let had_drag = drag_mode_before_up != DragMode::None;
         let had_preview = self.input.preview.is_some();
@@ -1322,6 +1454,19 @@ impl EventHandler for App {
                     {
                         self.preview_property_width(target, width);
                     }
+                }
+            }
+            self.refresh_mouse_cursor();
+            return;
+        }
+
+        if self.property_text_size_drag.is_some() {
+            self.input.mouse_pos = mouse_pos;
+            if let Some(panel) = self.resolve_property_panel() {
+                if let Some(font_size) =
+                    property_panel::text_size_at_x(self.screen_size, &panel.view, x)
+                {
+                    self.preview_property_text_size(font_size);
                 }
             }
             self.refresh_mouse_cursor();
