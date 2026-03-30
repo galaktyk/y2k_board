@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use cosmic_text::{CacheKey, SwashImage, SwashContent};
 use miniquad::{RenderingBackend, TextureId};
 
-pub const TEXT_ATLAS_SIZE: usize = 1024;
+pub const TEXT_ATLAS_SIZE: usize = 2048;
 pub const EMOJI_ATLAS_SIZE: usize = 1024;
 pub const ATLAS_GAP: usize = 2;
 pub const FALLBACK_GLYPH_SIZE: usize = 8;

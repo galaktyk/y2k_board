@@ -381,6 +381,28 @@ fn set_property_can_skip_connected_line_sync() {
 }
 
 #[test]
+fn undo_history_is_capped_to_fifty_operations() {
+    let mut board = Board::new();
+
+    for id in 1..=51 {
+        board.apply_operation(BoardOperation::AddElement(rect_element(
+            id,
+            Vec2::new(id as f32, 0.0),
+            Vec2::splat(10.0),
+        )));
+    }
+
+    for _ in 0..50 {
+        assert!(board.can_undo());
+        board.undo();
+    }
+
+    assert!(!board.can_undo());
+    assert_eq!(board.elements.len(), 1);
+    assert_eq!(board.elements[0].id, 1);
+}
+
+#[test]
 fn transform_related_ids_can_filter_connected_lines_by_visibility() {
     let mut board = Board::new();
     board.connected_lines.insert(10, vec![20, 21]);

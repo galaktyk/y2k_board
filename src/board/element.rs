@@ -186,7 +186,7 @@ impl Default for TextData {
     fn default() -> Self {
         Self {
             content: String::new(),
-            font_size: 24.0,
+            font_size: 14.0,
             color: DEFAULT_TEXT_COLOR,
         }
     }

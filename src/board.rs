@@ -27,6 +27,8 @@ pub use operation::{
     LineConnectionChange,
 };
 
+const MAX_HISTORY_OPS: usize = 50;
+
 // ── Board ────────────────────────────────────────────────────────────────────
 
 pub struct Board {
@@ -77,6 +79,10 @@ impl Board {
         let entry = HistoryEntry::from_operation(&op);
         self.execute(&op);
         self.undo_stack.push(entry);
+        if self.undo_stack.len() > MAX_HISTORY_OPS {
+            let overflow = self.undo_stack.len() - MAX_HISTORY_OPS;
+            self.undo_stack.drain(0..overflow);
+        }
         self.redo_stack.clear();
         log_operation(&op);
         self.emitted_ops.push(op);

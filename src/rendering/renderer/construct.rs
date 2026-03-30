@@ -1,5 +1,7 @@
 use miniquad::*;
 
+use crate::text::{EMOJI_ATLAS_SIZE, TEXT_ATLAS_SIZE};
+
 use super::shaders::{
     COLOR_TEXT_FRAGMENT_SRC, FRAGMENT_SRC, GRID_FRAGMENT_SRC, GRID_VERTEX_SRC, IMAGE_FRAGMENT_SRC,
     LINE_VERTEX_SRC, TEXT_FRAGMENT_SRC, TEXT_VERTEX_SRC, VERTEX_SRC,
@@ -102,10 +104,10 @@ impl Renderer {
 
         let text_atlas = ctx.new_texture(
             TextureAccess::Static,
-            TextureSource::Bytes(&vec![0u8; 1024 * 1024]),
+            TextureSource::Bytes(&vec![0u8; TEXT_ATLAS_SIZE * TEXT_ATLAS_SIZE]),
             TextureParams {
-                width: 1024,
-                height: 1024,
+                width: TEXT_ATLAS_SIZE as u32,
+                height: TEXT_ATLAS_SIZE as u32,
                 format: TextureFormat::Alpha,
                 wrap: TextureWrap::Clamp,
                 min_filter: FilterMode::Nearest,
@@ -115,10 +117,10 @@ impl Renderer {
         );
         let emoji_atlas = ctx.new_texture(
             TextureAccess::Static,
-            TextureSource::Bytes(&vec![0u8; 1024 * 1024 * 4]),
+            TextureSource::Bytes(&vec![0u8; EMOJI_ATLAS_SIZE * EMOJI_ATLAS_SIZE * 4]),
             TextureParams {
-                width: 1024,
-                height: 1024,
+                width: EMOJI_ATLAS_SIZE as u32,
+                height: EMOJI_ATLAS_SIZE as u32,
                 format: TextureFormat::RGBA8,
                 wrap: TextureWrap::Clamp,
                 min_filter: FilterMode::Nearest,

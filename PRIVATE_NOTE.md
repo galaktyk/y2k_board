@@ -1,4 +1,12 @@
 
+when save snapshot, don't clear history ops, but keep ops maximum at 50 on the app
+(when close app and re-open app, ops will no longer exist as normal)
+
+---
+increase text atlas size to 2048x2048
+keep emoji as 1024
+
+---
 
 better color palette
 

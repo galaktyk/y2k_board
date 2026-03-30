@@ -4,6 +4,7 @@ mod shaders;
 mod types;
 mod uniforms;
 
+use crate::text::{EMOJI_ATLAS_SIZE, TEXT_ATLAS_SIZE};
 use miniquad::*;
 
 pub use types::{
@@ -11,8 +12,8 @@ pub use types::{
     MAX_IMAGE_INSTANCES, MAX_LINE_INSTANCES, MAX_SHAPE_INSTANCES, MAX_TEXT_INSTANCES,
 };
 
-const TEXT_ATLAS_BYTES: usize = 1024 * 1024;
-const EMOJI_ATLAS_BYTES: usize = 1024 * 1024 * 4;
+const TEXT_ATLAS_BYTES: usize = TEXT_ATLAS_SIZE * TEXT_ATLAS_SIZE;
+const EMOJI_ATLAS_BYTES: usize = EMOJI_ATLAS_SIZE * EMOJI_ATLAS_SIZE * 4;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct RendererMemoryStats {

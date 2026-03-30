@@ -1193,7 +1193,6 @@ impl App {
                 let asset_root = snapshot_io::snapshot_root(&self.snapshot_path);
                 self.image_manager
                     .set_asset_root(&mut *self.ctx, asset_root);
-                self.board.clear_transient_state(true);
                 self.request_redraw();
                 println!("Saved snapshot to {}", path.display());
             }
