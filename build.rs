@@ -17,6 +17,21 @@ fn copy_if_different(source: &Path, dest: &Path) {
     fs::write(dest, source_bytes).expect("web asset should be copied to target output");
 }
 
+fn copy_dir_contents(source_dir: &Path, dest_dir: &Path) {
+    let entries = fs::read_dir(source_dir).expect("source directory should be readable");
+    for entry in entries {
+        let entry = entry.expect("directory entry should be readable");
+        let source_path = entry.path();
+        let dest_path = dest_dir.join(entry.file_name());
+        let file_type = entry.file_type().expect("file type should be readable");
+        if file_type.is_dir() {
+            copy_dir_contents(&source_path, &dest_path);
+        } else if file_type.is_file() {
+            copy_if_different(&source_path, &dest_path);
+        }
+    }
+}
+
 fn wasm_output_dir() -> PathBuf {
     let manifest_dir =
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("manifest dir should be set"));
@@ -33,24 +48,41 @@ fn sync_wasm_web_assets() {
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("manifest dir should be set"));
     let web_dir = manifest_dir.join("web");
     let cursor_dir = manifest_dir.join("assets").join("cursor");
+    let fonts_dir = manifest_dir.join("fonts");
     let output_dir = wasm_output_dir();
 
     copy_if_different(&web_dir.join("gl.js"), &output_dir.join("gl.js"));
     copy_if_different(&web_dir.join("index.html"), &output_dir.join("index.html"));
+    copy_if_different(&web_dir.join("font.js"), &output_dir.join("font.js"));
+    copy_if_different(&web_dir.join("favicon.ico"), &output_dir.join("favicon.ico"));
     copy_if_different(
         &cursor_dir.join("default_cursor.png"),
         &output_dir.join("cursor").join("default_cursor.png"),
     );
     copy_if_different(
+        &cursor_dir.join("caret.png"),
+        &output_dir.join("cursor").join("caret.png"),
+    );
+    copy_if_different(
         &cursor_dir.join("pointer_cursor.png"),
         &output_dir.join("cursor").join("pointer_cursor.png"),
     );
+    copy_if_different(
+        &cursor_dir.join("sticky_cursor.png"),
+        &output_dir.join("cursor").join("sticky_cursor.png"),
+    );
+    copy_dir_contents(&fonts_dir, &output_dir.join("fonts"));
 }
 
 fn main() {
     println!("cargo:rerun-if-changed=assets/icon.ico");
+    println!("cargo:rerun-if-changed=fonts");
+    println!("cargo:rerun-if-changed=web/font.js");
+    println!("cargo:rerun-if-changed=web/favicon.ico");
+    println!("cargo:rerun-if-changed=assets/cursor/caret.png");
     println!("cargo:rerun-if-changed=assets/cursor/default_cursor.png");
     println!("cargo:rerun-if-changed=assets/cursor/pointer_cursor.png");
+    println!("cargo:rerun-if-changed=assets/cursor/sticky_cursor.png");
     println!("cargo:rerun-if-changed=web/gl.js");
     println!("cargo:rerun-if-changed=web/index.html");
 

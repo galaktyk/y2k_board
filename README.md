@@ -1,38 +1,25 @@
-for compress
+# Y2K Board
 
-
-
-
-
-# Build Windows
+## Build Windows
 cargo build --release
 
-## Compress with UPX
+### Compress with UPX
 upx --best --lzma target/release/y2kboard.exe
 
+## Build Web
+cargo web-build
 
-# Build Web
-cargo build --release --target wasm32-unknown-unknown
+The web build assembles a self-contained site in `target/wasm32-unknown-unknown/release`.
 
-## Local testing
+### Local testing
 cd target/wasm32-unknown-unknown/release
 python -m http.server 8000
 
-## Host web
-1. copy target/wasm32-unknown-unknown/release to build_web
-
-copy font.js or .. if missing
-
-
-
-
-
-
-
-
+### GitHub Pages
+The GitHub Pages workflow builds from source and deploys `target/wasm32-unknown-unknown/release`.
 
 -------
-license
+## License
 
-cursor https://www.void1gaming.com/free-basic-cursor-pack
+cursor https://www.void1gaming.com/free-basic-cursor-pack  
 font: W95FA.otf, notosans, deja vu sans

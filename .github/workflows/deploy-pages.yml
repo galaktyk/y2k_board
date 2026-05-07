@@ -6,7 +6,14 @@ on:
       - master
       - main
     paths:
-      - web_host/**
+      - .cargo/config.toml
+      - Cargo.toml
+      - Cargo.lock
+      - build.rs
+      - assets/cursor/**
+      - fonts/**
+      - src/**
+      - web/**
       - .github/workflows/deploy-pages.yml
   workflow_dispatch:
 
@@ -30,13 +37,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Build web release
+        run: cargo web-build
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./web_host
+          path: ./target/wasm32-unknown-unknown/release
 
       - name: Deploy to GitHub Pages
         id: deployment
