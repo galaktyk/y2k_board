@@ -727,7 +727,7 @@ impl App {
             {
                 let handles = crate::input::get_selection_bounds_handles(bounds, self.camera.zoom);
                 if handles.len() > 4 {
-                    let pos = transform_overlay_point(handles[4], true);
+                    let pos = handles[4];
                     let screen_pos = self.camera.world_to_screen(pos, self.screen_size);
                     ui_text_specs.push(crate::text::UiTextSpec::top_center(
                         "↻",
